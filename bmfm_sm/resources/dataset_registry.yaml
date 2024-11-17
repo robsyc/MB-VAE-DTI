@@ -1,0 +1,1082 @@
+BACE:
+  collection: MoleculeNet
+  description: 'MoleculeNet: Inhibition of human beta secretase 1'
+  example: CC(C)CC1=CC=C(C=C1)C(C)C(=O)O,0
+  num_classes: 2
+  num_tasks: 1
+  path: datasets/raw_data/MoleculeNet/bace.csv
+  preferred_metric: rocauc
+  task_type: classification
+BBBP:
+  collection: MoleculeNet
+  description: 'MoleculeNet: Blood brain barrier penetration'
+  example: CC(C)CC1=CC=C(C=C1)C(C)C(=O)O,0
+  num_classes: 2
+  num_tasks: 1
+  path: datasets/raw_data/MoleculeNet/bbbp.csv
+  preferred_metric: rocauc
+  task_type: classification
+CLINTOX:
+  collection: MoleculeNet
+  description: 'MoleculeNet: Toxicity data of FDA-approved drugs and those that fail
+    clinical trials'
+  example: '[N+](=O)([O-])[O-],1 0'
+  num_classes: 2
+  num_tasks: 2
+  path: datasets/raw_data/MoleculeNet/clintox.csv
+  preferred_metric: rocauc
+  task_type: classification
+CYP1A2:
+  collection: CYP
+  description: PubChem-derived inhibition of CYP450 1A2 isoform
+  example: CC(C)CC1=CC=C(C=C1)C(C)C(=O)O,0
+  num_classes: 2
+  num_tasks: 1
+  path: datasets/raw_data/CYP/CYP1A2.csv
+  preferred_metric: rocauc
+  task_type: classification
+CYP2C19:
+  collection: CYP
+  description: PubChem-derived inhibition of CYP450 2C19 isoform
+  example: CC(C)CC1=CC=C(C=C1)C(C)C(=O)O,0
+  num_classes: 2
+  num_tasks: 1
+  path: datasets/raw_data/CYP/CYP2C19.csv
+  preferred_metric: rocauc
+  task_type: classification
+CYP2C9:
+  collection: CYP
+  description: PubChem-derived inhibition of CYP450 2C9 isoform
+  example: CC(C)CC1=CC=C(C=C1)C(C)C(=O)O,0
+  num_classes: 2
+  num_tasks: 1
+  path: datasets/raw_data/CYP/CYP2C9.csv
+  preferred_metric: rocauc
+  task_type: classification
+CYP2D6:
+  collection: CYP
+  description: PubChem-derived inhibition of CYP450 2D6 isoform
+  example: CC(C)CC1=CC=C(C=C1)C(C)C(=O)O,0
+  num_classes: 2
+  num_tasks: 1
+  path: datasets/raw_data/CYP/CYP2D6.csv
+  preferred_metric: rocauc
+  task_type: classification
+CYP3A4:
+  collection: CYP
+  description: PubChem-derived inhibition of CYP450 3A4 isoform
+  example: CC(C)CC1=CC=C(C=C1)C(C)C(=O)O,0
+  num_classes: 2
+  num_tasks: 1
+  path: datasets/raw_data/CYP/CYP3A4.csv
+  preferred_metric: rocauc
+  task_type: classification
+DAVIS:
+  description: Davis - Drug Target Affinity - regression
+  example: Cc1[nH]nc2ccc(-c3cncc(OCC(N)Cc4ccccc4)c3)cc12, MKKFFDSRREQGGSGLGSGSSGGGGSTSGLGSGYIGRVFGIGRQQVTVDEVLAEGGFAIVFLVRTSNGMKCALKRMFVNNEHDLQVCKREIQIMRDLSGHKNIVGYIDSSINNVSSGDVWEVLILMDFCRGGQVVNLMNQRLQTGFTENEVLQIFCDTCEAVARLHQCKTPIIHRDLKVENILLHDRGHYVLCDFGSATNKFQNPQTEGVNAVEDEIKKYTTLSYRAPEMVNLYSGKIITTKADIWALGCLLYKLCYFTLPFGESQVAICDGNFTIPDNSRYSQDMHCLIRYMLEPDPDKRPDIYQVSYFSFKLLKKECPIPNVQNSPIPAKLPEPVKASEAAAKKTQPKARLTDPIPTTETSIAPRQRPKAGQTQPNPGILPIQPALTPRKRATVQPPPQAAGSSNQPGLLASVPQPKPQAPPSQPLPQTQAKQPQAPPTPQQTPSTQAQGLPAQAQATPQHQQQLFLKQQQQQQQPPPAQQQPAGTFYQQQQAQTQQFQAVHPATQKPAIAQFPVVSQGGSQQQLMQNFYQQQQQQQQQQQQQQLATALHQQQLMTQQAALQQKPTMAAGQQPQPQPAAAPQPAPAQEPAIQAPVRQQPKVQTTPPPAVQGQKVGSLTPPSSPKTQRAGHRRILSDVTHSAVFGVPASKSTQLLQAAAAEASLNKSKSATTTPSGSPRTSQQNVYNPSEGSTWNPFDDDNFSKLTAEELLNKDFAKLGEGKHPEKLGGSAESLIPGFQSTQGDAFATTSFSAGTAEKRKGGQTVDSGLPLLSVSDPFIPLQVPDAPEKLIEGLKSPDTSLLLPDLLPMTDPFGSTSDAVIEKADVAVESLIPGLEPPVPQRLPSQTESVTSNRTDSLTGEDSLLDCSLLSNPTTDLLEEFAPTAISAPVHKAAEDSNLISGFDVPEGSDKVAEDEFDPIPVLITKNPQGGHSRNSSGSSESSLPNLARSLLLVDQLIDL,
+    7.365523
+  num_tasks: 1
+  path: datasets/raw_data/DAVIS/DAVIS_scores.csv
+  preferred_metric: rmse
+  task_type: regression
+ESOL:
+  collection: MoleculeNet
+  description: 'MoleculeNet: Water solubility data for organics'
+  example: OCC3OC(OCC2OC(OC(C#N)c1ccccc1)C(O)C(O)C2O)C(O)C(O)C3O,-0.77
+  num_tasks: 1
+  path: datasets/raw_data/MoleculeNet/esol.csv
+  preferred_metric: rmse
+  task_type: regression
+FREESOLV:
+  collection: MoleculeNet
+  description: 'MoleculeNet: Hydration free energy'
+  example: CN(C)C(=O)c1ccc(cc1)OC,-11.01
+  num_tasks: 1
+  path: datasets/raw_data/MoleculeNet/freesolv.csv
+  preferred_metric: rmse
+  task_type: regression
+HIV:
+  collection: MoleculeNet
+  description: 'MoleculeNet: Inhibition of HIV viral replication'
+  example: CC(C)CC1=CC=C(C=C1)C(C)C(=O)O,0
+  num_classes: 2
+  num_tasks: 1
+  path: datasets/raw_data/MoleculeNet/hiv.csv
+  preferred_metric: rocauc
+  task_type: classification
+LIPOPHILICITY:
+  collection: MoleculeNet
+  description: 'MoleculeNet: Octonol/water distribution coeffficient'
+  example: Cn1c(CN2CCN(CC2)c3ccc(Cl)cc3)nc4ccccc14,3.54
+  num_tasks: 1
+  path: datasets/raw_data/MoleculeNet/lipophilicity.csv
+  preferred_metric: rmse
+  task_type: regression
+MUV:
+  collection: MoleculeNet
+  description: 'MoleculeNet: PubChem derived target-activity tasks for virtual screening'
+  example: Cc1cccc(N2CCN(C(=O)C34CC5CC(CC(C5)C3)C4)CC2)c1C,-1 -1 -1 -1 -1 -1 -1 0
+    -1 -1 -1 0 -1 -1 -1 -1 -1
+  num_classes: 2
+  num_tasks: 17
+  path: datasets/raw_data/MoleculeNet/muv.csv
+  preferred_metric: rocauc
+  task_type: classification
+PCBA:
+  collection: MoleculeNet
+  description: 'MoleculeNet: PubChem derived target-activity (binding affinity) tasks'
+  example: CC(=O)N1CCC2(CC1)NC(=O)N(c1ccccc1)N2,0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 -1
+    0 0 0 -1 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 -1 0 -1 0 0 -1 0 0
+    0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 -1 0 0 0
+    0 1 -1 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+    -1 -1 -1 -1 -1 -1
+  num_classes: 2
+  num_tasks: 128
+  path: datasets/raw_data/MoleculeNet/pcba.csv
+  preferred_metric: rocauc
+  task_type: classification
+QM7:
+  collection: MoleculeNet
+  description: 'MoleculeNet: Electronic properties derived from DFT. Dataset contains
+    up to 7 heavy atoms'
+  example: C([H])([H])([H])[H],-417.96
+  num_tasks: 1
+  path: datasets/raw_data/MoleculeNet/qm7.csv
+  preferred_metric: mae
+  task_type: regression
+QM9:
+  collection: MoleculeNet
+  description: 'MoleculeNet: Geometric and electronic properties dervied from DFT.  Dataset
+    contains up to 9 heavy atoms'
+  example: C,0.0 13.21 -0.3877 0.1171 0.5048 35.3641 0.044749000000000004 6.468999999999999
+    -40.47893 -40.476062 -40.475117 -40.498597
+  num_tasks: 12
+  path: datasets/raw_data/MoleculeNet/qm9.csv
+  preferred_metric: mae
+  task_type: regression
+SIDER:
+  collection: MoleculeNet
+  description: 'MoleculeNet: Side Effect Resource.  Market drugs and their adverse
+    drug reactions/side effects'
+  example: C(CNCCNCCNCCN)N,1 1 0 0 1 1 1 0 0 0 0 1 0 0 0 0 1 0 0 1 1 0 0 1 1 1 0
+  num_classes: 2
+  num_tasks: 27
+  path: datasets/raw_data/MoleculeNet/sider.csv
+  preferred_metric: rocauc
+  task_type: classification
+TOX21:
+  collection: MoleculeNet
+  description: 'MoleculeNet: Toxicity against set of targets'
+  example: CCOc1ccc2nc(S(N)(=O)=O)sc2c1,0 0 1 -1 -1 0 0 1 0 0 0 0
+  num_classes: 2
+  num_tasks: 12
+  path: datasets/raw_data/MoleculeNet/tox21.csv
+  preferred_metric: rocauc
+  task_type: classification
+TOXCAST:
+  collection: MoleculeNet
+  description: 'MoleculeNet: Toxicology data for a large libary of compounds'
+  example: '[O-][N+](=O)C1=CC=C(Cl)C=C1,0 0 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+    -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+    -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 -1 -1 -1
+    -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+    -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 0 0 -1 -1 0 -1
+    -1 -1 0 -1 -1 -1 -1 -1 -1 -1 0 -1 1 0 -1 1 -1 0 -1 -1 -1 -1 -1 0 -1 1 -1 0 -1
+    -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+    -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+    -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 0 -1 -1 0 -1 -1 -1 0 -1 -1 -1 0 -1
+    -1 -1 -1 -1 -1 -1 -1 0 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
+  num_classes: 2
+  num_tasks: 617
+  path: datasets/raw_data/MoleculeNet/toxcast.csv
+  preferred_metric: rocauc
+  task_type: classification
+5HT1A:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/5HT1A.csv
+  preferred_metric: rmse
+  task_type: regression
+5HT1B:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/5HT1B.csv
+  preferred_metric: rmse
+  task_type: regression
+5HT1D:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/5HT1D.csv
+  preferred_metric: rmse
+  task_type: regression
+5HT1E:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/5HT1E.csv
+  preferred_metric: rmse
+  task_type: regression
+5HT1F:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/5HT1F.csv
+  preferred_metric: rmse
+  task_type: regression
+5HT2A:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/5HT2A.csv
+  preferred_metric: rmse
+  task_type: regression
+5HT2B:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/5HT2B.csv
+  preferred_metric: rmse
+  task_type: regression
+5HT2C:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/5HT2C.csv
+  preferred_metric: rmse
+  task_type: regression
+5HT4R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/5HT4R.csv
+  preferred_metric: rmse
+  task_type: regression
+5HT5A:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/5HT5A.csv
+  preferred_metric: rmse
+  task_type: regression
+5HT6R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/5HT6R.csv
+  preferred_metric: rmse
+  task_type: regression
+5HT7R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/5HT7R.csv
+  preferred_metric: rmse
+  task_type: regression
+AA1R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/AA1R.csv
+  preferred_metric: rmse
+  task_type: regression
+AA2AR:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/AA2AR.csv
+  preferred_metric: rmse
+  task_type: regression
+AA2BR:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/AA2BR.csv
+  preferred_metric: rmse
+  task_type: regression
+AA3R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/AA3R.csv
+  preferred_metric: rmse
+  task_type: regression
+ACM1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ACM1.csv
+  preferred_metric: rmse
+  task_type: regression
+ACM2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ACM2.csv
+  preferred_metric: rmse
+  task_type: regression
+ACM3:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ACM3.csv
+  preferred_metric: rmse
+  task_type: regression
+ACM4:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ACM4.csv
+  preferred_metric: rmse
+  task_type: regression
+ACM5:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ACM5.csv
+  preferred_metric: rmse
+  task_type: regression
+ADA1A:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ADA1A.csv
+  preferred_metric: rmse
+  task_type: regression
+ADA1B:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ADA1B.csv
+  preferred_metric: rmse
+  task_type: regression
+ADA1D:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ADA1D.csv
+  preferred_metric: rmse
+  task_type: regression
+ADA2A:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ADA2A.csv
+  preferred_metric: rmse
+  task_type: regression
+ADA2B:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ADA2B.csv
+  preferred_metric: rmse
+  task_type: regression
+ADA2C:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ADA2C.csv
+  preferred_metric: rmse
+  task_type: regression
+ADRB1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ADRB1.csv
+  preferred_metric: rmse
+  task_type: regression
+ADRB2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ADRB2.csv
+  preferred_metric: rmse
+  task_type: regression
+ADRB3:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/ADRB3.csv
+  preferred_metric: rmse
+  task_type: regression
+AGTR1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/AGTR1.csv
+  preferred_metric: rmse
+  task_type: regression
+AGTR2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/AGTR2.csv
+  preferred_metric: rmse
+  task_type: regression
+APJ:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/APJ.csv
+  preferred_metric: rmse
+  task_type: regression
+BKRB1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/BKRB1.csv
+  preferred_metric: rmse
+  task_type: regression
+BKRB2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/BKRB2.csv
+  preferred_metric: rmse
+  task_type: regression
+CALRL:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/CALRL.csv
+  preferred_metric: rmse
+  task_type: regression
+CCKAR:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/CCKAR.csv
+  preferred_metric: rmse
+  task_type: regression
+CCR1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/CCR1.csv
+  preferred_metric: rmse
+  task_type: regression
+CCR2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/CCR2.csv
+  preferred_metric: rmse
+  task_type: regression
+CCR3:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/CCR3.csv
+  preferred_metric: rmse
+  task_type: regression
+CCR5:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/CCR5.csv
+  preferred_metric: rmse
+  task_type: regression
+CNR1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/CNR1.csv
+  preferred_metric: rmse
+  task_type: regression
+CNR2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/CNR2.csv
+  preferred_metric: rmse
+  task_type: regression
+CRFR1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/CRFR1.csv
+  preferred_metric: rmse
+  task_type: regression
+CXCR2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/CXCR2.csv
+  preferred_metric: rmse
+  task_type: regression
+CXCR3:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/CXCR3.csv
+  preferred_metric: rmse
+  task_type: regression
+DRD1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/DRD1.csv
+  preferred_metric: rmse
+  task_type: regression
+DRD2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/DRD2.csv
+  preferred_metric: rmse
+  task_type: regression
+DRD3:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/DRD3.csv
+  preferred_metric: rmse
+  task_type: regression
+DRD4:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/DRD4.csv
+  preferred_metric: rmse
+  task_type: regression
+DRD5:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/DRD5.csv
+  preferred_metric: rmse
+  task_type: regression
+EDNRA:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/EDNRA.csv
+  preferred_metric: rmse
+  task_type: regression
+EDNRB:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/EDNRB.csv
+  preferred_metric: rmse
+  task_type: regression
+FFAR1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/FFAR1.csv
+  preferred_metric: rmse
+  task_type: regression
+FPR1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/FPR1.csv
+  preferred_metric: rmse
+  task_type: regression
+GASR:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/GASR.csv
+  preferred_metric: rmse
+  task_type: regression
+GHSR:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/GHSR.csv
+  preferred_metric: rmse
+  task_type: regression
+GLR:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/GLR.csv
+  preferred_metric: rmse
+  task_type: regression
+GNRHR:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/GNRHR.csv
+  preferred_metric: rmse
+  task_type: regression
+GRM2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/GRM2.csv
+  preferred_metric: rmse
+  task_type: regression
+GRM5:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/GRM5.csv
+  preferred_metric: rmse
+  task_type: regression
+HRH1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/HRH1.csv
+  preferred_metric: rmse
+  task_type: regression
+HRH2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/HRH2.csv
+  preferred_metric: rmse
+  task_type: regression
+HRH3:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/HRH3.csv
+  preferred_metric: rmse
+  task_type: regression
+HRH4:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/HRH4.csv
+  preferred_metric: rmse
+  task_type: regression
+LT4R1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/LT4R1.csv
+  preferred_metric: rmse
+  task_type: regression
+MC3R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/MC3R.csv
+  preferred_metric: rmse
+  task_type: regression
+MC4R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/MC4R.csv
+  preferred_metric: rmse
+  task_type: regression
+MC5R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/MC5R.csv
+  preferred_metric: rmse
+  task_type: regression
+MCHR1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/MCHR1.csv
+  preferred_metric: rmse
+  task_type: regression
+MSHR:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/MSHR.csv
+  preferred_metric: rmse
+  task_type: regression
+MTR1A:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/MTR1A.csv
+  preferred_metric: rmse
+  task_type: regression
+MTR1B:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/MTR1B.csv
+  preferred_metric: rmse
+  task_type: regression
+NK1R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/NK1R.csv
+  preferred_metric: rmse
+  task_type: regression
+NK2R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/NK2R.csv
+  preferred_metric: rmse
+  task_type: regression
+NK3R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/NK3R.csv
+  preferred_metric: rmse
+  task_type: regression
+NPY1R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/NPY1R.csv
+  preferred_metric: rmse
+  task_type: regression
+NPY2R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/NPY2R.csv
+  preferred_metric: rmse
+  task_type: regression
+NPY4R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/NPY4R.csv
+  preferred_metric: rmse
+  task_type: regression
+NPY5R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/NPY5R.csv
+  preferred_metric: rmse
+  task_type: regression
+NTR1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/NTR1.csv
+  preferred_metric: rmse
+  task_type: regression
+NTR2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/NTR2.csv
+  preferred_metric: rmse
+  task_type: regression
+OPRD:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/OPRD.csv
+  preferred_metric: rmse
+  task_type: regression
+OPRK:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/OPRK.csv
+  preferred_metric: rmse
+  task_type: regression
+OPRM:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/OPRM.csv
+  preferred_metric: rmse
+  task_type: regression
+OPRX:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/OPRX.csv
+  preferred_metric: rmse
+  task_type: regression
+OX1R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/OX1R.csv
+  preferred_metric: rmse
+  task_type: regression
+OX2R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/OX2R.csv
+  preferred_metric: rmse
+  task_type: regression
+OXYR:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/OXYR.csv
+  preferred_metric: rmse
+  task_type: regression
+P2RY1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/P2RY1.csv
+  preferred_metric: rmse
+  task_type: regression
+P2Y12:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/P2Y12.csv
+  preferred_metric: rmse
+  task_type: regression
+PD2R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/PD2R.csv
+  preferred_metric: rmse
+  task_type: regression
+PD2R2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/PD2R2.csv
+  preferred_metric: rmse
+  task_type: regression
+PE2R1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/PE2R1.csv
+  preferred_metric: rmse
+  task_type: regression
+PE2R2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/PE2R2.csv
+  preferred_metric: rmse
+  task_type: regression
+PE2R3:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/PE2R3.csv
+  preferred_metric: rmse
+  task_type: regression
+PE2R4:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/PE2R4.csv
+  preferred_metric: rmse
+  task_type: regression
+PI2R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/PI2R.csv
+  preferred_metric: rmse
+  task_type: regression
+PRLHR:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/PRLHR.csv
+  preferred_metric: rmse
+  task_type: regression
+S1PR1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/S1PR1.csv
+  preferred_metric: rmse
+  task_type: regression
+SSR1:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/SSR1.csv
+  preferred_metric: rmse
+  task_type: regression
+SSR2:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/SSR2.csv
+  preferred_metric: rmse
+  task_type: regression
+SSR3:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/SSR3.csv
+  preferred_metric: rmse
+  task_type: regression
+SSR4:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/SSR4.csv
+  preferred_metric: rmse
+  task_type: regression
+SSR5:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/SSR5.csv
+  preferred_metric: rmse
+  task_type: regression
+TA2R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/TA2R.csv
+  preferred_metric: rmse
+  task_type: regression
+UR2R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/UR2R.csv
+  preferred_metric: rmse
+  task_type: regression
+V1AR:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/V1AR.csv
+  preferred_metric: rmse
+  task_type: regression
+V1BR:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/V1BR.csv
+  preferred_metric: rmse
+  task_type: regression
+V2R:
+  collection: GPCR
+  description: "Ligand-GPCR binding activity"
+  example: CSc1nc(N)nc(-c2cccc(-c3ccc4[nH]ccc4c3)c2)n1,6.661543506
+  num_tasks: 1
+  path: datasets/raw_data/GPCR/V2R.csv
+  preferred_metric: rmse
+  task_type: regression

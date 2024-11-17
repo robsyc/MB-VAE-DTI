@@ -1,0 +1,10 @@
+index,smiles,label
+1,CCC1=[O+][Cu-3]2([O+]=C(CC)C1)[O+]=C(CC)CC(CC)=[O+]2,0
+2,C(=Cc1ccccc1)C1=[O+][Cu-3]2([O+]=C(C=Cc3ccccc3)CC(c3ccccc3)=[O+]2)[O+]=C(c2ccccc2)C1,0
+3,CC(=O)N1c2ccccc2Sc2c1ccc1ccccc21,0
+4,Nc1ccc(C=Cc2ccc(N)cc2S(=O)(=O)O)c(S(=O)(=O)O)c1,0
+5,O=S(=O)(O)CCS(=O)(=O)O,0
+6,CCOP(=O)(Nc1cccc(Cl)c1)OCC,0
+7,O=C(O)c1ccccc1O,0
+8,CC1=C2C(=COC(C)C2C)C(O)=C(C(=O)O)C1=O,0
+9,O=[N+]([O-])c1ccc(SSc2ccc([N+](=O)[O-])cc2[N+](=O)[O-])c([N+](=O)[O-])c1,1

@@ -1,0 +1,8 @@
+#Best checkpoint for each modality is kept here
+#These paths are relative to the BMFM_HOME base path that should be exported as an environment variable
+
+IMAGE: IMAGE_MODEL/ImageMol.pth.tar
+TEXT: TEXT_MODEL/best-model-epoch=02-step=462000.ckpt
+GRAPH: GRAPH_MODEL/best-model-epoch=03-step=427000.ckpt
+GRAPH_3D: pretrained/graph3d/graph3d_pretrain_19m_10epochs/last.ckpt
+MULTIVIEW: MULTIVIEW_MODEL/biomed-smmv-with-coeff-agg.pth
