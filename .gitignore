@@ -84,9 +84,7 @@ docs/_build/
 target/
 
 # Jupyter Notebook
-/notebooks/
 .ipynb_checkpoints
-!notebooks/*.ipynb
 
 #Model directory
 /core/api/bmfm_model_dir/
