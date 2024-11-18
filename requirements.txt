@@ -5,9 +5,6 @@ ipykernel
 notebook
 rdkit
 PyTDC
-torch==2.1.0
-torchvision==0.16.0
-torchaudio==2.1.0
 torch_geometric==2.3.1
 h5torch
 transformers==4.43.4
