@@ -5,6 +5,8 @@ ipykernel
 notebook
 rdkit
 PyTDC
+biopython
+subword-nmt
 torch_geometric==2.3.1
 h5torch
 transformers==4.43.4

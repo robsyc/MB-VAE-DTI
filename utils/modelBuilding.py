@@ -20,6 +20,7 @@ device = torch.device("cpu")
 def get_model_params(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
+
 # PRE-TRAINED MODELS
 
 class BiomedMultiViewMoleculeEncoder(nn.Module):

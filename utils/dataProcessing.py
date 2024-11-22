@@ -10,6 +10,7 @@ from typing import Literal
 from collections import Counter
 from scipy.spatial.distance import pdist, squareform
 import h5torch
+from Bio import Entrez, SeqIO
 
 
 np.random.seed(42)
@@ -20,7 +21,7 @@ MAX_MOL_WEIGHT = 600
 # BOUNDS_LogP = [-5, 5]
 MAX_SEQ_LEN = 1200
 
-
+Entrez.email = "robbe.claeys@ugent.be"
 IMG_PATH = "./data/logs/plots/"
 DATASET_PATH = "./data/dataset/"
 os.makedirs(IMG_PATH, exist_ok=True)
@@ -204,6 +205,21 @@ def explore_df(
     plt.savefig(IMG_PATH + name + "_interaction_properties.png")
     plt.show()
 
+def fetch_dna_sequence(target_id):
+    query = f"{target_id}[Gene Symbol] AND Homo sapiens[Organism]"
+    handle = Entrez.esearch(db="nucleotide", term=query, retmax=1)
+    record = Entrez.read(handle)
+    handle.close()
+    if record["IdList"]:
+        seq_id = record["IdList"][0]
+        handle = Entrez.efetch(db="nucleotide", id=seq_id, rettype="fasta", retmode="text")
+        seq_record = SeqIO.read(handle, "fasta")
+        handle.close()
+        return str(seq_record.seq)
+    else:
+        print(f"No DNA sequence found for target {target_id}")
+        return None
+
 def generate_h5torch(
         df: pd.DataFrame, 
         name: Literal["BindingDB_Kd", "DAVIS", "KIBA"]
@@ -246,6 +262,13 @@ def generate_h5torch(
     target_id = np.array([target_int2id[i] for i in range(df["Target_index"].max())])
     target_seq = np.array([target_int2seq[i] for i in range(df["Target_index"].max())])
 
+    # Gather DNA sequences for targets
+    target_seq_DNA = []
+    for s in target_id:
+        DNA_seq = fetch_dna_sequence(s)
+        target_seq_DNA.append(DNA_seq)
+    target_seq_DNA = np.array(target_seq_DNA)
+
     # Construct the h5torch file
     f = h5torch.File(DATASET_PATH + name + ".h5t", 'w')
     f.register((coo_matrix_indices, coo_matrix_values, coo_matrix_shape), axis="central", mode="coo", dtype_save="float32", dtype_load="float32")
@@ -253,6 +276,7 @@ def generate_h5torch(
     f.register(drug_smiles, axis=0, name="Drug_SMILES", dtype_save="bytes", dtype_load="str")
     f.register(target_id, axis=1, name="Target_ID", dtype_save="bytes", dtype_load="str")
     f.register(target_seq, axis=1, name="Target_seq", dtype_save="bytes", dtype_load="str")
+    f.register(target_seq_DNA, axis=1, name="Target_seq_DNA", dtype_save="bytes", dtype_load="str")
     f.register(df["split_rand"], axis="unstructured", name="split_rand", dtype_save="bytes", dtype_load="str")
     f.register(df["split_cold"], axis="unstructured", name="split_cold", dtype_save="bytes", dtype_load="str")
     f.close()
