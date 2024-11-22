@@ -1,7 +1,4 @@
 data/
-models/bmfm_model_dir/
-models/ProstT5_model_dir/
-models/mbvae_model_dir/
 
 # ignore model checkpoints
 *.pth
