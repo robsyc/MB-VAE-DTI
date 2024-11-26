@@ -205,20 +205,73 @@ def explore_df(
     plt.savefig(IMG_PATH + name + "_interaction_properties.png")
     plt.show()
 
+hand_corrected_IDs = {
+    # Davis
+    "ABL1p": "ABL1",
+    "AMPK-alpha1": "AMPK alpha 1",
+    "AMPK-alpha2": "AMPK alpha 2",
+    "FGFR3(G697C)": "FGFR3",
+    "IKK-epsilon": "IKK-E",
+    "JAK1(JH2domain-pseudokinase)": "JAK1",
+    "KIT(V559D-V654A)": "KIT",
+    "p38-alpha": "p38alpha",
+    "p38-beta": "p38beta",
+    "PFCDPK1(Pfalciparum)": "PF3D7_0217500",    # not human
+    "PFPK5(Pfalciparum)": "An12g05120",         # not human
+    "PKAC-alpha": "PKACA",
+    "RET(V804M)": "RET",
+    "RSK1(KinDom.2-C-terminal)": "RSK1",
+    "RSK4(KinDom.2-C-terminal)": "RSK4",
+    "TYK2(JH2domain-pseudokinase)": "TYK2",
+    "CDK4-cyclinD3": "CCND3",
+    "JAK2(JH1domain-catalytic)": "JAK2",
+    "JAK3(JH1domain-catalytic)": "JAK3",
+    "p38-gamma": "p38gamma",
+    "PKNB(Mtuberculosis)": "PKNB",              # not human
+    "RPS6KA5(KinDom.2-C-terminal)": "RPS6KA5",
+    "RSK2(KinDom.1-N-terminal)": "RSK2",
+    "RSK3(KinDom.2-C-terminal)": "RSK3",
+    "FLT3(R834Q)": "FLT3",
+    "PIK3CA(Q546K)": "PIK3CA",
+    "RPS6KA4(KinDom.2-C-terminal)": "RPS6KA4",
+    "BRAF(V600E)": "BRAF",
+    "PKAC-beta": "PKACB",
+    # KIBA
+}
+
 def fetch_dna_sequence(target_id):
+    """
+    Fetches coding DNA sequence of a protein target ID from NCBI.
+    """
+    if target_id in hand_corrected_IDs.keys():
+        target_id = hand_corrected_IDs[target_id]
+
     query = f"{target_id}[Gene Symbol] AND Homo sapiens[Organism]"
-    handle = Entrez.esearch(db="nucleotide", term=query, retmax=1)
-    record = Entrez.read(handle)
-    handle.close()
-    if record["IdList"]:
-        seq_id = record["IdList"][0]
-        handle = Entrez.efetch(db="nucleotide", id=seq_id, rettype="fasta", retmode="text")
-        seq_record = SeqIO.read(handle, "fasta")
+    fallback_query = f"{target_id}[Gene Symbol]"
+    for i, q in enumerate([query, fallback_query]):
+        handle = Entrez.esearch(db="nucleotide", term=q, retmax=10)
+        record = Entrez.read(handle)
         handle.close()
-        return str(seq_record.seq)
-    else:
-        print(f"No DNA sequence found for target {target_id}")
+        if record["IdList"]:
+            break
+        print("Not found in Homo sapiens") if i == 0 else None
+    if record["IdList"]:
+        for seq_id in record["IdList"]:
+            handle = Entrez.efetch(db="nucleotide", id=seq_id, rettype="gb", retmode="text")
+            seq_record = SeqIO.read(handle, "genbank")
+            handle.close()
+            for feature in seq_record.features:
+                if feature.type == 'CDS':
+                    try:
+                        return str(feature.location.extract(seq_record).seq)
+                    except:
+                        continue
+        
+        print(f"No CDS found for target {target_id}")
         return None
+        
+    print(f"No DNA sequences found for target {target_id}")
+    return None
 
 def generate_h5torch(
         df: pd.DataFrame, 
@@ -263,10 +316,24 @@ def generate_h5torch(
     target_seq = np.array([target_int2seq[i] for i in range(df["Target_index"].max())])
 
     # Gather DNA sequences for targets
+    fasta_file = DATASET_PATH + name + "_target_seq_DNA.fasta"
+    if not os.path.exists(fasta_file):
+        with open(fasta_file, "w") as f:
+            for i, s in enumerate(target_id):
+                print(i, s)
+                DNA_seq = fetch_dna_sequence(s)
+                try:
+                    print(len(DNA_seq))
+                except:
+                    print("No length for sequence")
+                if DNA_seq:
+                    f.write(f">{s}\n{DNA_seq}\n")
+                else:
+                    f.write(f">{s}\nNone\n")
     target_seq_DNA = []
-    for s in target_id:
-        DNA_seq = fetch_dna_sequence(s)
-        target_seq_DNA.append(DNA_seq)
+    for record in SeqIO.parse(fasta_file, "fasta"):
+        seq = str(record.seq)
+        target_seq_DNA.append(seq)
     target_seq_DNA = np.array(target_seq_DNA)
 
     # Construct the h5torch file
@@ -280,4 +347,3 @@ def generate_h5torch(
     f.register(df["split_rand"], axis="unstructured", name="split_rand", dtype_save="bytes", dtype_load="str")
     f.register(df["split_cold"], axis="unstructured", name="split_cold", dtype_save="bytes", dtype_load="str")
     f.close()
-
