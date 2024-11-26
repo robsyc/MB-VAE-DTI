@@ -347,3 +347,4 @@ def generate_h5torch(
     f.register(df["split_rand"], axis="unstructured", name="split_rand", dtype_save="bytes", dtype_load="str")
     f.register(df["split_cold"], axis="unstructured", name="split_cold", dtype_save="bytes", dtype_load="str")
     f.close()
+

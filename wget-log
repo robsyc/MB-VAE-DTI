@@ -1,6 +1,0 @@
---2024-11-19 15:10:18--  https://cdn-lfs-us-1.hf.co/repos/5f/2c/5f2ce387fa83a31e808bd1f81f0527a7fb4aa7f68a766e7ab45121e461305da6/74b7e159062b105c557d2459790ffc4617c906a660b14292656b11ab63ef8063?response-content-disposition=attachment%3B+filename*%3DUTF-8%27%27model.safetensors%3B+filename%3D%22model.safetensors%22%3B
-Resolving cdn-lfs-us-1.hf.co (cdn-lfs-us-1.hf.co)... 18.239.69.55, 18.239.69.100, 18.239.69.126, ...
-Connecting to cdn-lfs-us-1.hf.co (cdn-lfs-us-1.hf.co)|18.239.69.55|:443... connected.
-HTTP request sent, awaiting response... 403 Forbidden
-2024-11-19 15:10:18 ERROR 403: Forbidden.
-
