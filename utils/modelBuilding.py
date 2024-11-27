@@ -20,65 +20,6 @@ device = torch.device("cpu")
 def get_model_params(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-
-# PRE-TRAINED MODELS
-
-class BiomedMultiViewMoleculeEncoder(nn.Module):
-    def __init__(
-        self,
-        inference_mode: bool = True,
-        # hugging_face: bool = False
-    ):
-        super(BiomedMultiViewMoleculeEncoder, self).__init__()
-        # Initialize the pretrained model
-        # model = torch.load('../data_root/bmfm_model_dir/pretrained/MULTIVIEW_MODEL/biomed-smmv-with-coeff-agg.pth')
-        biomed_smmv_pretrained = SmallMoleculeMultiViewModel.from_pretrained(
-            LateFusionStrategy.ATTENTIONAL,
-            model_path='./models/bmfm_model_dir/biomed-smmv-base.pth',
-            inference_mode=inference_mode,
-        )
-        # biomed_smmv_pretrained = SmallMoleculeMultiViewModel.from_pretrained(
-        #     LateFusionStrategy.ATTENTIONAL,
-        #     model_path='ibm/biomed.sm.mv-te-84m',
-        #     hugging_face=True
-        # )
-        # Initialize the model subcomponents
-        self.model_graph = biomed_smmv_pretrained.model_graph # output dim: 512
-        self.model_image = biomed_smmv_pretrained.model_image # output dim: 512
-        self.model_text = biomed_smmv_pretrained.model_text   # output dim: 768
-
-    def forward(self, smiles):
-        tokenized_smiles_list = []
-        attention_mask_list = []
-        image_tensors = []
-        graph_emb = []
-
-        for sm in smiles:
-            # Prepare image and text data in batch format
-            img_data = ImageFinetuneDataPipeline.smiles_to_image_format(sm)
-            image_tensors.append(img_data['img'].squeeze(0)) # Remove extra batch dimension if present
-
-            txt_data = TextFinetuneDataPipeline.smiles_to_text_format(sm)
-            tokenized_smiles_list.append(txt_data['smiles.tokenized'].squeeze(0))
-            attention_mask_list.append(txt_data['attention_mask'].squeeze(0))
-
-            # Run the graph model on individual smiles
-            graph_data = Graph2dFinetuneDataPipeline.smiles_to_graph_format(sm)
-            graph_emb.append(self.model_graph(graph_data).squeeze(0))
-
-        # Run the image and text models on the batched data
-        image_batch = torch.stack(image_tensors, dim=0).to(device)
-        tokenized_smiles_batch = pad_sequence(tokenized_smiles_list, batch_first=True).to(device)
-        attention_mask_batch = pad_sequence(attention_mask_list, batch_first=True).to(device)
-
-        image_emb = self.model_image(image_batch)
-        text_emb = self.model_text(tokenized_smiles_batch, attention_mask_batch)
-
-        # Stack the individually computed graph embeddings
-        graph_emb = torch.stack(graph_emb, dim=0).to(device)
-
-        return graph_emb, image_emb, text_emb
-
 class T5ProstTargetEncoder(nn.Module):
     def __init__(self, verbose: bool = False, AA_SEQ_CAP: int = 20):
         super(T5ProstTargetEncoder, self).__init__()
@@ -93,6 +34,22 @@ class T5ProstTargetEncoder(nn.Module):
         if verbose:
             print(next(self.model.parameters()).device)
             print(self.model.dtype)
+    
+    def process(self, sequences):
+        sequences = [sequence[:self.AA_SEQ_CAP] for sequence in sequences]
+        sequences = [" ".join(list(re.sub(r"[UZOB]", "X", sequence))).upper() for sequence in sequences]
+        sequences = ["<AA2fold> " + s for s in sequences]
+        return sequences
+    
+    def tokenize(self, sequences):
+        ids = self.tokenizer.batch_encode_plus(
+            sequences,
+            add_special_tokens=True,
+            padding="longest",
+            return_tensors='pt'
+        )
+        ids = {key: tensor.to(device) for key, tensor in ids.items()}
+        return ids
 
     def forward(self, sequences):
         if self.verbose:
