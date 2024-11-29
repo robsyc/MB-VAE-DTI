@@ -18,8 +18,12 @@ from bmfm_sm.predictive.data_modules.graph_finetune_dataset import Graph2dFinetu
 from bmfm_sm.predictive.data_modules.image_finetune_dataset import ImageFinetuneDataPipeline
 from bmfm_sm.predictive.data_modules.text_finetune_dataset import TextFinetuneDataPipeline
 
-from transformers import T5Tokenizer, T5EncoderModel
+from transformers import T5Tokenizer, T5EncoderModel, AutoTokenizer, AutoModel
+from transformers.models.bert.configuration_bert import BertConfig
 import re
+
+
+import esm
 
 import h5torch
 from typing import Literal
@@ -90,8 +94,8 @@ class BiomedMultiViewMoleculeEncoder(nn.Module):
         self.model_image = biomed_smmv_pretrained.model_image # output dim: 512
         self.model_text = biomed_smmv_pretrained.model_text   # output dim: 768
 
-        # Helper function for collating the individual processed graph samples:
     def collate_graph_data(self, graph_data_list):
+        # Helper function for collating the individual processed graph samples into a batch
         collated = {}
         collated["node_num"] = torch.cat([sample['node_num'] for sample in graph_data_list])
         collated["node_data"] = torch.cat([sample['node_data'] for sample in graph_data_list])
@@ -145,7 +149,6 @@ class T5ProstTargetEncoder(nn.Module):
     def __init__(
             self, 
             huggingface = True,
-            cap_seq = False
             ):
         super(T5ProstTargetEncoder, self).__init__()
         if huggingface:
@@ -153,35 +156,77 @@ class T5ProstTargetEncoder(nn.Module):
         else:
             path = MODEL_PATH + "ProstT5"
         self.tokenizer = T5Tokenizer.from_pretrained(path, do_lower_case=False)
-        self.model = T5EncoderModel.from_pretrained(path).to(device)
+        self.model = T5EncoderModel.from_pretrained(path)
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
         # only GPUs support half-precision (float16) currently; if you want to run on CPU use full-precision (float32) (not recommended, much slower)
         self.model.float() if device.type=='cpu' else self.model.half()
     
     def process(self, sequences):
-        sequences = [sequence[:self.AA_SEQ_CAP] for sequence in sequences]
+        sequences = [sequence for sequence in sequences]
         sequences = [" ".join(list(re.sub(r"[UZOB]", "X", sequence))).upper() for sequence in sequences]
         sequences = ["<AA2fold> " + s for s in sequences]
         return sequences
     
     def tokenize(self, sequences):
-        ids = self.tokenizer.batch_encode_plus(
+        return self.tokenizer.batch_encode_plus(
             sequences,
             add_special_tokens=True,
             padding="longest",
             return_tensors='pt'
         )
-        ids = {key: tensor.to(device) for key, tensor in ids.items()}
-        return ids
 
     def forward(self, sequences):
-        X = self.process(sequences)
-        ids = self.tokenize(X)
+        # Tokenize input sequences
+        sequences = self.process(sequences)
+        sequences = self.tokenize(sequences)
+        input_ids = sequences['input_ids'].to(self.model.device)
+        attention_mask = sequences['attention_mask'].to(self.model.device)
+        # Get hidden states
         outputs = self.model(
-            input_ids=ids['input_ids'],
-            attention_mask=ids['attention_mask']
+            input_ids=input_ids,
+            attention_mask=attention_mask
         ).last_hidden_state # (batch_size, seq_len, hidden_dim)
-        outputs = outputs.mean(dim=1) # (batch_size, hidden_dim)
-        return outputs
+        # Mask padded tokens
+        mask = attention_mask.unsqueeze(-1).expand(outputs.size()).bool()
+        outputs = outputs.masked_fill(~mask, 0.0)
+        # Sum and count non-padded tokens for averaging
+        summed = torch.sum(outputs, dim=1)
+        counts = torch.clamp(attention_mask.sum(dim=1, keepdim=True), min=1).type_as(summed)
+        return summed / counts # (batch_size, hidden_dim)
+
+class ESMTargetEncoder(nn.Module):
+    def __init__(
+            self, 
+            ):
+        super(ESMTargetEncoder, self).__init__()
+        # other options: esm2_t36_3B_UR50D or esm2_t48_15B_UR50D
+        self.model, self.alphabet = esm.pretrained.esm2_t33_650M_UR50D()
+        self.batch_converter = self.alphabet.get_batch_converter()
+
+    def forward(self, sequences):
+        sequences = [(f"protein{i}", sequence) for i, sequence in enumerate(sequences)]
+        batch_labels, batch_strs, batch_tokens = self.batch_converter(sequences)
+        results = self.model(batch_tokens, repr_layers=[33], return_contacts=False)
+        token_representations = results["representations"][33]
+        sequence_representations = []
+        for i, (_, seq) in enumerate(sequences):
+            sequence_representations.append(token_representations[i, 1 : len(seq) + 1].mean(0))
+        return torch.stack(sequence_representations, dim=0) # (batch_size, 1280)
+
+class DNABERT2TargetEncoder(nn.Module):
+    def __init__(
+            self, 
+            ):
+        super(DNABERT2TargetEncoder, self).__init__()
+        config = BertConfig.from_pretrained("zhihan1996/DNABERT-2-117M")
+        tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-2-117M")
+        model = AutoModel.from_pretrained("zhihan1996/DNABERT-2-117M", trust_remote_code=True, config=config)
+
+    def forward(self, seq):
+        # Note: we are not batching sequences here because inputs can be very long
+        inputs = self.tokenizer(seq, return_tensors = 'pt')["input_ids"]
+        outputs = self.model(inputs)[0] # last hidden state (1, seq_len, 768)
+        return torch.mean(outputs[0], dim=0) # (seq_len, 768) -> (768)
 
 ####################################################################################################################
 
@@ -194,6 +239,8 @@ def add_embeddings(name: Literal["BindingDB_Kd", "DAVIS", "KIBA"]) -> None:
     target_AA = f["1/Target_seq"][:]
     target_DNA = f["1/Target_seq_DNA"][:]
 
+    # Drug embeddings
+    print("Adding drug embeddings...")
     drug_fingerprints = np.empty((len(drug_smiles), 2048), dtype=np.float32)
     for i, s in enumerate(drug_smiles):
         s = s.decode("utf-8")
@@ -217,6 +264,8 @@ def add_embeddings(name: Literal["BindingDB_Kd", "DAVIS", "KIBA"]) -> None:
     f.register(drug_emb_text, mode="N-D", axis=0, name="Drug_emb_text", dtype_save="float32", dtype_load="float32")
     f.save()
 
+    # Target embeddings
+    print("Adding target embeddings...")
     target_fingerprints = np.empty((len(target_AA), 4170), dtype=np.float32)
     for i, s in enumerate(target_AA):
         s = s.decode("utf-8")
@@ -226,7 +275,30 @@ def add_embeddings(name: Literal["BindingDB_Kd", "DAVIS", "KIBA"]) -> None:
     f.save()
 
     target_emb_T5 = np.empty((len(target_AA), 1024), dtype=np.float32)
-    # target_emb_ESM = np.empty((len(target_AA), 1280), dtype=np.float32)
-    # target_emb_DNA = np.empty((len(target_DNA), 1280), dtype=np.float32)
+    model = T5ProstTargetEncoder(huggingface=HUGGING_FACE)
+    for i, s in enumerate(target_AA):
+        s = s.decode("utf-8")
+        emb = model([s])
+        target_emb_T5[i] = emb
+    f.register(target_emb_T5, mode="N-D", axis=1, name="Target_emb_T5", dtype_save="float32", dtype_load="float32")
+    f.save()
 
-    # f.register(drug_embeddings_1, mode="N-D", axis=0, name="drug_embeddings_1", dtype_save="float32", dtype_load="float32")
+    target_emb_ESM = np.empty((len(target_AA), 1280), dtype=np.float32)
+    model = ESMTargetEncoder()
+    for i, s in enumerate(target_AA):
+        s = s.decode("utf-8")
+        emb = model([s])
+        target_emb_ESM[i] = emb
+    f.register(target_emb_ESM, mode="N-D", axis=1, name="Target_emb_ESM", dtype_save="float32", dtype_load="float32")
+    f.save()
+
+    target_emb_DNA = np.empty((len(target_DNA), 768), dtype=np.float32)
+    model = DNABERT2TargetEncoder()
+    for i, s in enumerate(target_DNA):
+        s = s.decode("utf-8")
+        emb = model(s)
+        target_emb_DNA[i] = emb
+    f.register(target_emb_DNA, mode="N-D", axis=1, name="Target_emb_DNA", dtype_save="float32", dtype_load="float32")
+    f.save()
+
+    f.close()
