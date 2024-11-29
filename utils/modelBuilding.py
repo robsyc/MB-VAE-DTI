@@ -16,78 +16,10 @@ from bmfm_sm.predictive.data_modules.text_finetune_dataset import TextFinetuneDa
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cpu")
 
-
 def get_model_params(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-class T5ProstTargetEncoder(nn.Module):
-    def __init__(self, verbose: bool = False, AA_SEQ_CAP: int = 20):
-        super(T5ProstTargetEncoder, self).__init__()
-        self.verbose = verbose
-        self.AA_SEQ_CAP = AA_SEQ_CAP
-        self.tokenizer = T5Tokenizer.from_pretrained("./models/ProstT5_model_dir", do_lower_case=False)
-        self.model = T5EncoderModel.from_pretrained("./models/ProstT5_model_dir").to(device)
-        # tokenizer = T5Tokenizer.from_pretrained('Rostlab/ProstT5', do_lower_case=False).to(device)
-        # model = T5EncoderModel.from_pretrained("Rostlab/ProstT5").to(device)
-        # only GPUs support half-precision (float16) currently; if you want to run on CPU use full-precision (float32) (not recommended, much slower)
-        self.model.float() if device.type=='cpu' else self.model.half()
-        if verbose:
-            print(next(self.model.parameters()).device)
-            print(self.model.dtype)
-    
-    def process(self, sequences):
-        sequences = [sequence[:self.AA_SEQ_CAP] for sequence in sequences]
-        sequences = [" ".join(list(re.sub(r"[UZOB]", "X", sequence))).upper() for sequence in sequences]
-        sequences = ["<AA2fold> " + s for s in sequences]
-        return sequences
-    
-    def tokenize(self, sequences):
-        ids = self.tokenizer.batch_encode_plus(
-            sequences,
-            add_special_tokens=True,
-            padding="longest",
-            return_tensors='pt'
-        )
-        ids = {key: tensor.to(device) for key, tensor in ids.items()}
-        return ids
-
-    def forward(self, sequences):
-        if self.verbose:
-            print("Encoding protein sequences")
-            print("Number of sequences:", len(sequences))
-            print("Max length sequence:", max(len(seq) for seq in sequences))
-
-        sequences = [sequence[:self.AA_SEQ_CAP] for sequence in sequences]
-        sequences = [" ".join(list(re.sub(r"[UZOB]", "X", sequence))).upper() for sequence in sequences]
-        sequences = ["<AA2fold> " + s for s in sequences]
-
-        # Tokenize sequences
-        ids = self.tokenizer.batch_encode_plus(
-            sequences,
-            add_special_tokens=True,
-            padding="longest",
-            return_tensors='pt'
-        )
-        ids = {key: tensor.to(device) for key, tensor in ids.items()}
-        if self.verbose:
-            print(ids.keys())
-            print(ids['input_ids'].shape)
-            print(ids['attention_mask'].shape)
-
-        # Generate embeddings
-        outputs = self.model(
-            input_ids=ids['input_ids'],
-            attention_mask=ids['attention_mask']
-        ).last_hidden_state # (batch_size, seq_len, hidden_dim)
-        if self.verbose:
-            print("Output shape:", outputs.shape)
-        outputs = outputs.mean(dim=1) # (batch_size, hidden_dim)
-        if self.verbose:
-            print("Mean-pooled output shape:", outputs.shape)
-        return outputs
-
 # CUSTOM MODELS
-
 class HiddenBlock(nn.Module):
     """
     A block of fully connected layers with layer normalization, SiLU activation, and dropout.
