@@ -1,9 +1,13 @@
 import os
+import sys
+
+os.chdir('/home/robbec/thesis/MB-VAE-DTI/')
+sys.path.append('/home/robbec/thesis/MB-VAE-DTI/')
+
 from utils.dataProcessing import load_df, explore_df
 from utils.dataProcessing import generate_h5torch
 from utils.preEmbedding import add_embeddings
 
-os.chdir('/home/robbec/thesis/MB-VAE-DTI/')
 
 df_davis = load_df(
     name="DAVIS",

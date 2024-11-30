@@ -18,8 +18,7 @@ from bmfm_sm.predictive.data_modules.graph_finetune_dataset import Graph2dFinetu
 from bmfm_sm.predictive.data_modules.image_finetune_dataset import ImageFinetuneDataPipeline
 from bmfm_sm.predictive.data_modules.text_finetune_dataset import TextFinetuneDataPipeline
 
-from transformers import T5Tokenizer, T5EncoderModel, AutoTokenizer, AutoModel
-from transformers.models.bert.configuration_bert import BertConfig
+from transformers import T5Tokenizer, T5EncoderModel, AutoTokenizer, AutoModelForMaskedLM
 import re
 
 
@@ -32,9 +31,8 @@ from typing import Literal
 HUGGING_FACE = True
 DATASET_PATH = "./data/dataset/"
 MODEL_PATH = "./data/model_saves/"
-espf_folder = "./data/ESPF"
+espf_folder = "./ESPF"
 assert os.path.exists(DATASET_PATH), "Dataset directory does not exist."
-assert any([f.endswith(".h5t") for f in os.listdir(DATASET_PATH)]), "No .h5t files found in dataset directory."
 if not HUGGING_FACE:
     assert os.path.exists(MODEL_PATH), "Model directory does not exist."
 else:
@@ -42,6 +40,8 @@ else:
 assert os.path.exists(espf_folder), "ESPF directory does not exist."
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+print("Device: ", device)
 
 
 ## FINGERPRINTS
@@ -159,7 +159,7 @@ class T5ProstTargetEncoder(nn.Module):
         self.model = T5EncoderModel.from_pretrained(path)
         self.avg_pool = nn.AdaptiveAvgPool1d(1)
         # only GPUs support half-precision (float16) currently; if you want to run on CPU use full-precision (float32) (not recommended, much slower)
-        self.model.float() if device.type=='cpu' else self.model.half()
+        # self.model.float() if device.type=='cpu' else self.model.half()
     
     def process(self, sequences):
         sequences = [sequence for sequence in sequences]
@@ -206,6 +206,7 @@ class ESMTargetEncoder(nn.Module):
     def forward(self, sequences):
         sequences = [(f"protein{i}", sequence) for i, sequence in enumerate(sequences)]
         batch_labels, batch_strs, batch_tokens = self.batch_converter(sequences)
+        batch_tokens = batch_tokens.to(device)
         results = self.model(batch_tokens, repr_layers=[33], return_contacts=False)
         token_representations = results["representations"][33]
         sequence_representations = []
@@ -213,26 +214,36 @@ class ESMTargetEncoder(nn.Module):
             sequence_representations.append(token_representations[i, 1 : len(seq) + 1].mean(0))
         return torch.stack(sequence_representations, dim=0) # (batch_size, 1280)
 
-class DNABERT2TargetEncoder(nn.Module):
+class DNATargetEncoder(nn.Module):
     def __init__(
             self, 
             ):
-        super(DNABERT2TargetEncoder, self).__init__()
-        config = BertConfig.from_pretrained("zhihan1996/DNABERT-2-117M")
-        tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-2-117M")
-        model = AutoModel.from_pretrained("zhihan1996/DNABERT-2-117M", trust_remote_code=True, config=config)
+        super(DNATargetEncoder, self).__init__()
+        self.tokenizer = AutoTokenizer.from_pretrained("InstaDeepAI/nucleotide-transformer-v2-500m-multi-species", trust_remote_code=True)
+        self.model = AutoModelForMaskedLM.from_pretrained("InstaDeepAI/nucleotide-transformer-v2-500m-multi-species", trust_remote_code=True)
 
-    def forward(self, seq):
-        # Note: we are not batching sequences here because inputs can be very long
-        inputs = self.tokenizer(seq, return_tensors = 'pt')["input_ids"]
-        outputs = self.model(inputs)[0] # last hidden state (1, seq_len, 768)
-        return torch.mean(outputs[0], dim=0) # (seq_len, 768) -> (768)
+    def forward(self, sequences):
+        max_length = self.tokenizer.model_max_length
+        tokens_ids = self.tokenizer.batch_encode_plus(sequences, return_tensors="pt", padding="max_length", max_length = max_length)["input_ids"].to(device)
+        attention_mask = tokens_ids != self.tokenizer.pad_token_id
+        attention_mask = attention_mask.to(device)
+        torch_outs = self.model(
+            tokens_ids,
+            attention_mask=attention_mask,
+            encoder_attention_mask=attention_mask,
+            output_hidden_states=True
+        )
+        embeddings = torch_outs['hidden_states'][-1]
+        attention_mask = torch.unsqueeze(attention_mask, dim=-1)
+        mean_sequence_embeddings = torch.sum(attention_mask*embeddings, axis=-2)/torch.sum(attention_mask, axis=1)
+        return mean_sequence_embeddings # (batch, 1024)
 
 ####################################################################################################################
 
 def add_embeddings(name: Literal["BindingDB_Kd", "DAVIS", "KIBA"]) -> None:
     """
     Adds fingerprint and embedding columns to the specified dataset's existing h5torch file.
+    We're asuming we have to work on tight GPU budgets with the pre-trained transformers - so NO batch processing!
     """
     f = h5torch.File(DATASET_PATH + name + ".h5t", "a")
     drug_smiles = f["0/Drug_SMILES"][:]
@@ -246,8 +257,8 @@ def add_embeddings(name: Literal["BindingDB_Kd", "DAVIS", "KIBA"]) -> None:
         s = s.decode("utf-8")
         fp = get_drug_fingerprint(s)
         drug_fingerprints[i] = fp
+    print("Fingerprint: ", drug_fingerprints.shape)
     f.register(drug_fingerprints, mode="N-D", axis=0, name="Drug_fp", dtype_save="float32", dtype_load="float32")
-    f.save()
 
     drug_emb_graph = np.empty((len(drug_smiles), 512), dtype=np.float32)
     drug_emb_image = np.empty((len(drug_smiles), 512), dtype=np.float32)
@@ -256,13 +267,16 @@ def add_embeddings(name: Literal["BindingDB_Kd", "DAVIS", "KIBA"]) -> None:
     for i, s in enumerate(drug_smiles):
         s = s.decode("utf-8")
         emb = model([s])    # [graph, image, text] TODO: maybe do batch processing?!
-        drug_emb_graph[i] = emb[0]
-        drug_emb_image[i] = emb[1]
-        drug_emb_text[i] = emb[2]
+        drug_emb_graph[i] = emb[0].detach().numpy()
+        drug_emb_image[i] = emb[1].detach().numpy()
+        drug_emb_text[i] = emb[2].detach().numpy()
+    print("Graph embedding: ", drug_emb_graph.shape)
+    print("Image embedding: ", drug_emb_image.shape)
+    print("Text embedding: ", drug_emb_text.shape)
     f.register(drug_emb_graph, mode="N-D", axis=0, name="Drug_emb_graph", dtype_save="float32", dtype_load="float32")
     f.register(drug_emb_image, mode="N-D", axis=0, name="Drug_emb_image", dtype_save="float32", dtype_load="float32")
     f.register(drug_emb_text, mode="N-D", axis=0, name="Drug_emb_text", dtype_save="float32", dtype_load="float32")
-    f.save()
+    torch.cuda.empty_cache()
 
     # Target embeddings
     print("Adding target embeddings...")
@@ -271,34 +285,40 @@ def add_embeddings(name: Literal["BindingDB_Kd", "DAVIS", "KIBA"]) -> None:
         s = s.decode("utf-8")
         fp = get_target_fingerprint(s)
         target_fingerprints[i] = fp
+    print("Fingerprint: ", target_fingerprints.shape)
     f.register(target_fingerprints, mode="N-D", axis=1, name="Target_fp", dtype_save="float32", dtype_load="float32")
-    f.save()
+    torch.cuda.empty_cache()
 
     target_emb_T5 = np.empty((len(target_AA), 1024), dtype=np.float32)
-    model = T5ProstTargetEncoder(huggingface=HUGGING_FACE)
+    model = T5ProstTargetEncoder(huggingface=HUGGING_FACE).to(device)
+    model.float() if device.type=='cpu' else model.half()
     for i, s in enumerate(target_AA):
         s = s.decode("utf-8")
-        emb = model([s])
-        target_emb_T5[i] = emb
+        with torch.no_grad():
+            emb = model([s])
+        target_emb_T5[i] = emb.detach().cpu().numpy()
+    print("T5 embedding: ", target_emb_T5.shape)
     f.register(target_emb_T5, mode="N-D", axis=1, name="Target_emb_T5", dtype_save="float32", dtype_load="float32")
-    f.save()
+    torch.cuda.empty_cache()
 
     target_emb_ESM = np.empty((len(target_AA), 1280), dtype=np.float32)
-    model = ESMTargetEncoder()
+    model = ESMTargetEncoder().to(device)
     for i, s in enumerate(target_AA):
         s = s.decode("utf-8")
-        emb = model([s])
-        target_emb_ESM[i] = emb
+        with torch.no_grad():
+            emb = model([s])
+        target_emb_ESM[i] = emb.detach().cpu().numpy()
+    print("ESM embedding: ", target_emb_ESM.shape)
     f.register(target_emb_ESM, mode="N-D", axis=1, name="Target_emb_ESM", dtype_save="float32", dtype_load="float32")
-    f.save()
 
-    target_emb_DNA = np.empty((len(target_DNA), 768), dtype=np.float32)
-    model = DNABERT2TargetEncoder()
+    target_emb_DNA = np.empty((len(target_DNA), 1024), dtype=np.float32)
+    model = DNATargetEncoder().to(device)
     for i, s in enumerate(target_DNA):
         s = s.decode("utf-8")
-        emb = model(s)
-        target_emb_DNA[i] = emb
+        with torch.no_grad():
+            emb = model([s])
+        target_emb_DNA[i] = emb.detach().cpu().numpy()
+    print("DNA embedding: ", target_emb_DNA.shape)
     f.register(target_emb_DNA, mode="N-D", axis=1, name="Target_emb_DNA", dtype_save="float32", dtype_load="float32")
-    f.save()
 
     f.close()
