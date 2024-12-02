@@ -13,9 +13,7 @@ from utils.modelBuilding import (
 CONFIGS = {
     'single_view_fp': {
         'inputs_0': ['0/Drug_fp'],
-        'inputs_0_shape': [2048],
         'inputs_1': ['1/Target_fp'],
-        'inputs_1_shape': [4170],
         'model_type': 'plain',  # 'plain' or 'variational'
     },
     # 'single_view_emb': {
@@ -92,12 +90,17 @@ def train_and_evaluate(config, split_type, num_epochs=10, batch_size=32):
         shuffle=False
     )
 
+    # Determine input dimensions
+    sample_batch = next(iter(train_loader))
+    input_dim_list_0 = [x.shape[1] for x in sample_batch[0]]
+    input_dim_list_1 = [x.shape[1] for x in sample_batch[1]]
+
     # Define the model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if config['model_type'] == 'plain':
         model = PlainMultiBranch(
-            input_dim_list_0=config["inputs_0_shape"],
-            input_dim_list_1=config["inputs_1_shape"],
+            input_dim_list_0=input_dim_list_0,
+            input_dim_list_1=input_dim_list_1,
             hidden_dim=512,
             latent_dim=1024,
             depth=1,
@@ -105,8 +108,8 @@ def train_and_evaluate(config, split_type, num_epochs=10, batch_size=32):
         ).to(device)
     else:
         model = VariationalMultiBranch(
-            input_dim_list_0=config["inputs_0_shape"],
-            input_dim_list_1=config["inputs_1_shape"],
+            input_dim_list_0=input_dim_list_0,
+            input_dim_list_1=input_dim_list_1,
             hidden_dim=512,
             latent_dim=1024,
             depth=1,

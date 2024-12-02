@@ -293,7 +293,7 @@ def generate_h5torch(
     unique_drugs = df["Drug_ID"].unique()
     unique_targets = df["Target_ID"].unique()
 
-    drug_id2int = {drug: i for i, drug in enumerate(unique_drugs)}
+    drug_id2int = {drug: i for i, drug in enumerate(unique_drugs)}          # e.g. 0 - 63
     target_id2int = {target: i for i, target in enumerate(unique_targets)}
 
     df["Drug_index"] = df["Drug_ID"].map(drug_id2int)
@@ -302,18 +302,18 @@ def generate_h5torch(
     # Generate necessary COO matrix data
     coo_matrix_indices = df[["Drug_index", "Target_index"]].values.T
     coo_matrix_values = df["Y"].values.astype(np.float32)
-    coo_matrix_shape = (df["Drug_index"].max(), df["Target_index"].max())
+    coo_matrix_shape = (df["Drug_index"].max() + 1, df["Target_index"].max() + 1)
 
     # Gather IDs and string representations in order of the integer indices
     drug_int2id = {v : k for k, v in drug_id2int.items()}
     drug_int2smiles = {k : v for k, v in zip(df["Drug_index"], df["Drug"])}
-    drug_id = np.array([drug_int2id[i] for i in range(df["Drug_index"].max())])
-    drug_smiles = np.array([drug_int2smiles[i] for i in range(df["Drug_index"].max())])
+    drug_id = np.array([drug_int2id[i] for i in range(df["Drug_index"].max() + 1)])
+    drug_smiles = np.array([drug_int2smiles[i] for i in range(df["Drug_index"].max() + 1)])
 
     target_int2id = {v : k for k, v in target_id2int.items()}
     target_int2seq = {k : v for k, v in zip(df["Target_index"], df["Target"])}
-    target_id = np.array([target_int2id[i] for i in range(df["Target_index"].max())])
-    target_seq = np.array([target_int2seq[i] for i in range(df["Target_index"].max())])
+    target_id = np.array([target_int2id[i] for i in range(df["Target_index"].max() + 1)])
+    target_seq = np.array([target_int2seq[i] for i in range(df["Target_index"].max() + 1)])
 
     # Gather DNA sequences for targets
     fasta_file = DATASET_PATH + name + "_target_seq_DNA.fasta"
@@ -330,11 +330,13 @@ def generate_h5torch(
                     f.write(f">{s}\n{DNA_seq}\n")
                 else:
                     f.write(f">{s}\nNone\n")
-    target_seq_DNA = []
-    for record in SeqIO.parse(fasta_file, "fasta"):
-        seq = str(record.seq)
-        target_seq_DNA.append(seq)
-    target_seq_DNA = np.array(target_seq_DNA)
+    target_id2DNA = {record.id: str(record.seq) for record in SeqIO.parse(fasta_file, "fasta")}
+    target_int2DNA = {k : target_id2DNA[v] for k, v in target_int2id.items()}
+    target_seq_DNA = np.array([target_int2DNA[i] for i in range(df["Target_index"].max() + 1)])
+
+    # Assert that arrays have the same length
+    assert len(drug_id) == len(drug_smiles) == coo_matrix_shape[0]
+    assert len(target_id) == len(target_seq) == len(target_seq_DNA) == coo_matrix_shape[1]
 
     # Construct the h5torch file
     f = h5torch.File(DATASET_PATH + name + ".h5t", 'w')
