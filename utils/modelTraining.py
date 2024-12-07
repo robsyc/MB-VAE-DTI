@@ -9,36 +9,6 @@ from utils.modelBuilding import (
     VariationalMultiBranch
 )
 
-# Configurations for different experiments
-CONFIGS = {
-    'single_view_fp': {
-        'inputs_0': ['0/Drug_fp'],
-        'inputs_1': ['1/Target_fp'],
-        'model_type': 'plain',  # 'plain' or 'variational'
-    },
-    # 'single_view_emb': {
-    #     'inputs_0': ['0/Drug_emb_graph'],
-    #     'inputs_1': ['1/Target_emb_T5'],
-    #     'model_type': 'plain',
-    # },
-    # 'var_single_view_fp': {
-    #     'inputs_0': ['0/Drug_fp'],
-    #     'inputs_1': ['1/Target_fp'],
-    #     'model_type': 'variational',
-    # },
-    # 'var_single_view_emb': {
-    #     'inputs_0': ['0/Drug_emb_graph'],
-    #     'inputs_1': ['1/Target_emb_T5'],
-    #     'model_type': 'variational',
-    # },
-    # 'multi_view': {
-    #     'inputs_0': ['0/Drug_fp', '0/Drug_emb_graph', '0/Drug_emb_image', '0/Drug_emb_text'],
-    #     'inputs_1': ['1/Target_fp', '1/Target_emb_ESM', '1/Target_emb_T5', '1/Target_emb_DNA'],
-    #     'model_type': 'variational',
-    # },
-    # Add more configurations if needed
-}
-
 def get_dataset(split_type, split_name):
     return h5torch.Dataset(
         "./data/dataset/DAVIS.h5t",
@@ -67,7 +37,18 @@ class CustomH5Dataset(Dataset):
         return x0, x1, y
 
 # Training and evaluation function
-def train_and_evaluate(config, split_type, num_epochs=10, batch_size=32):
+def train_and_evaluate(
+        config, 
+        split_type, 
+        num_epochs=30,
+        learning_rate=0.001, 
+        kl_weight=1,
+        batch_size=32,
+        hidden_dim=512,
+        latent_dim=1024,
+        depth=1,
+        dropout_prob=0.1
+    ):
     # Prepare datasets
     train_dataset = get_dataset(split_type, 'train')
     valid_dataset = get_dataset(split_type, 'valid')
@@ -101,25 +82,24 @@ def train_and_evaluate(config, split_type, num_epochs=10, batch_size=32):
         model = PlainMultiBranch(
             input_dim_list_0=input_dim_list_0,
             input_dim_list_1=input_dim_list_1,
-            hidden_dim=512,
-            latent_dim=1024,
-            depth=1,
-            dropout_prob=0.1
+            hidden_dim=hidden_dim,
+            latent_dim=latent_dim,
+            depth=depth,
+            dropout_prob=dropout_prob
         ).to(device)
     else:
         model = VariationalMultiBranch(
             input_dim_list_0=input_dim_list_0,
             input_dim_list_1=input_dim_list_1,
-            hidden_dim=512,
-            latent_dim=1024,
-            depth=1,
-            dropout_prob=0.1
+            hidden_dim=hidden_dim,
+            latent_dim=latent_dim,
+            depth=depth,
+            dropout_prob=dropout_prob
         ).to(device)
 
     # Loss function and optimizer
     mse_loss_fn = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    kl_weight = 1e-4  # Adjust KL divergence weight if using variational models
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Variables to track the best model
     best_valid_loss = float('inf')
@@ -168,7 +148,7 @@ def train_and_evaluate(config, split_type, num_epochs=10, batch_size=32):
                     output, coeffs = model(x0, x1)
                     loss = mse_loss_fn(output.squeeze(), y)
                 else:
-                    output, kl_loss = model(x0, x1, compute_loss=False)
+                    output, kl_loss, coeffs = model(x0, x1, compute_loss=False)
                     loss = mse_loss_fn(output.squeeze(), y)
 
                 total_valid_loss += loss.item()
@@ -199,7 +179,7 @@ def train_and_evaluate(config, split_type, num_epochs=10, batch_size=32):
                 output, coeffs = model(x0, x1)
                 loss = mse_loss_fn(output.squeeze(), y)
             else:
-                output, kl_loss = model(x0, x1, compute_loss=False)
+                output, kl_loss, coeffs = model(x0, x1, compute_loss=False)
                 loss = mse_loss_fn(output.squeeze(), y)
 
             total_test_loss += loss.item()
@@ -209,4 +189,3 @@ def train_and_evaluate(config, split_type, num_epochs=10, batch_size=32):
 
     # Return the best validation loss and corresponding test loss
     return best_valid_loss, avg_test_loss
-

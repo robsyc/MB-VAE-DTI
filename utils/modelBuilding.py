@@ -34,17 +34,17 @@ class PlainEncoder(nn.Module):
     ):
         super(PlainEncoder, self).__init__()
         self.input2hidden = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
+            nn.LayerNorm(input_dim),
             nn.Linear(input_dim, hidden_dim),
             nn.SiLU(),
             nn.Dropout(dropout_prob),
         )
         self.hidden_layers = nn.ModuleList([
             nn.Sequential(
-                nn.Dropout(dropout_prob),
                 nn.LayerNorm(hidden_dim),
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.SiLU(),
+                nn.Dropout(dropout_prob),
             ) for _ in range(max(depth, 0))
         ])
         self.hidden2output = nn.Linear(hidden_dim, output_dim)
@@ -84,17 +84,17 @@ class VariationalEncoder(nn.Module):
     ):
         super(VariationalEncoder, self).__init__()
         self.input2hidden = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
+            nn.LayerNorm(input_dim),
             nn.Linear(input_dim, hidden_dim),
             nn.SiLU(),
             nn.Dropout(dropout_prob),
         )
         self.hidden_layers = nn.ModuleList([
             nn.Sequential(
-                nn.Dropout(dropout_prob),
                 nn.LayerNorm(hidden_dim),
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.SiLU(),
+                nn.Dropout(dropout_prob),
             ) for _ in range(max(depth, 0))
         ])
         self.hidden2output = nn.Linear(hidden_dim, 2 * output_dim) # mean and logvar
