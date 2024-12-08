@@ -20,7 +20,7 @@ grid_search_config = {
     'learning_rate': [0.0001, 0.0005, 0.001, 0.01],
     'batch_size': [16, 32, 64, 128],
     'depth': [0, 1, 2, 3],
-    'hidden_dim': [128, 256, 512, 1024],
+    'hidden_dim': [128, 256, 512],
     'latent_dim': [256, 512, 1024],
     'dropout_prob': [0.1, 0.3, 0.5],
     # 'kl_weight': [0.01, 0.1, 0.5],  # Only used for variational models
@@ -32,11 +32,11 @@ CONFIGS = {
         'inputs_1': ['1/Target_fp'],
         'model_type': 'plain',  # 'plain' or 'variational'
     },
-    'single_view_emb_plain': {
-        'inputs_0': ['0/Drug_emb_graph'],
-        'inputs_1': ['1/Target_emb_T5'],
-        'model_type': 'plain',
-    }
+    # 'single_view_emb_plain': {
+    #     'inputs_0': ['0/Drug_emb_graph'],
+    #     'inputs_1': ['1/Target_emb_T5'],
+    #     'model_type': 'plain',
+    # }
 }
 
 def perform_grid_search(configs, grid_search_config):
