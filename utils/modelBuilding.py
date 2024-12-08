@@ -271,7 +271,7 @@ class VariationalBranch(nn.Module):
             z_list.append(z)
 
         out, coeffs = self.aggregator(z_list) # B x latent_dim
-        return out, loss_kl, coeffs
+        return out, loss_kl / len(x_list), coeffs
 
 #######################################################################################################################################
 
@@ -407,5 +407,5 @@ class VariationalMultiBranch(nn.Module):
             out1, kl1, coeffs1 = self.branch1(x1, compute_loss=compute_loss)
             coeffs.append(coeffs1)
         
-        kl_loss = kl0 + kl1 if compute_loss else None
+        kl_loss = (kl0 + kl1)/2 if compute_loss else None
         return torch.sum(out0 * out1, dim=1), kl_loss, coeffs
