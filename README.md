@@ -1,4 +1,6 @@
-# Multi-branch Variational Auto-encoder for Drug-target Interaction Prediction
+# Multi-branch Variational Encoders for Drug-target Interaction Prediction
+
+
 
 ## Quick Start
 

@@ -45,7 +45,7 @@ class PlainEncoder(nn.Module):
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.SiLU(),
                 nn.Dropout(dropout_prob),
-            ) for _ in range(max(depth, 0))
+            ) for _ in range(depth)
         ])
         self.hidden2output = nn.Linear(hidden_dim, output_dim)
 
@@ -95,7 +95,7 @@ class VariationalEncoder(nn.Module):
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.SiLU(),
                 nn.Dropout(dropout_prob),
-            ) for _ in range(max(depth, 0))
+            ) for _ in range(depth)
         ])
         self.hidden2output = nn.Linear(hidden_dim, 2 * output_dim) # mean and logvar
 
