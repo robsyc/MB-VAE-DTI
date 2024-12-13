@@ -40,7 +40,6 @@ class CustomH5Dataset(Dataset):
 def train_and_evaluate(
         config, 
         split_type, 
-        num_epochs=30,
         learning_rate=0.001, 
         kl_weight=1,
         batch_size=32,
@@ -101,12 +100,16 @@ def train_and_evaluate(
     mse_loss_fn = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # Variables to track the best model
+    # Variables to track the best model & early stopping
+    epoch = 0
+    patience = 10
+    early_stopping_counter = 0
     best_valid_loss = float('inf')
-    best_model_state = None
+    best_model_state = copy.deepcopy(model.state_dict())
 
     # Training loop
-    for epoch in range(num_epochs):
+    while True:
+        epoch += 1
         model.train()
         total_train_loss = 0
         for x0, x1, y in train_loader:
@@ -154,12 +157,19 @@ def train_and_evaluate(
                 total_valid_loss += loss.item()
 
         avg_valid_loss = total_valid_loss / len(valid_loader)
-        print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}")
+        print(f"Epoch [{epoch}], Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}")
 
         # Save the best model
         if avg_valid_loss < best_valid_loss:
             best_valid_loss = avg_valid_loss
             best_model_state = copy.deepcopy(model.state_dict())
+            early_stopping_counter = 0
+        else:
+            early_stopping_counter += 1
+        
+        # Early stopping
+        if early_stopping_counter >= patience:
+            break
 
     # Load the best model
     model.load_state_dict(best_model_state)

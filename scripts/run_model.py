@@ -1,29 +1,34 @@
 import os
-import sys
 import torch
 import time
 import itertools
-
-# os.chdir('/home/robbec/thesis/MB-VAE-DTI/')
-# sys.path.append('/home/robbec/thesis/MB-VAE-DTI/')
-os.chdir('/home/robsyc/Desktop/thesis/MB-VAE-DTI/')
-sys.path.append('/home/robsyc/Desktop/thesis/MB-VAE-DTI/')
-print(os.listdir('.'))
-print(os.getcwd())
-
-print(torch.cuda.is_available())
-torch.cuda.empty_cache()
-
 from utils.modelTraining import train_and_evaluate
 
+# sys.stdout.write("test")
+# print("test", flush=True)
+print(os.getcwd())
+print(os.listdir('.'))
+
+print(f"The version of PyTorch is: {torch.__version__}")
+print("Cuda: ", torch.cuda.is_available())
+torch.cuda.empty_cache()
+
+print("Import successful")
+
 grid_search_config = {
-    'learning_rate': [0.0001, 0.0005, 0.001, 0.01],
-    'batch_size': [16, 32, 64, 128],
-    'depth': [0, 1, 2, 3],
-    'hidden_dim': [128, 256, 512],
-    'latent_dim': [256, 512, 1024],
-    'dropout_prob': [0.1, 0.3, 0.5],
+    # 'learning_rate': [0.0001, 0.0005, 0.001, 0.01], # split up learning rate & sys.arg meegeven van learning rate  
+    # 'batch_size': [16, 32, 64, 128],
+    # 'depth': [0, 1, 2, 3],
+    # 'hidden_dim': [128, 256, 512],
+    # 'latent_dim': [256, 512, 1024],
+    # 'dropout_prob': [0.1, 0.3, 0.5],
     # 'kl_weight': [0.01, 0.1, 0.5],  # Only used for variational models
+    'learning_rate': [0.0001], # split up learning rate & sys.arg meegeven van learning rate  
+    'batch_size': [64],
+    'depth': [3],
+    'hidden_dim': [512],
+    'latent_dim': [1024],
+    'dropout_prob': [0.3],
 }
 
 CONFIGS = {
@@ -55,6 +60,7 @@ def perform_grid_search(configs, grid_search_config):
             full_config.update(hyperparams)
             
             print(f"\nRunning Grid Search: {config_name}, Params: {hyperparams}")
+            t = time.time()
             
             try:
                 best_valid_loss, test_loss = train_and_evaluate(
@@ -71,16 +77,19 @@ def perform_grid_search(configs, grid_search_config):
                     'test_loss': test_loss
                 }
                 results.append(result)
+                print("Elapsed time: ", time.time() - t)
+                
                 
             except Exception as e:
                 print(f"Error in experiment {config_name}: {e}")
+            # break
     
     return results
 
 # Perform grid search
 grid_search_results = perform_grid_search(CONFIGS, grid_search_config)
 
-# Optional: Save results to CSV for further analysis
-import pandas as pd
-results_df = pd.DataFrame(grid_search_results)
-results_df.to_csv('grid_search_results_simple_non_var.csv', index=False)
+# Save results
+with open("grid_search_results.txt", "a", encoding="utf-8") as f:
+    for result in grid_search_results:
+        f.write(str(result) + "\n")
