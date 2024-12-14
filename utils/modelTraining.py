@@ -172,6 +172,7 @@ def train_and_evaluate(
             break
 
     # Load the best model
+    print(f"Best Validation Loss: {best_valid_loss:.4f}")
     model.load_state_dict(best_model_state)
 
     # Test the model
