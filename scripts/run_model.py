@@ -3,6 +3,7 @@ import torch
 import time
 import itertools
 import argparse
+import json
 from utils.modelTraining import train_and_evaluate
 
 # TODO add runtime & num_trainable_params to the results csv
@@ -21,8 +22,8 @@ grid_search_config = {
     'learning_rate': [0.0001, 0.0005, 0.001],
     'batch_size': [32, 64, 128],
     'depth': [1, 2, 3],
-    'hidden_dim': [256, 512],
-    'latent_dim': [512, 1024],
+    'hidden_dim': [128, 256, 512],
+    'latent_dim': [256, 512, 1024],
     'dropout_prob': [0.1, 0.3],
     'kl_weight': [0.001, 0.01, 0.1],  # Only used for variational models
 }
@@ -49,12 +50,12 @@ CONFIGS = {
         'model_type': 'variational',
     },
     'multi_view_plain': {
-        'inputs_0': ['0/Drug_fp', '0/Drug_emb_graph', '0/Drug_image', '0/Drug_text'],
+        'inputs_0': ['0/Drug_fp', '0/Drug_emb_graph', '0/Drug_emb_image', '0/Drug_emb_text'],
         'inputs_1': ['1/Target_fp', '1/Target_emb_T5', '1/Target_emb_DNA', '1/Target_emb_ESM'],
         'model_type': 'plain',
     },
     'multi_view_variational': {
-        'inputs_0': ['0/Drug_fp', '0/Drug_emb_graph', '0/Drug_image', '0/Drug_text'],
+        'inputs_0': ['0/Drug_fp', '0/Drug_emb_graph', '0/Drug_emb_image', '0/Drug_emb_text'],
         'inputs_1': ['1/Target_fp', '1/Target_emb_T5', '1/Target_emb_DNA', '1/Target_emb_ESM'],
         'model_type': 'variational',
     },
@@ -71,6 +72,7 @@ def generate_experiments(configs, grid_search_config):
         
         keys, values = zip(*hyperparams_dict.items())
         grid_combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
+        print(f"Config: {config_name}, Grid combinations: {len(grid_combinations)}", flush=True)
         
         for hyperparams in grid_combinations:
             full_config = base_config.copy()
@@ -86,33 +88,56 @@ def perform_grid_search(batch_experiments):
         t = time.time()
         
         try:
-            best_valid_loss, test_loss = train_and_evaluate(
+            best_valid_loss, avg_test_loss, num_trainable_params, predictions = train_and_evaluate(
                 config=full_config,
                 split_type="split_cold",
                 **hyperparams
             )
-            
+            elapsed_time = time.time() - t
+            experiment_id = f"{config_name}_{hash(frozenset(hyperparams.items()))}"
             result = {
-                'experiment': config_name,
+                'experiment': experiment_id,
                 **hyperparams,
                 'best_valid_loss': best_valid_loss,
-                'test_loss': test_loss
+                'test_loss': avg_test_loss,
+                'num_trainable_params': num_trainable_params,
+                'runtime': elapsed_time
             }
-
-            # Save results
-            results_file = "grid_search_results_split_cold.csv"
-            if not os.path.exists(results_file):
-                with open(results_file, "w", encoding="utf-8") as f:
-                    headers = ["experiment", "learning_rate", "batch_size", "depth", "hidden_dim", "latent_dim", "dropout_prob", "kl_weight", "best_valid_loss", "test_loss"]
-                    f.write(",".join(headers) + "\n")
-
-            with open(results_file, "a", encoding="utf-8") as f:
-                row = [str(result.get(key, '')) for key in headers]
-                f.write(",".join(row) + "\n")
-            print("Elapsed time: ", time.time() - t, flush=True)
             
+            # Save predictions to a separate file
+            predictions_file = f"./predictions/{experiment_id}.csv"
+            os.makedirs(os.path.dirname(predictions_file), exist_ok=True)
+            with open(predictions_file, "w", encoding="utf-8") as f:
+                for pred in predictions:
+                    f.write(f"{pred[0]},{pred[1]}\n")
+            
+            # Save result to a separate file
+            results_file = f"./results/{experiment_id}.json"
+            os.makedirs(os.path.dirname(results_file), exist_ok=True)
+            with open(results_file, "w", encoding="utf-8") as f:
+                json.dump(result, f)
+    
         except Exception as e:
             print(f"Error in experiment {config_name}: {e}" , flush=True)
+            # Handle exceptions and save error information
+            elapsed_time = time.time() - t
+            experiment_id = f"{config_name}_{hash(frozenset(hyperparams.items()))}"
+            result = {
+                'experiment': experiment_id,
+                **hyperparams,
+                'best_valid_loss': None,
+                'test_loss': None,
+                'num_trainable_params': None,
+                'runtime': elapsed_time,
+                'error': str(e)
+            }
+            # Save the error result to a file
+            results_file = f"./results/{experiment_id}.json"
+            os.makedirs(os.path.dirname(results_file), exist_ok=True)
+            with open(results_file, "w", encoding="utf-8") as f:
+                json.dump(result, f)
+
+        print(f"Elapsed time: {elapsed_time:.2f} seconds", flush=True)
 
 # Generate all experiments
 experiments = generate_experiments(CONFIGS, grid_search_config)

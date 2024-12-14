@@ -15,4 +15,4 @@ module load PyTorch/2.1.2-foss-2023a-CUDA-12.1.1  # Load the PyTorch module
 cd /data/gent/454/vsc45450/thesis/MB-VAE-DTI
 
 # Run the script from 0 to 15
-python3 ./run.py --batch_index 2 --total_batches 16
+python3 ./scripts/run_model.py --batch_index 2 --total_batches 12

@@ -31,7 +31,6 @@ os.makedirs(DATASET_PATH, exist_ok=True)
 def load_df(
         name: Literal["BindingDB_Kd", "DAVIS", "KIBA"],
         use_filters: bool = True,
-        to_log: bool = True, 
         seed = 42,
     ) -> pd.DataFrame:
     """
@@ -44,17 +43,17 @@ def load_df(
         seed: Seed for the random split
     """
     print(f"Loading {name} dataset...")
-    davis = DTI(name = name)
-    if to_log:
-        davis.convert_to_log(form = 'binding')
+    data = DTI(name = name)
+    if name == "DAVIS" or name == "BindingDB_Kd":
+        data.convert_to_log(form = 'binding')
     
     # Get random (setting A at 7:2:1) and cold split (setting B at 7.5:1.5:1)
-    split = davis.get_split(method = 'random', seed = seed)
+    split = data.get_split(method = 'random', seed = seed)
     train, valid, test = split['train'], split['valid'], split['test']
     df_rand = pd.concat([train, valid, test], axis=0)
     df_rand['split_rand'] = ["train"] * len(train) + ["valid"] * len(valid) + ["test"] * len(test)
 
-    split = davis.get_split('cold_split', column_name='Drug')
+    split = data.get_split('cold_split', column_name='Drug')
     train, valid, test = split['train'], split['valid'], split['test']
     df_cold = pd.concat([train, valid, test], axis=0)
     df_cold['split_cold'] = ["train"] * len(train) + ["valid"] * len(valid) + ["test"] * len(test)
@@ -74,6 +73,10 @@ def load_df(
     df['HeavyAtoms'] = df['Drug'].map(unique_HeavyAtoms)
     df['TargetLength'] = df['Target'].map(unique_TagetLength)
     df['standardized'] = (df['Y'] - df['Y'].min()) / (df['Y'].max() - df['Y'].min())
+    if name == "DAVIS" or name == "BindingDB_Kd":
+        df['Y_binary'] = (df['Y'] >= 7).astype(int)
+    elif name == "KIBA":
+        df['Y_binary'] = (df['Y'] >= 12.1).astype(int)
 
     if use_filters:
         df = df[df['HeavyAtoms'] <= MAX_N_HEAVY_ATOMS]
@@ -82,6 +85,22 @@ def load_df(
         df = df[df['TargetLength'] <= MAX_SEQ_LEN]
     
     return df
+
+def plot_Y_distribution(df: pd.DataFrame, threshold: float, title: str) -> None:
+    """
+    Plots the Y value distribution with a vertical line at the threshold.
+    Caps extreme counts to improve visualization.
+    """
+    plt.figure(figsize=(8, 6))
+    sns.histplot(df['Y'], bins=12)
+    plt.axvline(x=threshold, color='red', linestyle='--', label=f'Threshold = {threshold}')
+    plt.title(title)
+    plt.xlabel('Y')
+    plt.ylabel('Count')
+    plt.yscale('log')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
 def explore_df(
         df: pd.DataFrame, 
@@ -94,115 +113,55 @@ def explore_df(
         df: Dataframe containing the DTI data
         name: Name of the dataset (BindingDB_Kd, DAVIS, KIBA)
     """
-    if name == "DAVIS":
+    if name == "DAVIS" or name == "BindingDB_Kd":
         y_lim = [0, 100, 8000, 10000]
         binding_threshold = 7
         xlabels = ['Binding Affinity (pKd)', 'Standardized Binding Affinity (pKd)']
     elif name == "KIBA":
         y_lim = [0, 5000, 11000, 11500]
-        binding_threshold = None
+        binding_threshold = 12.1
         xlabels = ['Binding Affinity (KIBA score)', 'Standardized Binding Affinity (KIBA score)']
-    else:
-        # TODO check for BindingDB_Kd
-        y_lim = [0, 100, 8000, 8400]
-        binding_threshold = None
-        xlabels = ['Binding Affinity (???)', 'Standardized Binding Affinity (???)']
 
     print(f"Exploring {name} dataset...")
     # Drug properties
-    # Count the number of times each drug has Y (pKd) > 7
-    if name == "DAVIS":
-        counts = df[df['Y'] > 7].groupby('Drug').size()
-        counts = counts.reindex(df['Drug'].unique(), fill_value=0)
-        counts = counts.sort_values(ascending=False)
-    else:
-        counts = None
+    fig, axes = plt.subplots(1, 3, figsize=(16, 7))
+    sns.histplot(df['MW'], ax=axes[0])
+    axes[0].set_title('Molecular Weight Distribution')
+    axes[0].set_xlabel('MW')
 
-    fig, axes = plt.subplots(2, 2, figsize=(15, 8))
-    sns.histplot(df['MW'], ax=axes[0][0])
-    axes[0][0].set_title('Molecular Weight Distribution of Drug molecules')
-    axes[0][0].set_xlabel('MW')
-    sns.histplot(df['LogP'], ax=axes[0][1])
-    axes[0][1].set_title('LogP Distribution of Drug molecules')
-    axes[0][1].set_xlabel('LogP')
-    sns.histplot(df['HeavyAtoms'], ax=axes[1][0])
-    axes[1][0].set_title('Heavy Atom Count Distribution')
-    axes[1][0].set_xlabel('# Heavy Atoms')
-    sns.histplot(counts, ax=axes[1][1])
-    axes[1][1].set_title('Number of times each drug has Y > 7')
-    axes[1][1].set_xlabel('Count')
+    sns.histplot(df['LogP'], ax=axes[1])
+    axes[1].set_title('LogP Distribution')
+    axes[1].set_xlabel('LogP')
+
+    sns.histplot(df['HeavyAtoms'], ax=axes[2])
+    axes[2].set_title('Heavy Atom Count Distribution')
+    axes[2].set_xlabel('Number of Heavy Atoms')
+
     plt.tight_layout()
-    plt.savefig(IMG_PATH + name + "_drug_properties.png")
     plt.show()
 
     # Target properties
-    # Compute pairwise distance between amino acid composition
-    unique_sequences = df['Target'].unique()
-    sequence_ids = ['Target_' + str(i) for i in range(len(unique_sequences))]
-    amino_acids = list('ACDEFGHIKLMNPQRSTVWY')
-    compositions = []
-    for seq in unique_sequences:
-        counts = Counter(seq)
-        comp = [counts.get(aa, 0) / len(seq) for aa in amino_acids]
-        compositions.append(comp)
-    comp_array = np.array(compositions)
-    distances = pdist(comp_array, metric='euclidean')
-    distance_matrix = squareform(distances)
-    dm = pd.DataFrame(distance_matrix, index=sequence_ids, columns=sequence_ids)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    sns.histplot(df['TargetLength'], ax=ax)
+    ax.set_title('Target Length Distribution')
+    ax.set_xlabel('Target Length')
 
-    fig, axes = plt.subplots(1, 2, figsize=(15, 4))
-    sns.histplot(df['TargetLength'], ax=axes[0])
-    axes[0].set_title('Target Sequence Length Distribution')
-    axes[0].set_xlabel('Length')
-    sns.heatmap(dm, ax=axes[1], cmap='viridis')
-    axes[1].set_title('Pairwise Amino Acid Composition Distance Heatmap')
-    axes[1].set_xticks([])
-    axes[1].set_yticks([])
     plt.tight_layout()
-    plt.savefig(IMG_PATH + name + "_target_properties.png")
     plt.show()
 
     # Interaction properties
-    data_list = ['Y', 'standardized']
-    titles = ['Binding Affinity Distribution', 'Standardized Binding Affinity Distribution']
-
-    fig, axes = plt.subplots(
-        2, 2, figsize=(15, 8), sharex='col', gridspec_kw={'height_ratios': [0.3, 1]}
-    )
-    fig.subplots_adjust(hspace=0.1)
-
-    for i, (data_col, title, xlabel) in enumerate(zip(data_list, titles, xlabels)):
-        # Plot the data on both upper and lower axes
-        sns.histplot(df[data_col], ax=axes[0, i])
-        sns.histplot(df[data_col], ax=axes[1, i])
-        
-        axes[0, i].set_title(title)
-        axes[0, i].set_ylabel('')
-        axes[1, i].set_xlabel(xlabel)
-        
-        # Set y-limits for upper and lower plots (adjust as needed)
-        axes[0, i].set_ylim(y_lim[2], y_lim[3])
-        axes[1, i].set_ylim(y_lim[0], y_lim[1])
-        
-        # Hide spines between axes
-        axes[0, i].spines['bottom'].set_visible(False)
-        axes[1, i].spines['top'].set_visible(False)
-        axes[0, i].tick_params(labelbottom=False, bottom=False)
-        axes[1, i].xaxis.tick_bottom()
-        
-        # Add slanted lines to indicate broken axes
-        d = .015  # Size of diagonal lines in axes coordinates
-        kwargs = dict(marker=[(-1, -d), (1, d)], markersize=12,
-                    linestyle="none", color='k', mec='k', mew=1, clip_on=False)
-        axes[0, i].plot([0, 1], [0, 0], transform=axes[0, i].transAxes, **kwargs)
-        axes[1, i].plot([0, 1], [1, 1], transform=axes[1, i].transAxes, **kwargs)
-
-        if i == 0 and binding_threshold is not None:
-            axes[0, i].axvline(binding_threshold, color='r', linestyle='--')
-            axes[1, i].axvline(binding_threshold, color='r', linestyle='--')
-
+    if name in ["DAVIS", "BindingDB_Kd"]:
+        threshold = 7
+    elif name == "KIBA":
+        threshold = 12.1
+    else:
+        threshold = df['Y'].median()
+    plot_Y_distribution(df, threshold, f'{name} Y Value Distribution')
+    plt.figure(figsize=(6, 5))
+    sns.countplot(x='Y_binary', data=df)
+    plt.title('Binary Interaction Distribution')
+    plt.xlabel('Y_binary')
     plt.tight_layout()
-    plt.savefig(IMG_PATH + name + "_interaction_properties.png")
     plt.show()
 
 hand_corrected_IDs = {

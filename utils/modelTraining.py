@@ -36,6 +36,9 @@ class CustomH5Dataset(Dataset):
         y = batch['central']
         return x0, x1, y
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 # Training and evaluation function
 def train_and_evaluate(
         config, 
@@ -174,10 +177,12 @@ def train_and_evaluate(
     # Load the best model
     print(f"Best Validation Loss: {best_valid_loss:.4f}")
     model.load_state_dict(best_model_state)
+    num_trainable_params = count_parameters(model)
 
     # Test the model
     model.eval()
     total_test_loss = 0
+    predictions = []
     with torch.no_grad():
         for x0, x1, y in test_loader:
             # Move data to device
@@ -192,11 +197,12 @@ def train_and_evaluate(
             else:
                 output, kl_loss, coeffs = model(x0, x1, compute_loss=False)
                 loss = mse_loss_fn(output.squeeze(), y)
-
+            
+            predictions.append((output.squeeze().cpu().numpy(), y.cpu().numpy()))
             total_test_loss += loss.item()
 
     avg_test_loss = total_test_loss / len(test_loader)
     print(f"Test Loss: {avg_test_loss:.4f}")
 
     # Return the best validation loss and corresponding test loss
-    return best_valid_loss, avg_test_loss
+    return best_valid_loss, avg_test_loss, num_trainable_params, predictions
