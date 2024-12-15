@@ -28,7 +28,6 @@ class EncoderBlock(nn.Module):
             depth: int,
             dropout_prob: float = 0.1,
             variational: bool = False,
-            **kwargs
     ):
         super(EncoderBlock, self).__init__()
         self.variational = variational
@@ -107,7 +106,6 @@ class MultiViewBlock(nn.Module):
             depth: int = 0,
             dropout_prob: float = 0.1,
             variational: bool = False,
-            **kwargs
             ):
         super(MultiViewBlock, self).__init__()
         self.variational = variational
@@ -165,6 +163,49 @@ class MultiViewBlock(nn.Module):
         return z, kl_loss
 
 
+class Generator(nn.Module):
+    """
+    Generator model for graph generation.
+
+    Args:
+        - latent_dim: int, the dimensionality of the input tensor
+        - hidden_dim: int, the dimensionality of the hidden layer(s)
+        - depth: int, the number of hidden layers & complexity of the model (residual connections)
+        - n_nodes: int, the number of nodes in the graph
+    """
+    def __init__(self, latent_dim, hidden_dim, depth, n_nodes):
+        super(Generator, self).__init__()
+        self.depth = depth
+        self.n_nodes = n_nodes
+
+        self.block = EncoderBlock(
+            input_dim=latent_dim,
+            hidden_dim=hidden_dim,
+            output_dim=hidden_dim,
+            depth=depth,
+            dropout_prob=0.1
+        )
+        self.to_adj = nn.Linear(hidden_dim, 2*n_nodes*(n_nodes-1)//2)
+        # TODO node and edge features
+
+    def forward(self, x):
+        """
+        Args:
+            - x: torch.Tensor, the input tensor of shape (batch_size, latent_dim)
+        Returns:
+            - adj: torch.Tensor, the output tensor of shape (batch_size, n_nodes, n_nodes)
+        """
+        x = self.block(x)
+
+        x = self.to_adj(x)
+        x = torch.reshape(x, (x.size(0), -1, 2))                                    # 2 halves of symmetric adjacency matrix
+        x = F.gumbel_softmax(x, tau=1, hard=True)[:,:,0]                            # mash both halves together & sample 
+        adj = torch.zeros(x.size(0), self.n_nodes, self.n_nodes, device=x.device)   # initialize adjacency matrix
+        idx = torch.triu_indices(self.n_nodes, self.n_nodes, 1)                     # get upper triangular indices
+        adj[:,idx[0],idx[1]] = x                                                    # fill in upper triangular part
+        adj = adj + torch.transpose(adj, 1, 2)                                      # make symmetric
+        return adj
+
 class MultiBranchDTI(nn.Module):
     """
     Multi-branch model for drug-target interaction-prediction.
@@ -187,7 +228,6 @@ class MultiBranchDTI(nn.Module):
             depth: int = 0,
             dropout_prob: float = 0.1,
             variational: bool = False,
-            **kwargs
             ):
         super(MultiBranchDTI, self).__init__()
         self.variational = variational
