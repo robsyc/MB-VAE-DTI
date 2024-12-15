@@ -1,4 +1,5 @@
 import os
+import random
 import torch
 import time
 import itertools
@@ -6,8 +7,7 @@ import argparse
 import json
 from utils.modelTraining import train_and_evaluate
 
-# TODO add runtime & num_trainable_params to the results csv
-# TODO Generative model using Flow Matching
+# TODO Generative model using Flow Matching?!
 print(f"The version of PyTorch is: {torch.__version__}", flush=True)
 print("Cuda: ", torch.cuda.is_available(), flush=True)
 
@@ -17,67 +17,118 @@ parser.add_argument('--batch_index', type=int, default=0, help='Index of the bat
 parser.add_argument('--total_batches', type=int, default=1, help='Total number of batches')
 args = parser.parse_args()
 
-# Grid search configuration
-grid_search_config = {
-    'learning_rate': [0.0001, 0.0005, 0.001],
-    'batch_size': [32, 64, 128],
-    'depth': [1, 2, 3],
-    'hidden_dim': [128, 256, 512],
-    'latent_dim': [256, 512, 1024],
-    'dropout_prob': [0.1, 0.3],
-    'kl_weight': [0.0001, 0.005, 0.01],  # Only used for variational models
-}
+# Grid search configuration (first big general search)
+# grid_search_config = {
+#     'learning_rate': [0.0001, 0.0005, 0.001],
+#     'batch_size': [32, 64, 128],
+#     'depth': [1, 2, 3],
+#     'hidden_dim': [128, 256, 512],
+#     'latent_dim': [256, 512, 1024],
+#     'dropout_prob': [0.1, 0.3],
+#     'kl_weight': [0.001, 0.01, 0.1],  # Only used for variational models
+# } # 486 or 1458
 
 CONFIGS = {
     'single_view_fp_plain': {
         'inputs_0': ['0/Drug_fp'],
         'inputs_1': ['1/Target_fp'],
         'model_type': 'plain',
+        'hyperparamter_grid': {
+            'learning_rate': [0.0001, 0.0005, 0.001],
+            'batch_size': [32, 64, 128],
+            'depth': [1, 2, 3, 4],
+            'hidden_dim': [64, 128, 256, 512],
+            'latent_dim': [128, 256, 512, 1024],
+            'dropout_prob': [0.2],
+        } # 576 combinations, ~110 secs each = 18 hours
     },
     'single_view_emb_plain': {
         'inputs_0': ['0/Drug_emb_graph'],
         'inputs_1': ['1/Target_emb_T5'],
         'model_type': 'plain',
+        'hyperparamter_grid': {
+            'learning_rate': [0.0001, 0.0005, 0.001],
+            'batch_size': [32, 64, 128],
+            'depth': [2, 3, 4],
+            'hidden_dim': [64, 128, 256],
+            'latent_dim': [256, 512, 1024],
+            'dropout_prob': [0.2, 0.4],
+        } # 486 combinations, ~90 secs each = 13 hours
     },
     'single_view_fp_variational': {
         'inputs_0': ['0/Drug_fp'],
         'inputs_1': ['1/Target_fp'],
         'model_type': 'variational',
+        'hyperparamter_grid': {
+            'learning_rate': [0.00005, 0.0001, 0.0005],
+            'batch_size': [16, 32, 64, 128],
+            'depth': [1, 2, 3],
+            'hidden_dim': [64, 128, 256, 512],
+            'latent_dim': [128, 256, 512],
+            'dropout_prob': [0.2],
+            'kl_weight': [0.0001, 0.001, 0.01],
+        } # 1296 combinations, ~200 secs each = 72 hours
     },
     'single_view_emb_variational': {
         'inputs_0': ['0/Drug_emb_graph'],
         'inputs_1': ['1/Target_emb_T5'],
         'model_type': 'variational',
+        'hyperparamter_grid': {
+            'learning_rate': [0.00005, 0.0001, 0.0005],
+            'batch_size': [16, 32, 64, 128],
+            'depth': [0, 1, 2, 3],
+            'hidden_dim': [64, 128, 256],
+            'latent_dim': [128, 256, 512],
+            'dropout_prob': [0.2],
+            "kl_weight": [0.0001, 0.001, 0.01],
+        } # 1296 combinations, ~170 secs each = 62 hours
     },
     'multi_view_plain': {
         'inputs_0': ['0/Drug_fp', '0/Drug_emb_graph', '0/Drug_emb_image', '0/Drug_emb_text'],
         'inputs_1': ['1/Target_fp', '1/Target_emb_T5', '1/Target_emb_DNA', '1/Target_emb_ESM'],
         'model_type': 'plain',
+        'hyperparamter_grid': {
+            'learning_rate': [0.0001, 0.0005, 0.001],
+            'batch_size': [64, 128, 256],
+            'depth': [1, 2, 3],
+            'hidden_dim': [64, 128, 256],
+            'latent_dim': [256, 512, 1024],
+            'dropout_prob': [0.2],
+        } # 243 combinations, ~160 secs each = 11 hours
     },
     'multi_view_variational': {
         'inputs_0': ['0/Drug_fp', '0/Drug_emb_graph', '0/Drug_emb_image', '0/Drug_emb_text'],
         'inputs_1': ['1/Target_fp', '1/Target_emb_T5', '1/Target_emb_DNA', '1/Target_emb_ESM'],
         'model_type': 'variational',
-    },
+        'hyperparamter_grid': {
+            'learning_rate': [0.00005, 0.0001, 0.0005],
+            'batch_size': [16, 32, 64, 128],
+            'depth': [1, 2, 3],
+            'hidden_dim': [64, 128, 256],
+            'latent_dim': [128, 256, 512],
+            'dropout_prob': [0.2],
+            "kl_weight": [0.0001, 0.001, 0.01],
+        } # 972 combinations, ~330 secs each = 90 hours
+    }, # total 4869 combinations, 266 hours (~11 days)
 }
 
-def generate_experiments(configs, grid_search_config):
+def generate_experiments(configs) -> list:
     experiments = []
-    for config_name, base_config in configs.items():
-        model_type = base_config['model_type']
-        if model_type == 'plain':
-            hyperparams_dict = {k: v for k, v in grid_search_config.items() if k != 'kl_weight'}
-        else:
-            hyperparams_dict = grid_search_config
+    for config_name, config in configs.items():
+        hyperparams_dict = config['hyperparamter_grid']
         
         keys, values = zip(*hyperparams_dict.items())
         grid_combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
         print(f"Config: {config_name}, Grid combinations: {len(grid_combinations)}", flush=True)
         
         for hyperparams in grid_combinations:
-            full_config = base_config.copy()
+            full_config = config.copy()
             full_config.update(hyperparams)
             experiments.append((config_name, full_config, hyperparams))
+    
+    # shuffle experiments to distribute the load in a reproducible way
+    random.seed(42)
+    random.shuffle(experiments)
     return experiments
 
 def perform_grid_search(batch_experiments):
@@ -140,8 +191,8 @@ def perform_grid_search(batch_experiments):
         print(f"Elapsed time: {elapsed_time:.2f} seconds", flush=True)
 
 # Generate all experiments
-experiments = generate_experiments(CONFIGS, grid_search_config)
-total_experiments = len(experiments) # +-5k
+experiments = generate_experiments(CONFIGS)
+total_experiments = len(experiments) # +- 5k
 print(f"Total experiments: {total_experiments}", flush=True)
 
 # Split experiments into batches

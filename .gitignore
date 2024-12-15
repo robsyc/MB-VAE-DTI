@@ -1,4 +1,5 @@
 data/
+notebooks/results/
 
 # ignore model checkpoints
 *.pth

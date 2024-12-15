@@ -4,10 +4,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 import h5torch
 import copy
-from utils.modelBuilding import (
-    PlainMultiBranch,
-    VariationalMultiBranch
-)
+from utils.modelBuilding import MultiBranchDTI
+
 
 def get_dataset(split_type, split_name):
     return h5torch.Dataset(
@@ -49,7 +47,8 @@ def train_and_evaluate(
         hidden_dim,
         latent_dim,
         depth,
-        dropout_prob=0.1
+        dropout_prob=0.1,
+        output_setting="regression" # TDOO add support for classification
     ):
     # Prepare datasets
     train_dataset = get_dataset(split_type, 'train')
@@ -80,24 +79,15 @@ def train_and_evaluate(
 
     # Define the model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if config['model_type'] == 'plain':
-        model = PlainMultiBranch(
-            input_dim_list_0=input_dim_list_0,
-            input_dim_list_1=input_dim_list_1,
-            hidden_dim=hidden_dim,
-            latent_dim=latent_dim,
-            depth=depth,
-            dropout_prob=dropout_prob
-        ).to(device)
-    else:
-        model = VariationalMultiBranch(
-            input_dim_list_0=input_dim_list_0,
-            input_dim_list_1=input_dim_list_1,
-            hidden_dim=hidden_dim,
-            latent_dim=latent_dim,
-            depth=depth,
-            dropout_prob=dropout_prob
-        ).to(device)
+    model = MultiBranchDTI(
+        input_dim_list_0=input_dim_list_0,
+        input_dim_list_1=input_dim_list_1,
+        hidden_dim=hidden_dim,
+        latent_dim=latent_dim,
+        depth=depth,
+        dropout_prob=dropout_prob,
+        variational=True if config['model_type'] == 'variational' else False
+    ).to(device)
 
     # Loss function and optimizer
     mse_loss_fn = nn.MSELoss()
@@ -123,10 +113,10 @@ def train_and_evaluate(
 
             # Forward pass
             if config['model_type'] == 'plain':
-                output, attn_values = model(x0, x1)
+                output = model(x0, x1)
                 loss = mse_loss_fn(output.squeeze(), y)
             else:
-                output, attn_values, kl_loss = model(x0, x1, compute_kl_loss=True)
+                output, kl_loss = model(x0, x1, compute_kl_loss=True)
                 mse_loss = mse_loss_fn(output.squeeze(), y)
                 loss = mse_loss + kl_weight * kl_loss
 
@@ -149,13 +139,9 @@ def train_and_evaluate(
                 x1 = [x.to(device).float() for x in x1]
                 y = y.to(device).float()
 
-                # Forward pass
-                if config['model_type'] == 'plain':
-                    output, attn_values = model(x0, x1)
-                    loss = mse_loss_fn(output.squeeze(), y)
-                else:
-                    output, attn_values, kl_loss = model(x0, x1, compute_kl_loss=False)
-                    loss = mse_loss_fn(output.squeeze(), y)
+                # Forward pass (no kl_loss computation)
+                output = model(x0, x1)
+                loss = mse_loss_fn(output.squeeze(), y)
 
                 total_valid_loss += loss.item()
 
@@ -190,14 +176,9 @@ def train_and_evaluate(
             x1 = [x.to(device).float() for x in x1]
             y = y.to(device).float()
 
-            # Forward pass
-            if config['model_type'] == 'plain':
-                output, attn_values = model(x0, x1)
-                loss = mse_loss_fn(output.squeeze(), y)
-            else:
-                output, attn_values, kl_loss = model(x0, x1, compute_loss=False)
-                loss = mse_loss_fn(output.squeeze(), y)
-            
+            # Forward pass (no kl_loss computation)
+            output = model(x0, x1)
+            loss = mse_loss_fn(output.squeeze(), y)            
             predictions.append((output.squeeze().cpu().numpy(), y.cpu().numpy()))
             total_test_loss += loss.item()
 
