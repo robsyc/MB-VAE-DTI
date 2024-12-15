@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from dataclasses import dataclass
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # device = torch.device("cpu")
@@ -10,11 +11,9 @@ def get_model_params(model):
 
 #######################################################################################################################################
 
-# BLOCKS
-
-class PlainEncoder(nn.Module):
+class Encoder(nn.Module):
     """
-    Plain encoder with residual connections, LayerNorm, SiLU activation, and dropout.
+    Encoder with residual connections, LayerNorm, SiLU activation, and dropout.
 
     Args:
         - input_dim: int, the dimension of the input tensor
@@ -28,25 +27,24 @@ class PlainEncoder(nn.Module):
             input_dim: int,
             hidden_dim: int,
             output_dim: int,
-            depth: int = 1,
+            depth: int,
             dropout_prob: float = 0.1,
             **kwargs
     ):
-        super(PlainEncoder, self).__init__()
+        super(Encoder, self).__init__()
         self.input2hidden = nn.Sequential(
-            nn.LayerNorm(input_dim),
             nn.Linear(input_dim, hidden_dim),
             nn.SiLU(),
             nn.Dropout(dropout_prob),
         )
         self.hidden_layers = nn.ModuleList([
             nn.Sequential(
-                nn.LayerNorm(hidden_dim),
-                nn.Linear(hidden_dim, hidden_dim),
+                nn.Linear(hidden_dim, hidden_dim, bias=False),
                 nn.SiLU(),
                 nn.Dropout(dropout_prob),
             ) for _ in range(depth)
         ])
+        self.layer_norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(depth)])
         self.hidden2output = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, x):
@@ -57,221 +55,127 @@ class PlainEncoder(nn.Module):
             - torch.Tensor, the output tensor of shape (batch_size, output_dim)
         """
         x = self.input2hidden(x)
-        for layer in self.hidden_layers:
-            x = x + layer(x)
+        for i, layer in enumerate(self.hidden_layers):
+            x = self.layer_norms[i](x + layer(x))
         return self.hidden2output(x)
 
-class VariationalEncoder(nn.Module):
+class Branch(nn.Module):
     """
-    Variational encoder with residual connections, LayerNorm, SiLU activation, and dropout.
-    Final layer projects to 2 x output_dim (mean and logvar) and applies reparameterization. 
+    Multi-view encoding branch.
 
     Args:
-        - input_dim: int, the dimension of the input tensor
+        - input_dim_list: list, the dimensions of the input tensors (num_modalities)
         - hidden_dim: int, the dimension of the hidden layer(s)
-        - output_dim: int, the dimension of the output tensor
-        - depth: int, the number of hidden residual layers
+        - latent_dim: int, the dimension of the branch's output tensor
+        - depth: int, the number of hidden layers
         - dropout_prob: float, the dropout probability (default: 0.1)
     """
     def __init__(
             self,
-            input_dim: int,
+            input_dim_list: list,
             hidden_dim: int,
-            output_dim: int,
+            latent_dim: int,
             depth: int = 0,
-            dropout_prob: float = 0.1,
-            **kwargs
-    ):
-        super(VariationalEncoder, self).__init__()
-        self.input2hidden = nn.Sequential(
-            nn.LayerNorm(input_dim),
-            nn.Linear(input_dim, hidden_dim),
-            nn.SiLU(),
-            nn.Dropout(dropout_prob),
-        )
-        self.hidden_layers = nn.ModuleList([
-            nn.Sequential(
-                nn.LayerNorm(hidden_dim),
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.SiLU(),
-                nn.Dropout(dropout_prob),
-            ) for _ in range(depth)
-        ])
-        self.hidden2output = nn.Linear(hidden_dim, 2 * output_dim) # mean and logvar
-
-    def encode(self, x):
-        """
-        Encodes the input data into the latent space.
+            dropout_prob: float = 0.1
+            ):
+        super(Branch, self).__init__()
+        self.encoders = nn.ModuleList([
+                Encoder(
+                    input_dim=size,
+                    hidden_dim=hidden_dim,
+                    output_dim=latent_dim,
+                    depth=depth,
+                    dropout_prob=dropout_prob)
+                for size in input_dim_list])
         
-        Args:
-            x (torch.Tensor): Input data.
+        self.to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
         
-        Returns:
-            mean, logvar (torch.Tensor): Mean and logvar of the encoded data of shape (batch_size, output_dim).
-        """
-        x = self.input2hidden(x)
-        for layer in self.hidden_layers:
-            x = x + layer(x)
-        return self.hidden2output(x).chunk(2, dim=-1)
-
-    def reparameterize(self, mean, logvar):
-        """
-        Args:
-            - mean: torch.Tensor, the mean tensor of shape (batch_size, output_dim)
-            - logvar: torch.Tensor, the log-variance tensor of shape (batch_size, output_dim)
-        Returns:
-            - z: torch.Tensor, the output tensor of shape (batch_size, output_dim) after reparameterization
-        """
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mean + eps * std
-
-    def forward(self, x, compute_loss=True):
-        """
-        Args:
-            - x: torch.Tensor, the input tensor of shape (batch_size, input_dim)
-        Returns:
-            - z: torch.Tensor, the output tensor of shape (batch_size, output_dim) after reparameterization
-            - loss_kl: the KL divergence loss
-        """
-        mean, logvar = self.encode(x)
-        z = self.reparameterize(mean, logvar)
-        if not compute_loss:
-            return z, None
-        loss_kl = ( -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp()) ) / mean.size(1)
-        return z, loss_kl
-
-class AttentiveAggregator(nn.Module):
-    """
-    Attention-based embedding aggregator. Embeddings are first projected to same space, multiplied by a learned attention ~ 'view' and summed.
-
-    Args:
-        - input_dim_list: list[int], the dimensions of the input vectors
-        - output_dim: int, size of the aggregated output dimension (default: min(input_dim_list))
-    """
-    def __init__(
-        self,
-        input_dim_list: list,
-        output_dim: int = None,
-        ):
-        super().__init__()
-        if output_dim is None:
-            output_dim = min(input_dim_list)
-        self.project_to_samespace = nn.ModuleList([
-            nn.Linear(input_dim, output_dim)
-            for input_dim in input_dim_list
-        ])
-        self.to_attn_logits = nn.Conv1d(output_dim, 1, 1)
-
     def forward(self, x_list):
-        x_proj = []
-        for x, layer in zip(x_list, self.project_to_samespace):
-            x_proj.append(layer(x))
-        x_proj = torch.stack(x_proj, -1)            # B, output_dim, len(x_list)
-        attn_logits = self.to_attn_logits(x_proj)   # B, 1, len(x_list)
-        attn_values = attn_logits.softmax(dim = -1) # B, 1, len(x_list)
+        """
+        Args:
+            - x_list: The list of input tensors of shape (batch_size, input_dim) in num_modalities
+        Returns:
+            - z: torch.Tensor, the output tensor of shape (batch_size, latent_dim)
+            - attn_values: torch.Tensor, the attention coefficients of shape (batch_size, len(x_list))
+        """
+        x = torch.stack(
+            [self.encoders[i](x) for i, x in enumerate(x_list)], 
+            dim=-1)                                 # B x latent_dim x num_modalities
+        attn_logits = self.to_attn_logits(x)        # B x 1 x num_modalities
+        attn_values = attn_logits.softmax(dim=-1)   # B x 1 x num_modalities (sums to 1)
         return (
-            (x_proj * attn_values).sum(-1),         # B, output_dim
-            attn_values.squeeze(1)                  # B, len(x_list)
-        )
+            (x * attn_values).sum(-1),              # B x latent_dim
+            attn_values.squeeze(1)                  # B x num_modalities
+         ) # out, attn_values over batch
 
-#######################################################################################################################################
 
-# BRANCHES
+# class VariationalBranch(nn.Module):
+#     """
+#     Variational multi-view encoding branch.
 
-class PlainBranch(nn.Module):
-    """
-    Plain multi-view encoding branch.
-
-    Args:
-        - input_dim_list: list, the dimensions of the input tensors
-        - hidden_dim: int, the dimension of the hidden layer(s)
-        - latent_dim: int, the dimension of the branch's output tensor
-        - depth: int, the number of hidden layers
-        - dropout_prob: float, the dropout probability (default: 0.1)
-    """
-    def __init__(
-            self,
-            input_dim_list: list,
-            hidden_dim: int = 512,
-            latent_dim: int = 1024,
-            depth: int = 0,
-            dropout_prob: float = 0.1
-            ):
-        super(PlainBranch, self).__init__()
-        self.blocks = nn.ModuleList([
-                PlainEncoder(
-                    input_dim=size,
-                    hidden_dim=hidden_dim,
-                    output_dim=hidden_dim,
-                    depth=depth,
-                    dropout_prob=dropout_prob)
-                for size in input_dim_list])
-        self.aggregator = AttentiveAggregator(
-            input_dim_list=len(input_dim_list)*[hidden_dim],
-            output_dim=latent_dim
-        )
+#     Args:
+#         - input_dim_list: list, the dimensions of the input tensors (num_modalities)
+#         - hidden_dim: int, the dimension of the hidden layer(s)
+#         - latent_dim: int, the dimension of the branch's output tensor
+#         - depth: int, the number of hidden layers
+#         - dropout_prob: float, the dropout probability (default: 0.1)
+#     """
+#     def __init__(
+#             self,
+#             input_dim_list: list,
+#             hidden_dim: int,
+#             latent_dim: int,
+#             depth: int,
+#             dropout_prob: float = 0.1
+#             ):
+#         super(VariationalBranch, self).__init__()
+#         self.encoders = nn.ModuleList([
+#                 Encoder(
+#                     input_dim=size,
+#                     hidden_dim=hidden_dim,
+#                     output_dim=2 * latent_dim, # mu and logvar
+#                     depth=depth,
+#                     dropout_prob=dropout_prob)
+#                 for size in input_dim_list])
         
-    def forward(self, x_list):
-        """
-        Args:
-            - x_list: The list of input tensors of shape (batch_size, input_dim) in input_dim_list
-        Returns:
-            - out: torch.Tensor, the output tensor of shape (batch_size, latent_dim)
-        """
-        x_list = [self.blocks[i](x) for i, x in enumerate(x_list)]
-        return self.aggregator(x_list) # B x latent_dim & coefficients
+#         self.to_attn_logits = nn.Conv1d(2 * latent_dim, 1, 1)
 
-class VariationalBranch(nn.Module):
-    """
-    Variational multi-view encoding branch.
+#     def reparameterize(self, mean, logvar):
+#         """
+#         Args:
+#             - mean: torch.Tensor, the mean tensor of shape (batch_size, output_dim)
+#             - logvar: torch.Tensor, the log-variance tensor of shape (batch_size, output_dim)
+#         Returns:
+#             - z: torch.Tensor, the output tensor of shape (batch_size, output_dim) after reparameterization
+#         """
+#         std = torch.exp(0.5 * logvar)
+#         eps = torch.randn_like(std)
+#         return mean + eps * std
 
-    Args:
-        - input_dim_list: list, the dimensions of the input tensors
-        - hidden_dim: int, the dimension of the hidden layer(s)
-        - latent_dim: int, the dimension of the branch's output tensor
-        - depth: int, the number of hidden layers
-        - dropout_prob: float, the dropout probability (default: 0.1)
-    """
-    def __init__(
-            self,
-            input_dim_list: list,
-            hidden_dim: int = 512,
-            latent_dim: int = 1024,
-            depth: int = 0,
-            dropout_prob: float = 0.1
-            ):
-        super(VariationalBranch, self).__init__()
-        self.blocks = nn.ModuleList([
-                VariationalEncoder(
-                    input_dim=size,
-                    hidden_dim=hidden_dim,
-                    output_dim=hidden_dim,
-                    depth=depth,
-                    dropout_prob=dropout_prob)
-                for size in input_dim_list])
-        self.aggregator = AttentiveAggregator(
-            input_dim_list=len(input_dim_list)*[hidden_dim],
-            output_dim=latent_dim
-        )
+#     def forward(self, x_list, compute_kl_loss = True):
+#         """
+#         Args:
+#             - x_list: The list of input tensors of shape (batch_size, input_dim) in input_dim_list
+#         Returns:
+#             - z: torch.Tensor, the output tensor of shape (batch_size, latent_dim) after reparameterization
+#             - kl_loss: torch.Tensor, the KL divergence loss
+#             - attn_values: torch.Tensor, the attention coefficients of shape (batch_size, len(x_list))
+#         """
+#         x = torch.stack(
+#             [self.encoders[i](x) for i, x in enumerate(x_list)], 
+#             dim=-1)                                 # B x 2*latent_dim x num_modalities
+#         attn_logits = self.to_attn_logits(x)
+#         attn_values = attn_logits.softmax(dim=-1)   # B x 1 x num_modalities (sums to 1)
+#         return (x * attn_values).sum(-1)               # B x 2*latent_dim
+        # return torch.chunk(x, 2, dim=1)             # each B x latent_dim
+        # z = self.reparameterize(mu, logvar)         # B x latent_dim
+
+        # if not compute_kl_loss:
+        #     return z, attn_values.squeeze(1), None
         
-    def forward(self, x_list, compute_loss = True):
-        """
-        Args:
-            - x_list: The list of input tensors of shape (batch_size, input_dim) in input_dim_list
-        Returns:
-            - z: torch.Tensor, the output tensor of shape (batch_size, output_dim) after reparameterization
-            - loss_kl: the KL divergence loss
-        """
-        loss_kl = 0.0
-        z_list = []
-        for i, x in enumerate(x_list):
-            z, kl = self.blocks[i](x, compute_loss=compute_loss)
-            loss_kl += kl if compute_loss else 0.0
-            z_list.append(z)
-
-        out, coeffs = self.aggregator(z_list) # B x latent_dim
-        return out, loss_kl / len(x_list), coeffs
+        # loss_kl = ( -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) ) / mu.size(1)
+        # return z, attn_values.squeeze(1), loss_kl
+        
 
 #######################################################################################################################################
 
@@ -293,32 +197,32 @@ class PlainMultiBranch(nn.Module):
             self,
             input_dim_list_0: list,
             input_dim_list_1: list,
-            hidden_dim: int = 512,
-            latent_dim: int = 1024,
+            hidden_dim: int,
+            latent_dim: int,
             depth: int = 0,
             dropout_prob: float = 0.1
             ):
         super(PlainMultiBranch, self).__init__()
-        self.branch0 = PlainBranch(
+        self.branch0 = Branch(
             input_dim_list=input_dim_list_0,
             hidden_dim=hidden_dim,
             latent_dim=latent_dim,
             depth=depth,
             dropout_prob=dropout_prob
-        ) if len(input_dim_list_0) > 1 else PlainEncoder(
+        ) if len(input_dim_list_0) > 1 else Encoder(
             input_dim=input_dim_list_0[0],
             hidden_dim=hidden_dim,
             output_dim=latent_dim,
             depth=depth,
             dropout_prob=dropout_prob
         )
-        self.branch1 = PlainBranch(
+        self.branch1 = Branch(
             input_dim_list=input_dim_list_1,
             hidden_dim=hidden_dim,
             latent_dim=latent_dim,
             depth=depth,
             dropout_prob=dropout_prob
-        ) if len(input_dim_list_1) > 1 else PlainEncoder(
+        ) if len(input_dim_list_1) > 1 else Encoder(
             input_dim=input_dim_list_1[0],
             hidden_dim=hidden_dim,
             output_dim=latent_dim,
@@ -328,20 +232,20 @@ class PlainMultiBranch(nn.Module):
         print(f"Number of parameters\n - Branch 0: {get_model_params(self.branch0):,}\n - Branch 1: {get_model_params(self.branch1):,}")
         
     def forward(self, x0, x1):
-        coeffs = []
+        attn_values = []
         if len(x0) == 1:
             out0 = self.branch0(x0[0])
         else:
-            out0, coeffs0 = self.branch0(x0)
-            coeffs.append(coeffs0)
+            out0, attn_values0 = self.branch0(x0)
+            attn_values.append(attn_values0)
 
         if len(x1) == 1:
             out1 = self.branch1(x1[0])
         else:
-            out1, coeffs1 = self.branch1(x1)
-            coeffs.append(coeffs1)
+            out1, attn_values1 = self.branch1(x1)
+            attn_values.append(attn_values1)
 
-        return torch.sum(out0 * out1, dim=1), coeffs
+        return torch.sum(out0 * out1, dim=1), attn_values
 
 class VariationalMultiBranch(nn.Module):
     """
@@ -359,53 +263,73 @@ class VariationalMultiBranch(nn.Module):
             self,
             input_dim_list_0: list,
             input_dim_list_1: list,
-            hidden_dim: int = 512,
-            latent_dim: int = 1024,
-            depth: int = 0,
+            hidden_dim: int,
+            latent_dim: int,
+            depth: int,
             dropout_prob: float = 0.1
             ):
         super(VariationalMultiBranch, self).__init__()
-        self.branch0 = VariationalBranch(
+        self.branch0 = Branch(
             input_dim_list=input_dim_list_0,
             hidden_dim=hidden_dim,
-            latent_dim=latent_dim,
+            latent_dim=2 * latent_dim,  # mu and logvar
             depth=depth,
             dropout_prob=dropout_prob
-        ) if len(input_dim_list_0) > 1 else VariationalEncoder(
+        ) if len(input_dim_list_0) > 1 else Encoder(
             input_dim=input_dim_list_0[0],
             hidden_dim=hidden_dim,
-            output_dim=latent_dim,
+            output_dim=2 * latent_dim,
             depth=depth,
             dropout_prob=dropout_prob
         )
-        self.branch1 = VariationalBranch(
+        self.branch1 = Branch(
             input_dim_list=input_dim_list_1,
             hidden_dim=hidden_dim,
-            latent_dim=latent_dim,
+            latent_dim=2 * latent_dim,  # mu and logvar
             depth=depth,
             dropout_prob=dropout_prob
-        ) if len(input_dim_list_1) > 1 else VariationalEncoder(
+        ) if len(input_dim_list_1) > 1 else Encoder(
             input_dim=input_dim_list_1[0],
             hidden_dim=hidden_dim,
-            output_dim=latent_dim,
+            output_dim=2 * latent_dim,
             depth=depth,
             dropout_prob=dropout_prob
         )
         print(f"Number of parameters\n - Branch 0: {get_model_params(self.branch0):,}\n - Branch 1: {get_model_params(self.branch1):,}")
         
-    def forward(self, x0, x1, compute_loss = True):
-        coeffs = []
+    def reparameterize(self, mean, logvar):
+        """
+        Args:
+            - mean: torch.Tensor, the mean tensor of shape (batch_size, output_dim)
+            - logvar: torch.Tensor, the log-variance tensor of shape (batch_size, output_dim)
+        Returns:
+            - z: torch.Tensor, the output tensor of shape (batch_size, output_dim) after reparameterization
+        """
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mean + eps * std
+    
+    def forward(self, x0, x1, compute_kl_loss = True):
+        attn_values = []
         if len(x0) == 1:
-            out0, kl0 = self.branch0(x0[0], compute_loss=compute_loss)
+            out0 = self.branch0(x0[0])
         else:
-            out0, kl0, coeffs0 = self.branch0(x0, compute_loss=compute_loss)
-            coeffs.append(coeffs0)
+            out0, attn_values0 = self.branch0(x0)
+            attn_values.append(attn_values0)
+
+        mu, logvar = torch.chunk(out0, 2, dim=1)
+        z0 = self.reparameterize(mu, logvar)
+        kl0 = ( -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) ) / mu.size(1) if compute_kl_loss else None
 
         if len(x1) == 1:
-            out1, kl1 = self.branch1(x1[0], compute_loss=compute_loss)
+            out1 = self.branch1(x1[0])
         else:
-            out1, kl1, coeffs1 = self.branch1(x1, compute_loss=compute_loss)
-            coeffs.append(coeffs1)
+            out1, attn_values1 = self.branch1(x1)
+            attn_values.append(attn_values1)
         
-        kl_loss = (kl0 + kl1)/2 if compute_loss else None
-        return torch.sum(out0 * out1, dim=1), kl_loss, coeffs
+        mu, logvar = torch.chunk(out1, 2, dim=1)
+        z1 = self.reparameterize(mu, logvar)
+        kl1 = ( -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) ) / mu.size(1) if compute_kl_loss else None
+        
+        kl_loss = (kl0 + kl1) / 2 if compute_kl_loss else None
+        return torch.sum(z0 * z1, dim=1), attn_values, kl_loss

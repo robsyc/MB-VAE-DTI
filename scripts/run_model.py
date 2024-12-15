@@ -25,7 +25,7 @@ grid_search_config = {
     'hidden_dim': [128, 256, 512],
     'latent_dim': [256, 512, 1024],
     'dropout_prob': [0.1, 0.3],
-    'kl_weight': [0.001, 0.01, 0.1],  # Only used for variational models
+    'kl_weight': [0.0001, 0.005, 0.01],  # Only used for variational models
 }
 
 CONFIGS = {

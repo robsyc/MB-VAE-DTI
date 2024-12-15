@@ -43,12 +43,12 @@ def count_parameters(model):
 def train_and_evaluate(
         config, 
         split_type, 
-        learning_rate=0.001, 
-        kl_weight=1,
-        batch_size=32,
-        hidden_dim=512,
-        latent_dim=1024,
-        depth=1,
+        learning_rate,
+        kl_weight,
+        batch_size,
+        hidden_dim,
+        latent_dim,
+        depth,
         dropout_prob=0.1
     ):
     # Prepare datasets
@@ -105,7 +105,7 @@ def train_and_evaluate(
 
     # Variables to track the best model & early stopping
     epoch = 0
-    patience = 10
+    patience = 12
     early_stopping_counter = 0
     best_valid_loss = float('inf')
     best_model_state = copy.deepcopy(model.state_dict())
@@ -123,10 +123,10 @@ def train_and_evaluate(
 
             # Forward pass
             if config['model_type'] == 'plain':
-                output, coeffs = model(x0, x1)
+                output, attn_values = model(x0, x1)
                 loss = mse_loss_fn(output.squeeze(), y)
             else:
-                output, kl_loss, coeffs = model(x0, x1, compute_loss=True)
+                output, attn_values, kl_loss = model(x0, x1, compute_kl_loss=True)
                 mse_loss = mse_loss_fn(output.squeeze(), y)
                 loss = mse_loss + kl_weight * kl_loss
 
@@ -151,10 +151,10 @@ def train_and_evaluate(
 
                 # Forward pass
                 if config['model_type'] == 'plain':
-                    output, coeffs = model(x0, x1)
+                    output, attn_values = model(x0, x1)
                     loss = mse_loss_fn(output.squeeze(), y)
                 else:
-                    output, kl_loss, coeffs = model(x0, x1, compute_loss=False)
+                    output, attn_values, kl_loss = model(x0, x1, compute_kl_loss=False)
                     loss = mse_loss_fn(output.squeeze(), y)
 
                 total_valid_loss += loss.item()
@@ -192,16 +192,17 @@ def train_and_evaluate(
 
             # Forward pass
             if config['model_type'] == 'plain':
-                output, coeffs = model(x0, x1)
+                output, attn_values = model(x0, x1)
                 loss = mse_loss_fn(output.squeeze(), y)
             else:
-                output, kl_loss, coeffs = model(x0, x1, compute_loss=False)
+                output, attn_values, kl_loss = model(x0, x1, compute_loss=False)
                 loss = mse_loss_fn(output.squeeze(), y)
             
             predictions.append((output.squeeze().cpu().numpy(), y.cpu().numpy()))
             total_test_loss += loss.item()
 
     avg_test_loss = total_test_loss / len(test_loader)
+    # TODO: plot residuals, other metrics e.g. concordance index
     print(f"Test Loss: {avg_test_loss:.4f}")
 
     # Return the best validation loss and corresponding test loss
