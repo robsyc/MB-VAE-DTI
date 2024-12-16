@@ -7,7 +7,6 @@ import argparse
 import json
 from utils.modelTraining import train_and_evaluate
 
-# TODO Generative model using Flow Matching?!
 print(f"The version of PyTorch is: {torch.__version__}", flush=True)
 print("Cuda: ", torch.cuda.is_available(), flush=True)
 
@@ -16,17 +15,6 @@ parser = argparse.ArgumentParser(description="Run grid search experiments")
 parser.add_argument('--batch_index', type=int, default=0, help='Index of the batch to run (starting from 0)')
 parser.add_argument('--total_batches', type=int, default=1, help='Total number of batches')
 args = parser.parse_args()
-
-# Grid search configuration (first big general search)
-# grid_search_config = {
-#     'learning_rate': [0.0001, 0.0005, 0.001],
-#     'batch_size': [32, 64, 128],
-#     'depth': [1, 2, 3],
-#     'hidden_dim': [128, 256, 512],
-#     'latent_dim': [256, 512, 1024],
-#     'dropout_prob': [0.1, 0.3],
-#     'kl_weight': [0.001, 0.01, 0.1],  # Only used for variational models
-# } # 486 or 1458
 
 CONFIGS = {
     'single_view_fp_plain': {
