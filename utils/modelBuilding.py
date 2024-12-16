@@ -280,8 +280,8 @@ class MultiBranchDTI(nn.Module):
     def forward(self, x0, x1, compute_kl_loss = False):
         """
         Args:
-            - x0: list, the input tensor(s) of the drug-branch
-            - x1: list, the input tensor(s) of the target-branch
+            - x0: Tensor or list of tensors, the input tensor(s) of the drug-branch
+            - x1: Tensor of list of tensors, the input tensor(s) of the target-branch
             - compute_kl_loss: bool, whether to compute the KL divergence loss (default: False)
         Returns:
             - y_hat: torch.Tensor, the output tensor of shape (batch_size, 1) after dot-product aggregation

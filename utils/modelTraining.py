@@ -42,11 +42,11 @@ def train_and_evaluate(
         config, 
         split_type, 
         learning_rate,
-        kl_weight,
         batch_size,
         hidden_dim,
         latent_dim,
         depth,
+        kl_weight=None,
         dropout_prob=0.1,
         output_setting="regression" # TDOO add support for classification
     ):
@@ -100,15 +100,18 @@ def train_and_evaluate(
     best_valid_loss = float('inf')
     best_model_state = copy.deepcopy(model.state_dict())
 
+    def move_to_device(data, device):
+        data = [x.to(device).float() for x in data]
+        return data[0] if len(data) == 1 else data  # Return single tensor if only one input (single view case)
+    
     # Training loop
     while True:
         epoch += 1
         model.train()
         total_train_loss = 0
         for x0, x1, y in train_loader:
-            # Move data to device
-            x0 = [x.to(device).float() for x in x0]
-            x1 = [x.to(device).float() for x in x1]
+            x0 = move_to_device(x0, device)
+            x1 = move_to_device(x1, device)
             y = y.to(device).float()
 
             # Forward pass
@@ -135,8 +138,8 @@ def train_and_evaluate(
         with torch.no_grad():
             for x0, x1, y in valid_loader:
                 # Move data to device
-                x0 = [x.to(device).float() for x in x0]
-                x1 = [x.to(device).float() for x in x1]
+                x0 = move_to_device(x0, device)
+                x1 = move_to_device(x1, device)
                 y = y.to(device).float()
 
                 # Forward pass (no kl_loss computation)
@@ -172,8 +175,8 @@ def train_and_evaluate(
     with torch.no_grad():
         for x0, x1, y in test_loader:
             # Move data to device
-            x0 = [x.to(device).float() for x in x0]
-            x1 = [x.to(device).float() for x in x1]
+            x0 = move_to_device(x0, device)
+            x1 = move_to_device(x1, device)
             y = y.to(device).float()
 
             # Forward pass (no kl_loss computation)
