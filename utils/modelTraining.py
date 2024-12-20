@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 import h5torch
 import copy
-from utils.modelBuilding import MultiBranchDTI
+from utils.modelBuilding import DrugTargetTree
 
 
 def get_dataset(split_type, split_name):
@@ -48,7 +48,8 @@ def train_and_evaluate(
         depth,
         kl_weight=None,
         dropout_prob=0.1,
-        output_setting="regression" # TDOO add support for classification
+        classification=False,
+        dot_product=False
     ):
     # Prepare datasets
     train_dataset = get_dataset(split_type, 'train')
@@ -74,23 +75,25 @@ def train_and_evaluate(
 
     # Determine input dimensions
     sample_batch = next(iter(train_loader))
-    input_dim_list_0 = [x.shape[1] for x in sample_batch[0]]
-    input_dim_list_1 = [x.shape[1] for x in sample_batch[1]]
+    drug_dims = [x.shape[1] for x in sample_batch[0]]
+    target_dims = [x.shape[1] for x in sample_batch[1]]
 
     # Define the model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = MultiBranchDTI(
-        input_dim_list_0=input_dim_list_0,
-        input_dim_list_1=input_dim_list_1,
+    model = DrugTargetTree(
+        drug_dims=drug_dims,
+        target_dims=target_dims,
         hidden_dim=hidden_dim,
         latent_dim=latent_dim,
         depth=depth,
         dropout_prob=dropout_prob,
-        variational=True if config['model_type'] == 'variational' else False
+        variational=True if config['model_type'] == 'variational' else False,
+        classification=classification,
+        dot_product=dot_product
     ).to(device)
 
     # Loss function and optimizer
-    mse_loss_fn = nn.MSELoss()
+    loss_fn = nn.MSELoss() if not classification else nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Variables to track the best model & early stopping
@@ -116,12 +119,18 @@ def train_and_evaluate(
 
             # Forward pass
             if config['model_type'] == 'plain':
-                output = model(x0, x1)
-                loss = mse_loss_fn(output.squeeze(), y)
+                if not dot_product:
+                    output = model(x0, x1, compute_recon_loss = False, compute_kl_loss=False)
+                else:
+                    output, recon_loss = model(x0, x1, compute_recon_loss = True, compute_kl_loss=False)
+                    loss = loss_fn(output.squeeze(), y) + recon_loss
             else:
-                output, kl_loss = model(x0, x1, compute_kl_loss=True)
-                mse_loss = mse_loss_fn(output.squeeze(), y)
-                loss = mse_loss + kl_weight * kl_loss
+                if not dot_product:
+                    output, kl_loss = model(x0, x1, compute_recon_loss = False, compute_kl_loss=True)
+                    loss = loss_fn(output.squeeze(), y) + kl_weight * kl_loss
+                else:
+                    output, recon_loss, kl_loss = model(x0, x1, compute_recon_loss = True, compute_kl_loss=True)
+                    loss = loss_fn(output.squeeze(), y) + recon_loss + kl_weight * kl_loss
 
             # Backward pass and optimization
             optimizer.zero_grad()
@@ -143,8 +152,12 @@ def train_and_evaluate(
                 y = y.to(device).float()
 
                 # Forward pass (no kl_loss computation)
-                output = model(x0, x1)
-                loss = mse_loss_fn(output.squeeze(), y)
+                if not dot_product:
+                    output = model(x0, x1, compute_recon_loss = False, compute_kl_loss=False)
+                    loss = loss_fn(output.squeeze(), y)
+                else:
+                    output, recon_loss = model(x0, x1, compute_recon_loss = True, compute_kl_loss=False)
+                    loss = loss_fn(output.squeeze(), y) + recon_loss
 
                 total_valid_loss += loss.item()
 
@@ -181,7 +194,7 @@ def train_and_evaluate(
 
             # Forward pass (no kl_loss computation)
             output = model(x0, x1)
-            loss = mse_loss_fn(output.squeeze(), y)            
+            loss = loss_fn(output.squeeze(), y)            
             predictions.append((output.squeeze().cpu().numpy(), y.cpu().numpy()))
             total_test_loss += loss.item()
 

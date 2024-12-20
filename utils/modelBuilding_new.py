@@ -9,7 +9,7 @@ def get_model_params(model):
 
 
 
-class Generator(nn.Module):
+class GraphGenerator(nn.Module):
     """
     Generator model for graph generation.
 
@@ -22,7 +22,7 @@ class Generator(nn.Module):
         - n_iters: int, the number of iterations for the Gumbel-Softmax sampling
     """
     def __init__(self, latent_dim, hidden_dim, depth, dropout_prob, n_nodes, n_iters):
-        super(Generator, self).__init__()
+        super(GraphGenerator, self).__init__()
         self.depth = depth
         self.n_nodes = n_nodes
         self.n_iters = n_iters
@@ -54,13 +54,11 @@ class Generator(nn.Module):
             - adj: torch.Tensor, the output tensor of shape (batch_size, n_nodes, n_nodes)
         """
         x = self.latent2hidden(x)
-        print(x.shape)
         for _ in range(self.n_iters):
             for residual in self.residual_blocks:
                 x = x + residual(x)  # Residual connection            
             gb = self._gumbel_softmax(self.hidden2topology(x))  # Sample topology
             x = x + self.gumbel2hidden(gb)  # Integrate topology feedback
-        print(x.shape)
         return self._generate_adj(self.hidden2topology(x))
 
     def _gumbel_softmax(self, x):
@@ -70,14 +68,10 @@ class Generator(nn.Module):
     def _generate_adj(self, x):
         """Convert sampled topology to adjacency matrix."""
         adj = torch.zeros(x.size(0), self.n_nodes, self.n_nodes, device=x.device)
-        print(adj.shape)
         idx = torch.triu_indices(self.n_nodes, self.n_nodes, 1)
         adj[:, idx[0], idx[1]] = self._gumbel_softmax(x)  # Fill upper triangular part
         adj = adj + adj.transpose(1, 2)  # Symmetrize
         return adj # (batch_size, n_nodes, n_nodes)
-
-
-
 
 
 class ResidualBranch(nn.Module):
@@ -155,36 +149,30 @@ class DrugTargetTree(nn.Module):
             depth: int = 0,
             dropout_prob: float = 0.1,
             variational: bool = False,
-            classification: bool = False,
     ):
         super(DrugTargetTree, self).__init__()
         self.variational = variational
-        self.classification = classification
+
+        latent_dim = latent_dim * 2 if variational else latent_dim
 
         # Initialize drug and target leafs
         self.drug_leafs = nn.ModuleList([
-            ResidualBranch(drug_dim, hidden_dim, hidden_dim, depth, dropout_prob)
+            ResidualBranch(drug_dim, hidden_dim, latent_dim, depth, dropout_prob)
             for drug_dim in drug_dims
         ])
         self.target_leafs = nn.ModuleList([
-            ResidualBranch(target_dim, hidden_dim, hidden_dim, depth, dropout_prob)
+            ResidualBranch(target_dim, hidden_dim, latent_dim, depth, dropout_prob)
             for target_dim in target_dims
         ])
-        
-        # Initialize branches
-        latent_dim_out = latent_dim * 2 if variational else latent_dim
-        self.drug_branch = ResidualBranch(hidden_dim * len(drug_dims), hidden_dim, latent_dim_out, depth, dropout_prob)
-        self.target_branch = ResidualBranch(hidden_dim * len(target_dims), hidden_dim, latent_dim_out, depth, dropout_prob)
-        self.stem = ResidualBranch(latent_dim * 2, hidden_dim, latent_dim_out, depth, dropout_prob)
 
-        # Root and output layers
-        self.root = ResidualBranch(latent_dim, hidden_dim, latent_dim * 2, depth, dropout_prob)
-        self.bud = nn.Linear(latent_dim, 1)
+        # Initialize attentive branches
+        self.drug_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
+        self.target_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
 
         p_trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        print(f"Number of parameters\n - Drug Leafs: {get_model_params(self.drug_leafs):,}\n - Target Leafs: {get_model_params(self.target_leafs):,}\n - Drug Branch: {get_model_params(self.drug_branch):,}\n - Target Branch: {get_model_params(self.target_branch):,}\n - Stem: {get_model_params(self.stem):,}\n - Root: {get_model_params(self.root):,}\n - Bud: {get_model_params(self.bud):,}\n - Total Trainable: {p_trainable:,}")
+        print(f"Number of parameters\n - Drug Leafs: {get_model_params(self.drug_leafs):,}\n - Target Leafs: {get_model_params(self.target_leafs):,}\n - Attention: {get_model_params(self.drug_to_attn_logits) + get_model_params(self.target_to_attn_logits):,}\n - Total: {p_trainable:,}")
 
-    def forward(self, drug_inputs, target_inputs, compute_recon_loss = True, compute_kl_loss = False):
+    def forward(self, drug_inputs, target_inputs, compute_kl_loss = False):
         """
         Args:
             - drug_inputs: list of torch.Tensor, the input tensor(s) of the drug-branch
@@ -192,55 +180,47 @@ class DrugTargetTree(nn.Module):
             - compute_kl_loss: bool, whether to compute the KL divergence loss (default: False)
         Returns:
             - y_hat: torch.Tensor, the output tensor of shape (batch_size, 1)
-            - recon_loss: torch.Tensor, the latent reconstruction loss
             - kl_loss: torch.Tensor, the KL divergence loss
         """
-        drug_latents = torch.cat([leaf(drug_input) for leaf, drug_input in zip(self.drug_leafs, drug_inputs)], dim=1)
-        target_latents = torch.cat([leaf(target_input) for leaf, target_input in zip(self.target_leafs, target_inputs)], dim=1)
+        # Map drug and target inputs to same hidden space
+        drug_latents = torch.stack([leaf(drug_input) for leaf, drug_input in zip(self.drug_leafs, drug_inputs)], dim=-1)
+        target_latents = torch.stack([leaf(target_input) for leaf, target_input in zip(self.target_leafs, target_inputs)], dim=-1)
         
-        if self.variational:
-            # Variational branches
-            drug_mean, drug_logvar = torch.chunk(self.drug_branch(drug_latents), 2, dim=1)
-            target_mean, target_logvar = torch.chunk(self.target_branch(target_latents), 2, dim=1)
+        # Compute attention weights
+        drug_attn = self.drug_to_attn_logits(drug_latents).softmax(dim = -1)
+        target_attn = self.target_to_attn_logits(target_latents).softmax(dim = -1)
+        print(drug_attn.shape, target_attn.shape)
+
+        # Scale drug and target latents by attention weights and sum
+        if not self.variational:
+            drug_latents = torch.sum(drug_latents * drug_attn, dim=-1)
+            target_latents = torch.sum(target_latents * target_attn, dim=-1)
+        else:
+            drug_mean, drug_logvar = torch.chunk(drug_latents, 2, dim=1)
+            drug_mean = torch.sum(drug_mean * drug_attn, dim=-1)
+            drug_logvar = self.combine_variances_logsumexp(drug_logvar, drug_attn)
             drug_latents = self._reparameterize(drug_mean, drug_logvar)
+            
+            target_mean, target_logvar = torch.chunk(target_latents, 2, dim=1)
+            target_mean = torch.sum(target_mean * target_attn, dim=-1)
+            target_logvar = self.combine_variances_logsumexp(target_logvar, target_attn)
             target_latents = self._reparameterize(target_mean, target_logvar)
 
-            stem_mean, stem_logvar = torch.chunk(self.stem(torch.cat([drug_latents, target_latents], dim=1)), 2, dim=1)
-            stem_latents = self._reparameterize(stem_mean, stem_logvar)
-        else:
-            # Deterministic branches
-            drug_latents = self.drug_branch(drug_latents)
-            target_latents = self.target_branch(target_latents)
-            stem_latents = self.stem(torch.cat([drug_latents, target_latents], dim=1))
-
-        # Compute interaction output
-        y_hat = self.bud(stem_latents).squeeze()
-
-        if self.classification:
-            y_hat = torch.sigmoid(y_hat)
+        # Compute interaction output (dot product)
+        y_hat = torch.sum(drug_latents * target_latents, dim=1)
         
-        if not compute_recon_loss:
-            return y_hat
-        
-        # Reconstruct drug and target latents using the root and reconstruction loss
-        reconstructed_latents = self.root(stem_latents)
-        reconstructed_drug_latents, reconstructed_target_latents = torch.chunk(reconstructed_latents, 2, dim=1)
-        recon_loss = (
-            self._reconstruction_loss(drug_latents, reconstructed_drug_latents) +
-            self._reconstruction_loss(target_latents, reconstructed_target_latents)
-        ) / 2
-
         if not compute_kl_loss:
-            return y_hat, recon_loss
-        
-        # Compute KL divergence loss
-        kl_loss = (
-            self._kl_divergence(drug_mean, drug_logvar) +
-            self._kl_divergence(target_mean, target_logvar) +
-            self._kl_divergence(stem_mean, stem_logvar)
-        ) / 3
+            return y_hat
+        else:
+            kl_loss = self._kl_divergence(drug_mean, drug_logvar) + self._kl_divergence(target_mean, target_logvar)
+            return y_hat, kl_loss
 
-        return y_hat, recon_loss, kl_loss
+    def combine_variances_logsumexp(self, sigma2_list, weights):
+        max_sigma2 = torch.max(sigma2_list, dim=-1, keepdim=True)[0]
+        weighted_exp = weights * torch.exp(sigma2_list - max_sigma2)
+        sum_exp = torch.sum(weighted_exp, dim=-1, keepdim=True)
+        log_sigma2_tot = max_sigma2 + torch.log(sum_exp)
+        return log_sigma2_tot.squeeze()
 
     def _reparameterize(self, mean, logvar):
         """
@@ -263,13 +243,3 @@ class DrugTargetTree(nn.Module):
             - kl_loss: torch.Tensor, the KL divergence loss regularizing the latent space into a standard normal distribution
         """
         return ( -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp()) ) / mean.size(1)
-    
-    def _reconstruction_loss(self, x, x_reconstructed):
-        """
-        Args:
-            - x: torch.Tensor, the input tensor of shape (batch_size, *)
-            - x_reconstructed: torch.Tensor, the reconstructed tensor of shape (batch_size, *)
-        Returns:
-            - loss: torch.Tensor, the reconstruction loss
-        """
-        return F.mse_loss(x_reconstructed, x, reduction='mean')
