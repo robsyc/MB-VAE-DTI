@@ -21,6 +21,9 @@ class GraphGenerator(nn.Module):
         - n_nodes: int, the number of nodes in the graph
         - n_iters: int, the number of iterations for the Gumbel-Softmax sampling
     """
+    # TODO, See: 
+    # - https://pygmtools.readthedocs.io/en/latest/guide/numerical_backends.html#example-matching-isomorphic-graphs-with-pytorch-backend
+    # - https://pygmtools.readthedocs.io/en/latest/api/_autosummary/pygmtools.utils.build_aff_mat.html#pygmtools.utils.build_aff_mat
     def __init__(self, latent_dim, hidden_dim, depth, dropout_prob, n_nodes, n_iters):
         super(GraphGenerator, self).__init__()
         self.depth = depth
