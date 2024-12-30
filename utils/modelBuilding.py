@@ -153,6 +153,9 @@ class DrugTargetTree(nn.Module):
             dropout_prob: float = 0.1,
     ):
         super(DrugTargetTree, self).__init__()
+        self.drug_multiview = True if len(drug_dims) > 1 else False
+        self.target_multiview = True if len(target_dims) > 1 else False
+
         # Initialize drug and target leafs
         #   Each leaf is a ResidualBranch that encodes a view of the drug or target
         #   from their respective input dimensions into a latent space of dimension latent_dim
@@ -169,11 +172,16 @@ class DrugTargetTree(nn.Module):
         #   View-wise attention logits that treat view's latent space as channels 
         #   generating a single attention score for each view
         #   (essentially a projection from each view to an interpretable importance score)
-        self.drug_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
-        self.target_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
+        p_attn = 0
+        if self.drug_multiview:
+            self.drug_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
+            p_attn += get_model_params(self.drug_to_attn_logits)
+        if self.target_multiview:
+            self.target_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
+            p_attn += get_model_params(self.target_to_attn_logits)
 
         p_trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        print(f"Number of parameters\n - Drug Leafs: {get_model_params(self.drug_leafs):,}\n - Target Leafs: {get_model_params(self.target_leafs):,}\n - Attention: {get_model_params(self.drug_to_attn_logits) + get_model_params(self.target_to_attn_logits):,}\n - Total: {p_trainable:,}")
+        print(f"Number of parameters\n - Drug Leafs: {get_model_params(self.drug_leafs):,}\n - Target Leafs: {get_model_params(self.target_leafs):,}\n - Attention: {p_attn:,}\n - Total: {p_trainable:,}")
 
     def forward(self, drug_inputs, target_inputs):
         """
@@ -186,20 +194,24 @@ class DrugTargetTree(nn.Module):
         # Encode drug and target inputs to same hidden space
         #   Both: n_views x (batch_size, view_dim) -> (batch_size, latent_dim, n_views)
         #   Stack ensures that the latent spaces are aligned along the last dimension
-        drug_latents = torch.stack([leaf(drug_input) for leaf, drug_input in zip(self.drug_leafs, drug_inputs)], dim=-1)
-        target_latents = torch.stack([leaf(target_input) for leaf, target_input in zip(self.target_leafs, target_inputs)], dim=-1)
+        drug_latents = torch.stack(
+            [leaf(drug_input) for leaf, drug_input in zip(self.drug_leafs, drug_inputs)], dim=-1
+            ) if self.drug_multiview else self.drug_leafs[0](drug_inputs[0])
+        target_latents = torch.stack(
+            [leaf(target_input) for leaf, target_input in zip(self.target_leafs, target_inputs)], dim=-1
+            ) if self.target_multiview else self.target_leafs[0](target_inputs[0])
         
         # Compute view-wise attention weights
         #   Both: (batch_size, latent_dim, n_views) -> (batch_size, 1, n_views)
         #   Softmax ensures that the attention scores sum to 1 across views
-        drug_attn = self.drug_to_attn_logits(drug_latents).softmax(dim = -1)
-        target_attn = self.target_to_attn_logits(target_latents).softmax(dim = -1)
+        drug_attn = self.drug_to_attn_logits(drug_latents).softmax(dim = -1) if self.drug_multiview else None
+        target_attn = self.target_to_attn_logits(target_latents).softmax(dim = -1) if self.target_multiview else None
 
         # Scale drug and target latents by view-wise attention weights and sum
         #   Both: (batch_size, latent_dim, n_views) * (batch_size, 1, n_views) -> (batch_size, latent_dim)
         #   Summing across views gives a single latent vector for each drug and target (and we get an *importance score* for each view)
-        drug_latents = torch.sum(drug_latents * drug_attn, dim=-1)
-        target_latents = torch.sum(target_latents * target_attn, dim=-1)
+        drug_latents = torch.sum(drug_latents * drug_attn, dim=-1) if self.drug_multiview else drug_latents
+        target_latents = torch.sum(target_latents * target_attn, dim=-1) if self.target_multiview else target_latents
 
         # Compute interaction output (dot product)
         #   (batch_size, latent_dim) * (batch_size, latent_dim) -> (batch_size, 1)
@@ -231,6 +243,9 @@ class VariationalDrugTargetTree(nn.Module):
             dropout_prob: float = 0.1,
     ):
         super(VariationalDrugTargetTree, self).__init__()
+        self.drug_multiview = True if len(drug_dims) > 1 else False
+        self.target_multiview = True if len(target_dims) > 1 else False
+
         # Initialize drug and target leafs
         #   Same as before, but we project to means & logvars of multivariate Gaussian
         self.drug_leafs = nn.ModuleList([
@@ -245,14 +260,19 @@ class VariationalDrugTargetTree(nn.Module):
         # Initialize attentive branches
         #   Similar as before, but we incorporate uncertainty into the attn mechanism
         #   by treating the means and logvars seperately
-        self.drug_means_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
-        self.drug_logvars_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
-        self.target_means_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
-        self.target_logvars_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
+        p_attn = 0
+        if self.drug_multiview:
+            self.drug_means_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
+            self.drug_logvars_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
+            p_attn += get_model_params(self.drug_means_to_attn_logits) + get_model_params(self.drug_logvars_to_attn_logits)
+        if self.target_multiview:
+            self.target_means_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
+            self.target_logvars_to_attn_logits = nn.Conv1d(latent_dim, 1, 1)
+            p_attn += get_model_params(self.target_means_to_attn_logits) + get_model_params(self.target_logvars_to_attn_logits)
         self.softplus = nn.Softplus()
 
         p_trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        print(f"Number of parameters\n - Drug Leafs: {get_model_params(self.drug_leafs):,}\n - Target Leafs: {get_model_params(self.target_leafs):,}\n - Attention: {get_model_params(self.drug_means_to_attn_logits) + get_model_params(self.drug_logvars_to_attn_logits) + get_model_params(self.target_means_to_attn_logits) + get_model_params(self.target_logvars_to_attn_logits):,}\n - Total: {p_trainable:,}")
+        print(f"Number of parameters\n - Drug Leafs: {get_model_params(self.drug_leafs):,}\n - Target Leafs: {get_model_params(self.target_leafs):,}\n - Attention: {p_attn:,}\n - Total: {p_trainable:,}")
 
     def forward(self, drug_inputs, target_inputs, compute_kl_loss = False):
         """
@@ -268,22 +288,30 @@ class VariationalDrugTargetTree(nn.Module):
         #   Both: n_views x (batch_size, view_dim) 
         #           -> (batch_size, 2*latent_dim, n_views) 
         #           -> 2 * (batch_size, latent_dim, n_views) 
-        drug_mean, drug_logvar = torch.chunk(torch.stack([leaf(drug_input) for leaf, drug_input in zip(self.drug_leafs, drug_inputs)], dim=-1), 2, dim=1)
-        target_mean, target_logvar = torch.chunk(torch.stack([leaf(target_input) for leaf, target_input in zip(self.target_leafs, target_inputs)], dim=-1), 2, dim=1)
+        drug_mean, drug_logvar = torch.chunk(
+            torch.stack([leaf(drug_input) for leaf, drug_input in zip(self.drug_leafs, drug_inputs)], dim=-1), 2, dim=1
+            ) if self.drug_multiview else torch.chunk(self.drug_leafs[0](drug_inputs[0]), 2, dim=1)
+        target_mean, target_logvar = torch.chunk(
+            torch.stack([leaf(target_input) for leaf, target_input in zip(self.target_leafs, target_inputs)], dim=-1), 2, dim=1
+            ) if self.target_multiview else torch.chunk(self.target_leafs[0](target_inputs[0]), 2, dim=1)
         
         # Compute view-wise uncertainty-aware attention weights
         #   Both: 2 * (batch_size, latent_dim, n_views) -> (batch_size, 1, n_views) 
         drug_attn = (
             self.drug_means_to_attn_logits(drug_mean) - self.softplus(self.drug_logvars_to_attn_logits(drug_logvar))
-        ).softmax(dim=-1)
+        ).softmax(dim=-1) if self.drug_multiview else None
         target_attn = (
             self.target_means_to_attn_logits(target_mean) - self.softplus(self.target_logvars_to_attn_logits(target_logvar))
-        ).softmax(dim=-1)
+        ).softmax(dim=-1) if self.target_multiview else None
 
         # Attention-based fusion w/ helper function
         #   Both: -> 2 * (batch_size, latent_dim)
-        drug_mean, drug_logvar = self._mixture_fusion(drug_mean, drug_logvar, drug_attn)
-        target_mean, target_logvar = self._mixture_fusion(target_mean, target_logvar, target_attn)
+        drug_mean, drug_logvar = self._gaussian_fusion(
+            drug_mean, drug_logvar, drug_attn
+            ) if self.drug_multiview else (drug_mean, drug_logvar)
+        target_mean, target_logvar = self._gaussian_fusion(
+            target_mean, target_logvar, target_attn
+            ) if self.target_multiview else (target_mean, target_logvar)
 
         # Reparameterize to obtain latent sample
         #   Both: -> (batch_size, latent_dim)
@@ -355,7 +383,7 @@ class VariationalDrugTargetTree(nn.Module):
             - z: torch.Tensor, the output tensor of shape (batch_size, latent_dim) after reparameterization
         """
         std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
+        eps = torch.randn_like(std) # sample epsilon from N(0, 1)
         return mean + eps * std
 
     def _kl_divergence(self, mean, logvar):
@@ -366,4 +394,6 @@ class VariationalDrugTargetTree(nn.Module):
         Returns:
             - kl_loss: torch.Tensor, the KL divergence loss regularizing the latent space into a standard normal distribution
         """
-        return ( -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp()) ) / mean.size(1)
+        return - ( 
+            0.5 * torch.sum(1 + logvar - mean**2 - logvar.exp()) 
+            ) / mean.size(1)

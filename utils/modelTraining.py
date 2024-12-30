@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 import h5torch
 import copy
-from utils.modelBuilding import DrugTargetTree
+from utils.modelBuilding import DrugTargetTree, VariationalDrugTargetTree
 
 
 def get_dataset(split_type, split_name):
@@ -48,8 +48,6 @@ def train_and_evaluate(
         depth,
         kl_weight=None,
         dropout_prob=0.1,
-        classification=False,
-        dot_product=False
     ):
     # Prepare datasets
     train_dataset = get_dataset(split_type, 'train')
@@ -86,14 +84,18 @@ def train_and_evaluate(
         hidden_dim=hidden_dim,
         latent_dim=latent_dim,
         depth=depth,
+        dropout_prob=dropout_prob
+    ).to(device) if config['model_type'] == "plain" else VariationalDrugTargetTree(
+        drug_dims=drug_dims,
+        target_dims=target_dims,
+        hidden_dim=hidden_dim,
+        latent_dim=latent_dim,
+        depth=depth,
         dropout_prob=dropout_prob,
-        variational=True if config['model_type'] == 'variational' else False,
-        classification=classification,
-        dot_product=dot_product
     ).to(device)
 
     # Loss function and optimizer
-    loss_fn = nn.MSELoss() if not classification else nn.BCELoss()
+    loss_fn = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Variables to track the best model & early stopping
@@ -102,10 +104,6 @@ def train_and_evaluate(
     early_stopping_counter = 0
     best_valid_loss = float('inf')
     best_model_state = copy.deepcopy(model.state_dict())
-
-    def move_to_device(data, device):
-        data = [x.to(device).float() for x in data]
-        return data[0] if len(data) == 1 else data  # Return single tensor if only one input (single view case)
     
     # Training loop
     while True:
@@ -113,24 +111,17 @@ def train_and_evaluate(
         model.train()
         total_train_loss = 0
         for x0, x1, y in train_loader:
-            x0 = move_to_device(x0, device)
-            x1 = move_to_device(x1, device)
+            x0 = [x.to(device).float() for x in x0]
+            x1 = [x.to(device).float() for x in x1]
             y = y.to(device).float()
 
             # Forward pass
             if config['model_type'] == 'plain':
-                if not dot_product:
-                    output = model(x0, x1, compute_recon_loss = False, compute_kl_loss=False)
-                else:
-                    output, recon_loss = model(x0, x1, compute_recon_loss = True, compute_kl_loss=False)
-                    loss = loss_fn(output.squeeze(), y) + recon_loss
+                output = model(x0, x1)
+                loss = loss_fn(output.squeeze(), y)
             else:
-                if not dot_product:
-                    output, kl_loss = model(x0, x1, compute_recon_loss = False, compute_kl_loss=True)
-                    loss = loss_fn(output.squeeze(), y) + kl_weight * kl_loss
-                else:
-                    output, recon_loss, kl_loss = model(x0, x1, compute_recon_loss = True, compute_kl_loss=True)
-                    loss = loss_fn(output.squeeze(), y) + recon_loss + kl_weight * kl_loss
+                output, kl_loss = model(x0, x1, compute_kl_loss=True)
+                loss = loss_fn(output.squeeze(), y) + kl_weight * kl_loss
 
             # Backward pass and optimization
             optimizer.zero_grad()
@@ -147,17 +138,13 @@ def train_and_evaluate(
         with torch.no_grad():
             for x0, x1, y in valid_loader:
                 # Move data to device
-                x0 = move_to_device(x0, device)
-                x1 = move_to_device(x1, device)
+                x0 = [x.to(device).float() for x in x0]
+                x1 = [x.to(device).float() for x in x1]
                 y = y.to(device).float()
 
                 # Forward pass (no kl_loss computation)
-                if not dot_product:
-                    output = model(x0, x1, compute_recon_loss = False, compute_kl_loss=False)
-                    loss = loss_fn(output.squeeze(), y)
-                else:
-                    output, recon_loss = model(x0, x1, compute_recon_loss = True, compute_kl_loss=False)
-                    loss = loss_fn(output.squeeze(), y) + recon_loss
+                output = model(x0, x1)
+                loss = loss_fn(output.squeeze(), y)
 
                 total_valid_loss += loss.item()
 
@@ -188,8 +175,8 @@ def train_and_evaluate(
     with torch.no_grad():
         for x0, x1, y in test_loader:
             # Move data to device
-            x0 = move_to_device(x0, device)
-            x1 = move_to_device(x1, device)
+            x0 = [x.to(device).float() for x in x0]
+            x1 = [x.to(device).float() for x in x1]
             y = y.to(device).float()
 
             # Forward pass (no kl_loss computation)

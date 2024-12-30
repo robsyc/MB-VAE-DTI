@@ -27,8 +27,8 @@ CONFIGS = {
             'depth': [1, 2, 3, 4],
             'hidden_dim': [64, 128, 256, 512],
             'latent_dim': [128, 256, 512, 1024],
-            'dropout_prob': [0.2],
-        } # 576 combinations, ~110 secs each = 18 hours
+            'dropout_prob': [0.1, 0.3],
+        }
     },
     'single_view_emb_plain': {
         'inputs_0': ['0/Drug_emb_graph'],
@@ -37,39 +37,39 @@ CONFIGS = {
         'hyperparamter_grid': {
             'learning_rate': [0.0001, 0.0005, 0.001],
             'batch_size': [32, 64, 128],
-            'depth': [2, 3, 4],
-            'hidden_dim': [64, 128, 256],
-            'latent_dim': [256, 512, 1024],
-            'dropout_prob': [0.2, 0.4],
-        } # 486 combinations, ~90 secs each = 13 hours
+            'depth': [1, 2, 3, 4],
+            'hidden_dim': [64, 128, 256, 512],
+            'latent_dim': [128, 256, 512, 1024],
+            'dropout_prob': [0.1, 0.3],
+        }
     },
     'single_view_fp_variational': {
         'inputs_0': ['0/Drug_fp'],
         'inputs_1': ['1/Target_fp'],
         'model_type': 'variational',
         'hyperparamter_grid': {
-            'learning_rate': [0.00005, 0.0001, 0.0005],
-            'batch_size': [16, 32, 64, 128],
-            'depth': [1, 2, 3],
+            'learning_rate': [0.0001, 0.0005, 0.001],
+            'batch_size': [32, 64, 128],
+            'depth': [1, 2, 3, 4],
             'hidden_dim': [64, 128, 256, 512],
-            'latent_dim': [128, 256, 512],
-            'dropout_prob': [0.2],
+            'latent_dim': [128, 256, 512, 1024],
+            'dropout_prob': [0.1, 0.3],
             'kl_weight': [0.0001, 0.001, 0.01],
-        } # 1296 combinations, ~200 secs each = 72 hours
+        }
     },
     'single_view_emb_variational': {
         'inputs_0': ['0/Drug_emb_graph'],
         'inputs_1': ['1/Target_emb_T5'],
         'model_type': 'variational',
         'hyperparamter_grid': {
-            'learning_rate': [0.00005, 0.0001, 0.0005],
-            'batch_size': [16, 32, 64, 128],
-            'depth': [0, 1, 2, 3],
-            'hidden_dim': [64, 128, 256],
-            'latent_dim': [128, 256, 512],
-            'dropout_prob': [0.2],
+            'learning_rate': [0.0001, 0.0005, 0.001],
+            'batch_size': [32, 64, 128],
+            'depth': [1, 2, 3, 4],
+            'hidden_dim': [64, 128, 256, 512],
+            'latent_dim': [128, 256, 512, 1024],
+            'dropout_prob': [0.1, 0.3],
             "kl_weight": [0.0001, 0.001, 0.01],
-        } # 1296 combinations, ~170 secs each = 62 hours
+        }
     },
     'multi_view_plain': {
         'inputs_0': ['0/Drug_fp', '0/Drug_emb_graph', '0/Drug_emb_image', '0/Drug_emb_text'],
@@ -77,27 +77,27 @@ CONFIGS = {
         'model_type': 'plain',
         'hyperparamter_grid': {
             'learning_rate': [0.0001, 0.0005, 0.001],
-            'batch_size': [64, 128, 256],
-            'depth': [1, 2, 3],
-            'hidden_dim': [64, 128, 256],
-            'latent_dim': [256, 512, 1024],
-            'dropout_prob': [0.2],
-        } # 243 combinations, ~160 secs each = 11 hours
+            'batch_size': [32, 64, 128],
+            'depth': [1, 2, 3, 4],
+            'hidden_dim': [64, 128, 256, 512],
+            'latent_dim': [128, 256, 512, 1024],
+            'dropout_prob': [0.1, 0.3],
+        }
     },
     'multi_view_variational': {
         'inputs_0': ['0/Drug_fp', '0/Drug_emb_graph', '0/Drug_emb_image', '0/Drug_emb_text'],
         'inputs_1': ['1/Target_fp', '1/Target_emb_T5', '1/Target_emb_DNA', '1/Target_emb_ESM'],
         'model_type': 'variational',
         'hyperparamter_grid': {
-            'learning_rate': [0.00005, 0.0001, 0.0005],
-            'batch_size': [16, 32, 64, 128],
-            'depth': [1, 2, 3],
-            'hidden_dim': [64, 128, 256],
-            'latent_dim': [128, 256, 512],
-            'dropout_prob': [0.2],
+            'learning_rate': [0.0001, 0.0005, 0.001],
+            'batch_size': [32, 64, 128],
+            'depth': [1, 2, 3, 4],
+            'hidden_dim': [64, 128, 256, 512],
+            'latent_dim': [128, 256, 512, 1024],
+            'dropout_prob': [0.1, 0.3],
             "kl_weight": [0.0001, 0.001, 0.01],
-        } # 972 combinations, ~330 secs each = 90 hours
-    }, # total 4869 combinations, 266 hours (~11 days)
+        }
+    }, # total 5k combinations, ~12 days
 }
 
 def generate_experiments(configs) -> list:
