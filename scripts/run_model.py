@@ -25,8 +25,8 @@ CONFIGS = {
             'learning_rate': [0.0001, 0.0005, 0.001],
             'batch_size': [32, 64, 128],
             'depth': [1, 2, 3, 4],
-            'hidden_dim': [64, 128, 256, 512],
-            'latent_dim': [128, 256, 512, 1024],
+            'hidden_dim': [128, 256, 512],
+            'latent_dim': [256, 512, 1024],
             'dropout_prob': [0.1, 0.3],
         }
     },
@@ -38,8 +38,8 @@ CONFIGS = {
             'learning_rate': [0.0001, 0.0005, 0.001],
             'batch_size': [32, 64, 128],
             'depth': [1, 2, 3, 4],
-            'hidden_dim': [64, 128, 256, 512],
-            'latent_dim': [128, 256, 512, 1024],
+            'hidden_dim': [128, 256, 512],
+            'latent_dim': [256, 512, 1024],
             'dropout_prob': [0.1, 0.3],
         }
     },
@@ -51,9 +51,9 @@ CONFIGS = {
             'learning_rate': [0.0001, 0.0005, 0.001],
             'batch_size': [32, 64, 128],
             'depth': [1, 2, 3, 4],
-            'hidden_dim': [64, 128, 256, 512],
-            'latent_dim': [128, 256, 512, 1024],
-            'dropout_prob': [0.1, 0.3],
+            'hidden_dim': [128, 256, 512],
+            'latent_dim': [256, 512, 1024],
+            'dropout_prob': [0.1],
             'kl_weight': [0.0001, 0.001, 0.01],
         }
     },
@@ -65,9 +65,9 @@ CONFIGS = {
             'learning_rate': [0.0001, 0.0005, 0.001],
             'batch_size': [32, 64, 128],
             'depth': [1, 2, 3, 4],
-            'hidden_dim': [64, 128, 256, 512],
-            'latent_dim': [128, 256, 512, 1024],
-            'dropout_prob': [0.1, 0.3],
+            'hidden_dim': [128, 256, 512],
+            'latent_dim': [256, 512, 1024],
+            'dropout_prob': [0.1],
             "kl_weight": [0.0001, 0.001, 0.01],
         }
     },
@@ -79,8 +79,8 @@ CONFIGS = {
             'learning_rate': [0.0001, 0.0005, 0.001],
             'batch_size': [32, 64, 128],
             'depth': [1, 2, 3, 4],
-            'hidden_dim': [64, 128, 256, 512],
-            'latent_dim': [128, 256, 512, 1024],
+            'hidden_dim': [128, 256, 512],
+            'latent_dim': [256, 512, 1024],
             'dropout_prob': [0.1, 0.3],
         }
     },
@@ -92,12 +92,15 @@ CONFIGS = {
             'learning_rate': [0.0001, 0.0005, 0.001],
             'batch_size': [32, 64, 128],
             'depth': [1, 2, 3, 4],
-            'hidden_dim': [64, 128, 256, 512],
-            'latent_dim': [128, 256, 512, 1024],
-            'dropout_prob': [0.1, 0.3],
+            'hidden_dim': [128, 256, 512],
+            'latent_dim': [256, 512, 1024],
+            'dropout_prob': [0.1],
             "kl_weight": [0.0001, 0.001, 0.01],
         }
-    }, # total 5k combinations, ~12 days
+    }, 
+    # 3 x 648 (non-variational) -> 1,944 (2 dropout params, no kl_weight)
+    # 3 x 972 (variational)     -> 2,916 (only 1 dropout param, 3 kl_weights)
+    # total 5k combinations, ~12 days
 }
 
 def generate_experiments(configs) -> list:
