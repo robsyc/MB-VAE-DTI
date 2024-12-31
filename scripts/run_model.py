@@ -24,53 +24,53 @@ CONFIGS = {
         'hyperparamter_grid': {
             'learning_rate': [0.0001, 0.0005, 0.001],
             'batch_size': [32, 64, 128],
-            'depth': [1, 2, 3, 4],
-            'hidden_dim': [128, 256, 512],
-            'latent_dim': [256, 512, 1024],
+            'depth': [0, 1, 2, 3],
+            'hidden_dim': [64, 128, 256, 512],
+            'latent_dim': [128, 256, 512, 1024],
             'dropout_prob': [0.1, 0.3],
         }
     },
-    'single_view_emb_plain': {
-        'inputs_0': ['0/Drug_emb_graph'],
-        'inputs_1': ['1/Target_emb_T5'],
-        'model_type': 'plain',
-        'hyperparamter_grid': {
-            'learning_rate': [0.0001, 0.0005, 0.001],
-            'batch_size': [32, 64, 128],
-            'depth': [1, 2, 3, 4],
-            'hidden_dim': [128, 256, 512],
-            'latent_dim': [256, 512, 1024],
-            'dropout_prob': [0.1, 0.3],
-        }
-    },
+    # 'single_view_emb_plain': {
+    #     'inputs_0': ['0/Drug_emb_graph'],
+    #     'inputs_1': ['1/Target_emb_T5'],
+    #     'model_type': 'plain',
+    #     'hyperparamter_grid': {
+    #         'learning_rate': [0.0001, 0.0005, 0.001],
+    #         'batch_size': [32, 64, 128],
+    #         'depth': [1, 2, 3, 4],
+    #         'hidden_dim': [128, 256, 512],
+    #         'latent_dim': [256, 512, 1024],
+    #         'dropout_prob': [0.1, 0.3],
+    #     }
+    # },
     'single_view_fp_variational': {
         'inputs_0': ['0/Drug_fp'],
         'inputs_1': ['1/Target_fp'],
         'model_type': 'variational',
         'hyperparamter_grid': {
             'learning_rate': [0.0001, 0.0005, 0.001],
-            'batch_size': [32, 64, 128],
-            'depth': [1, 2, 3, 4],
-            'hidden_dim': [128, 256, 512],
-            'latent_dim': [256, 512, 1024],
-            'dropout_prob': [0.1],
-            'kl_weight': [0.0001, 0.001, 0.01],
+            'batch_size': [16, 32, 64],
+            'depth': [0, 1, 2, 3],
+            'hidden_dim': [64, 128, 256, 512],
+            'latent_dim': [128, 256, 512, 1024],
+            'dropout_prob': [0.2],
+            'kl_weight': [0.0001, 0.001, 0.005],
         }
     },
-    'single_view_emb_variational': {
-        'inputs_0': ['0/Drug_emb_graph'],
-        'inputs_1': ['1/Target_emb_T5'],
-        'model_type': 'variational',
-        'hyperparamter_grid': {
-            'learning_rate': [0.0001, 0.0005, 0.001],
-            'batch_size': [32, 64, 128],
-            'depth': [1, 2, 3, 4],
-            'hidden_dim': [128, 256, 512],
-            'latent_dim': [256, 512, 1024],
-            'dropout_prob': [0.1],
-            "kl_weight": [0.0001, 0.001, 0.01],
-        }
-    },
+    # 'single_view_emb_variational': {
+    #     'inputs_0': ['0/Drug_emb_graph'],
+    #     'inputs_1': ['1/Target_emb_T5'],
+    #     'model_type': 'variational',
+    #     'hyperparamter_grid': {
+    #         'learning_rate': [0.0001, 0.0005, 0.001],
+    #         'batch_size': [32, 64, 128],
+    #         'depth': [1, 2, 3, 4],
+    #         'hidden_dim': [128, 256, 512],
+    #         'latent_dim': [256, 512, 1024],
+    #         'dropout_prob': [0.1],
+    #         'kl_weight': [0.0001, 0.001, 0.005],
+    #     }
+    # },
     'multi_view_plain': {
         'inputs_0': ['0/Drug_fp', '0/Drug_emb_graph', '0/Drug_emb_image', '0/Drug_emb_text'],
         'inputs_1': ['1/Target_fp', '1/Target_emb_T5', '1/Target_emb_DNA', '1/Target_emb_ESM'],
@@ -79,7 +79,7 @@ CONFIGS = {
             'learning_rate': [0.0001, 0.0005, 0.001],
             'batch_size': [32, 64, 128],
             'depth': [1, 2, 3, 4],
-            'hidden_dim': [128, 256, 512],
+            'hidden_dim': [64, 128, 256, 512],
             'latent_dim': [256, 512, 1024],
             'dropout_prob': [0.1, 0.3],
         }
@@ -90,12 +90,12 @@ CONFIGS = {
         'model_type': 'variational',
         'hyperparamter_grid': {
             'learning_rate': [0.0001, 0.0005, 0.001],
-            'batch_size': [32, 64, 128],
+            'batch_size': [16, 32, 64],
             'depth': [1, 2, 3, 4],
-            'hidden_dim': [128, 256, 512],
+            'hidden_dim': [64, 128, 256, 512],
             'latent_dim': [256, 512, 1024],
-            'dropout_prob': [0.1],
-            "kl_weight": [0.0001, 0.001, 0.01],
+            'dropout_prob': [0.2],
+            'kl_weight': [0.0001, 0.001, 0.005],
         }
     }, 
     # 3 x 648 (non-variational) -> 1,944 (2 dropout params, no kl_weight)
