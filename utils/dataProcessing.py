@@ -7,8 +7,6 @@ from rdkit import Chem
 from rdkit.Chem import Descriptors
 from tdc.multi_pred import DTI
 from typing import Literal
-from collections import Counter
-from scipy.spatial.distance import pdist, squareform
 import h5torch
 from Bio import Entrez, SeqIO
 
