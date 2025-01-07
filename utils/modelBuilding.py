@@ -10,9 +10,9 @@ def get_model_params(model):
 
 
 
-class GraphGenerator(nn.Module):
+class MoleculeGenerator(nn.Module):
     """
-    Generator model for graph generation.
+    Generator block for molecule generation.
 
     Args:
         - latent_dim: int, the dimensionality of the input tensor
@@ -26,7 +26,7 @@ class GraphGenerator(nn.Module):
     # - https://pygmtools.readthedocs.io/en/latest/guide/numerical_backends.html#example-matching-isomorphic-graphs-with-pytorch-backend
     # - https://pygmtools.readthedocs.io/en/latest/api/_autosummary/pygmtools.utils.build_aff_mat.html#pygmtools.utils.build_aff_mat
     def __init__(self, latent_dim, hidden_dim, depth, dropout_prob, n_nodes, n_iters):
-        super(GraphGenerator, self).__init__()
+        super(MoleculeGenerator, self).__init__()
         self.depth = depth
         self.n_nodes = n_nodes
         self.n_iters = n_iters
@@ -78,7 +78,7 @@ class GraphGenerator(nn.Module):
         return adj # (batch_size, n_nodes, n_nodes)
 
 
-class ResidualBranch(nn.Module):
+class ResidualMLP(nn.Module):
     """
     MLP with residual connections, LayerNorm, SiLU/ELU activation, and dropout.
 
@@ -89,6 +89,7 @@ class ResidualBranch(nn.Module):
         - depth: int, the number of hidden residual layers
         - dropout_prob: float, the dropout probability (default: 0.1)
         - activation: str, the activation function (default: 'SiLU')
+        - layer_scale: float, the value by which residual outputs are initially scaled
     """
     def __init__(
             self,
@@ -98,27 +99,46 @@ class ResidualBranch(nn.Module):
             depth: int,
             dropout_prob: float = 0.1,
             activation: str = 'SiLU',
+            layer_scale: float = 1e-4
     ):
-        super(ResidualBranch, self).__init__()
-        self.activation = nn.SiLU() if activation == 'SiLU' else nn.ELU()
+        super(ResidualMLP, self).__init__()
+        if activation == 'SiLU':
+            self.activation = nn.SiLU()
+        elif activation == 'GELU':
+            self.activation = nn.GELU() # bit more expensive to compute but may be worth it ...
+        elif activation == 'ELU':
+            self.activation = nn.ELU()
+        else:
+            raise Exception(f"Activation '{activation}' not implemented")
+        
         self.input2hidden = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, hidden_dim, bias=False),
             self.activation,
             nn.Dropout(dropout_prob),
         )
+
         self.hidden_layers = nn.ModuleList([
             nn.Sequential(
                 nn.LayerNorm(hidden_dim),
-                nn.Linear(hidden_dim, hidden_dim, bias=False),
+                nn.Linear(hidden_dim, 4 * hidden_dim, bias=False),
                 self.activation,
                 nn.Dropout(dropout_prob),
-                nn.Linear(hidden_dim, hidden_dim, bias=False),
+                nn.Linear(4 * hidden_dim, hidden_dim, bias=False),
             ) for _ in range(depth)
         ])
-        self.layer_norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(depth)])
-        self.hidden2output = nn.Linear(hidden_dim, output_dim)
+
+        self.layer_norms = nn.ModuleList([
+            nn.LayerNorm(hidden_dim) for _ in range(depth)])
+        self.layer_scales = nn.ParameterList([
+            nn.Parameter(torch.ones(hidden_dim) * layer_scale) for _ in range(depth)])
+        
+        self.hidden2output = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, output_dim, bias=False),
+        )
     
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
             - x: torch.Tensor, the input tensor of shape (batch_size, input_dim)
@@ -126,8 +146,12 @@ class ResidualBranch(nn.Module):
             - x: torch.Tensor, the output tensor of shape (batch_size, output_dim)
         """
         x = self.input2hidden(x)
-        for i, layer in enumerate(self.hidden_layers):
-            x = self.layer_norms[i](x + layer(x))
+
+        for layer, scale, norm in zip(self.hidden_layers, self.layer_scales, self.layer_norms):
+            residual = layer(x)
+            residual = residual * scale.view(1, -1)
+            x = norm(x + residual)
+
         return self.hidden2output(x)
 
 
@@ -160,11 +184,11 @@ class DrugTargetTree(nn.Module):
         #   Each leaf is a ResidualBranch that encodes a view of the drug or target
         #   from their respective input dimensions into a latent space of dimension latent_dim
         self.drug_leafs = nn.ModuleList([
-            ResidualBranch(drug_dim, hidden_dim, latent_dim, depth, dropout_prob)
+            ResidualMLP(drug_dim, hidden_dim, latent_dim, depth, dropout_prob)
             for drug_dim in drug_dims
         ])
         self.target_leafs = nn.ModuleList([
-            ResidualBranch(target_dim, hidden_dim, latent_dim, depth, dropout_prob)
+            ResidualMLP(target_dim, hidden_dim, latent_dim, depth, dropout_prob)
             for target_dim in target_dims
         ])
 
@@ -249,11 +273,11 @@ class VariationalDrugTargetTree(nn.Module):
         # Initialize drug and target leafs
         #   Same as before, but we project to means & logvars of multivariate Gaussian
         self.drug_leafs = nn.ModuleList([
-            ResidualBranch(drug_dim, hidden_dim, 2 * latent_dim, depth, dropout_prob)
+            ResidualMLP(drug_dim, hidden_dim, 2 * latent_dim, depth, dropout_prob)
             for drug_dim in drug_dims
         ])
         self.target_leafs = nn.ModuleList([
-            ResidualBranch(target_dim, hidden_dim, 2 * latent_dim, depth, dropout_prob)
+            ResidualMLP(target_dim, hidden_dim, 2 * latent_dim, depth, dropout_prob)
             for target_dim in target_dims
         ])
 
