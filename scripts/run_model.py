@@ -27,7 +27,7 @@ CONFIGS = {
             'depth': [0, 1, 2, 3],
             'hidden_dim': [64, 128, 256, 512],
             'latent_dim': [128, 256, 512, 1024],
-            'dropout_prob': [0.1, 0.3],
+            'dropout_prob': [0.1, 0.3]
         }
     },
     # 'single_view_emb_plain': {
@@ -81,7 +81,7 @@ CONFIGS = {
             'depth': [1, 2, 3, 4],
             'hidden_dim': [64, 128, 256, 512],
             'latent_dim': [256, 512, 1024],
-            'dropout_prob': [0.1, 0.3],
+            'dropout_prob': [0.1, 0.3]
         }
     },
     'multi_view_variational': {
@@ -98,8 +98,6 @@ CONFIGS = {
             'kl_weight': [0.0001, 0.001, 0.005],
         }
     }, 
-    # 3 x 648 (non-variational) -> 1,944 (2 dropout params, no kl_weight)
-    # 3 x 972 (variational)     -> 2,916 (only 1 dropout param, 3 kl_weights)
     # total 5k combinations, ~12 days
 }
 

@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 import h5torch
 import copy
-from utils.modelBuilding import DrugTargetTree, VariationalDrugTargetTree
+from utils.modelBuilding import DrugTargetTree
 
 
 def get_dataset(split_type, split_name):
@@ -78,20 +78,15 @@ def train_and_evaluate(
 
     # Define the model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    variational = config['model_type'] != "plain"
     model = DrugTargetTree(
         drug_dims=drug_dims,
         target_dims=target_dims,
         hidden_dim=hidden_dim,
         latent_dim=latent_dim,
         depth=depth,
-        dropout_prob=dropout_prob
-    ).to(device) if config['model_type'] == "plain" else VariationalDrugTargetTree(
-        drug_dims=drug_dims,
-        target_dims=target_dims,
-        hidden_dim=hidden_dim,
-        latent_dim=latent_dim,
-        depth=depth,
         dropout_prob=dropout_prob,
+        variational=variational
     ).to(device)
 
     # Loss function and optimizer
@@ -106,7 +101,7 @@ def train_and_evaluate(
     best_model_state = copy.deepcopy(model.state_dict())
     
     # Training loop
-    while True:
+    while True and epoch < 100:
         epoch += 1
         model.train()
         total_train_loss = 0
@@ -118,10 +113,10 @@ def train_and_evaluate(
             # Forward pass
             if config['model_type'] == 'plain':
                 output = model(x0, x1)
-                loss = loss_fn(output.squeeze(), y)
+                loss = loss_fn(output.predictions.squeeze(), y)
             else:
-                output, kl_loss = model(x0, x1, compute_kl_loss=True)
-                loss = loss_fn(output.squeeze(), y) + kl_weight * kl_loss
+                output = model(x0, x1, compute_kl_loss=True)
+                loss = loss_fn(output.predictions.squeeze(), y) + kl_weight * output.kl_loss
 
             # Backward pass and optimization
             optimizer.zero_grad()
@@ -144,7 +139,7 @@ def train_and_evaluate(
 
                 # Forward pass (no kl_loss computation)
                 output = model(x0, x1)
-                loss = loss_fn(output.squeeze(), y)
+                loss = loss_fn(output.predictions.squeeze(), y)
 
                 total_valid_loss += loss.item()
 
@@ -172,6 +167,7 @@ def train_and_evaluate(
     model.eval()
     total_test_loss = 0
     predictions = []
+    # attention_weights = []
     with torch.no_grad():
         for x0, x1, y in test_loader:
             # Move data to device
@@ -180,12 +176,15 @@ def train_and_evaluate(
             y = y.to(device).float()
 
             # Forward pass (no kl_loss computation)
-            output = model(x0, x1)
-            loss = loss_fn(output.squeeze(), y)            
-            predictions.append((output.squeeze().cpu().numpy(), y.cpu().numpy()))
+            output = model(x0, x1, return_attn=True)
+            loss = loss_fn(output.predictions.squeeze(), y)
+            predictions.append((output.predictions.squeeze().cpu().numpy(), y.cpu().numpy()))
+            # attention_weights.append(output.attention_weights)
             total_test_loss += loss.item()
 
     avg_test_loss = total_test_loss / len(test_loader)
+    # TODO: attention weights (needs to work for single and multi view case)
+    # attention_weights = [torch.mean(torch.stack(weights), dim=0) for weights in attention_weights]
     # TODO: plot residuals, other metrics e.g. concordance index
     print(f"Test Loss: {avg_test_loss:.4f}")
 
