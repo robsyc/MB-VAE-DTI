@@ -11,10 +11,8 @@ import h5torch
 from collections import defaultdict
 from Bio import Entrez, SeqIO
 
-MAX_N_HEAVY_ATOMS = 60
-MAX_AA_SEQ_LEN = 1200
-
-sns.set_style("whitegrid")
+MAX_N_HEAVY_ATOMS = 64
+MAX_AA_SEQ_LEN = 1280
 
 def load_Metz():
     try:
@@ -101,7 +99,8 @@ def plot_interaction_distribution(
         dfs: List of dataframes containing interaction data
         names: List of dataset names corresponding to the dataframes
     """
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+    sns.set_style("whitegrid")
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
     
     # Define thresholds and y-limits for each type
     thresholds = {"Y_pKd": 7.0, "Y_pKi": 7.6, "Y_KIBA": 12.1}
@@ -121,6 +120,7 @@ def plot_interaction_distribution(
                     ax=ax,
                     alpha=0.5
                 )
+                ax.set_xlabel(score_type.replace("Y_", ""))
         
         # Add threshold line and set limits if we have data for this type
         if has_data:
@@ -128,7 +128,7 @@ def plot_interaction_distribution(
                       label=f'Threshold ({thresholds[score_type]})')
             ax.set_ylim(ylims[score_type])
             
-        ax.set_title(f'Histogram of {score_type.replace("_", "-")} Distribution')
+        ax.set_title(f'Histogram of {score_type.replace("Y_", "")} Distribution')
         if has_data:
             ax.legend()
         else:
@@ -136,6 +136,46 @@ def plot_interaction_distribution(
                    horizontalalignment='center',
                    verticalalignment='center',
                    transform=ax.transAxes)
+
+    # Plot binary interaction distribution with colored bars for bound/unbound
+    data = []
+    for df, name in zip(dfs, names):
+        # Calculate percentages
+        counts = df['Y'].value_counts()
+        total = len(df)
+        data.append({
+            'Dataset': name,
+            'Status': 'Bound',
+            'Percentage': (counts.get(True, 0) / total) * 100
+        })
+        data.append({
+            'Dataset': name,
+            'Status': 'Unbound',
+            'Percentage': (counts.get(False, 0) / total) * 100
+        })
+    
+    # Convert to DataFrame for easier plotting
+    plot_df = pd.DataFrame(data)
+    
+    # Create grouped bar plot with seaborn styling
+    sns.set_style("whitegrid")
+    sns.barplot(
+        data=plot_df,
+        x='Dataset',
+        y='Percentage',
+        hue='Status',
+        ax=ax4,
+        alpha=0.5
+    )
+    
+    # Customize the plot to match histogram style
+    ax4.set_ylabel('Percentage of Interactions (%)')
+    ax4.set_xlabel('')
+    ax4.tick_params(axis='x', rotation=45)
+    ax4.grid(True, alpha=0.3)
+    ax4.set_title('Binary Interaction Distribution')
+    ax4.set_xlabel('Interaction')
+    ax4.legend()
     
     plt.tight_layout()
     plt.show()
@@ -222,3 +262,38 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     
     return filtered_df.drop(columns=['n_heavy_atoms'])
 
+def get_IDs():
+    Drug_SMILE2IDs = {}
+    Target_AA2IDs = {}
+
+    for name in ["DAVIS", "BindingDB_Kd", "BindingDB_Ki", "Metz", "KIBA"]:
+        # Load dataset
+        if name == "Metz":
+            data = pd.read_csv('data/Metz.csv')
+            # Map protein sequence to unique GeneID and Symbol for Metz
+            for seq, symbol in zip(data['ProteinSequence'], data['Symbol']):
+                if seq not in Target_AA2IDs:
+                    Target_AA2IDs[seq] = set()
+                Target_AA2IDs[seq].add(f"{symbol}")
+        
+        else:
+            data = DTI(name=name).get_data()
+            # Map SMILES to unique Drug_ID for other datasets
+            for smile, drug_id in zip(data['Drug'], data['Drug_ID']):
+                if smile not in Drug_SMILE2IDs:
+                    Drug_SMILE2IDs[smile] = set()
+                Drug_SMILE2IDs[smile].add(f"{drug_id}")
+            
+            # Map protein sequence to unique Target_ID for other datasets  
+            for seq, target_id in zip(data['Target'], data['Target_ID']):
+                if seq not in Target_AA2IDs:
+                    Target_AA2IDs[seq] = set()
+                Target_AA2IDs[seq].add(f"{target_id}")
+
+    return Drug_SMILE2IDs, Target_AA2IDs
+
+
+# TODO
+# - use get_IDs to add DNA sequences to the AA sequences (and save fasta file)
+# - add random- and cold-split columns to the dataframe
+# - create h5torch dataset
