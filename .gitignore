@@ -1,5 +1,6 @@
 data/
 notebooks/results/
+external/
 
 # ignore model checkpoints
 *.pth

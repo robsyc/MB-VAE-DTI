@@ -1,0 +1,28 @@
+name: mbvae_env
+channels:
+  - pytorch
+  - pyg
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip=23.1.2
+  - numpy=1.24.3
+  - pandas=2.0.2
+  - matplotlib=3.7.1
+  - seaborn=0.12.2
+  - ipykernel=6.23.1
+  - notebook=6.5.4
+  - pip:
+    - wheel==0.44.0
+    - rdkit==2023.9.6
+    - PyTDC==1.1.1
+    - biopython==1.84
+    - subword-nmt==0.3.8
+    - h5torch==0.2.14
+    - transformers==4.46.3
+    - sentencepiece==0.2.0
+    - fuse-med-ml==0.3.0
+    - pytorch-fast-transformers==0.4.0
+    - fair-esm==2.0.0
+    - torch-geometric==2.3.1 

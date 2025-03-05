@@ -2,10 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_model_params(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return 0 if model is None else sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 @dataclass
 class DrugTargetOutput:
@@ -13,11 +15,9 @@ class DrugTargetOutput:
     
     Args:
         predictions: Tensor of interaction predictions
-        attention_weights: Optional tuple of attention weights for drug and target views
         kl_loss: Optional KL divergence loss for variational models
     """
     predictions: torch.Tensor
-    attention_weights: Optional[Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]] = None
     kl_loss: Optional[torch.Tensor] = None
 
 
@@ -82,7 +82,7 @@ class MoleculeGenerator(nn.Module):
 
     def _generate_adj(self, x):
         """Convert sampled topology to adjacency matrix."""
-        adj = torch.zeros(x.size(0), self.n_nodes, self.n_nodes)
+        adj = torch.zeros(x.size(0), self.n_nodes, self.n_nodes, device=x.device)
         idx = torch.triu_indices(self.n_nodes, self.n_nodes, 1)
         adj[:, idx[0], idx[1]] = self._gumbel_softmax(x)  # Fill upper triangular part
         adj = adj + adj.transpose(1, 2)  # Symmetrize
@@ -198,33 +198,34 @@ class DrugTargetTree(nn.Module):
         self.output_dim = 2*latent_dim if variational else latent_dim
 
         # Initialize drug and target leafs
-        #   Each leaf is a ResidualBranch that encodes a view of the drug or target
-        #   from their respective input dimensions into a latent space of dimension latent_dim
+        #   Each leaf is a ResidualMLP that encodes a view of the drug or target
+        #   from their respective input dimensions into a hidden space of dimension hidden_dim
         self.drug_leafs = nn.ModuleList([
-            ResidualMLP(drug_dim, hidden_dim, self.output_dim, depth, dropout_prob)
+            ResidualMLP(drug_dim, hidden_dim, hidden_dim, depth, dropout_prob)
             for drug_dim in drug_dims
-        ])
+        ]) if self.drug_multiview else ResidualMLP(drug_dims[0], hidden_dim, self.output_dim, depth, dropout_prob)
         self.target_leafs = nn.ModuleList([
-            ResidualMLP(target_dim, hidden_dim, self.output_dim, depth, dropout_prob)
+            ResidualMLP(target_dim, hidden_dim, hidden_dim, depth, dropout_prob)
             for target_dim in target_dims
-        ])
+        ]) if self.target_multiview else ResidualMLP(target_dims[0], hidden_dim, self.output_dim, depth, dropout_prob)
 
-        # Initialize attentive branches
-        #   View-wise attention logits that treat view's latent space as channels 
-        #   generating a single attention score for each view
-        #   (essentially a projection from each view to an interpretable importance score)
-        p_attn = 0
-        if self.drug_multiview:
-            self.drug_to_attn_logits = nn.Conv1d(self.output_dim, 1, 1)
-            p_attn += get_model_params(self.drug_to_attn_logits)
-        if self.target_multiview:
-            self.target_to_attn_logits = nn.Conv1d(self.output_dim, 1, 1)
-            p_attn += get_model_params(self.target_to_attn_logits)
+        # Initialize branches
+        #   Each branch is a ResidualMLP that encodes the concatenation of all views of the drug or target
+        #   into a single latent space of dimension self.output_dim
+        self.drug_branch = ResidualMLP(
+            hidden_dim * len(drug_dims), hidden_dim, self.output_dim, depth, dropout_prob
+            ) if self.drug_multiview else None
+        self.target_branch = ResidualMLP(
+            hidden_dim * len(target_dims), hidden_dim, self.output_dim, depth, dropout_prob
+            ) if self.target_multiview else None
 
         p_trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        print(f"Number of parameters\n - Drug Leafs: {get_model_params(self.drug_leafs):,}\n - Target Leafs: {get_model_params(self.target_leafs):,}\n - Attention: {p_attn:,}\n - Total: {p_trainable:,}")
+        print(f"""Number of parameters
+- Drug   leafs & branch: {get_model_params(self.drug_leafs):,}, {get_model_params(self.drug_branch):,}
+- Target leafs & branch: {get_model_params(self.target_leafs):,}, {get_model_params(self.target_branch):,}
+- Total: {p_trainable:,}""")
 
-    def forward(self, drug_inputs, target_inputs, return_attn = False, compute_kl_loss = False):
+    def forward(self, drug_inputs, target_inputs, compute_kl_loss = False):
         """
         Args:
             - drug_inputs: list of torch.Tensor, the input tensor(s) of the drug-branch
@@ -234,26 +235,19 @@ class DrugTargetTree(nn.Module):
             - y_hat: torch.Tensor, the output tensor of shape (batch_size, 1)
         """
         # Encode drug and target inputs to same hidden space
-        #   Both: n_views x (batch_size, view_dim) -> (batch_size, latent_dim, n_views)
-        #   Stack ensures that the latent spaces are aligned along the last dimension
-        drug_latents = torch.stack(
+        #   Both: n_views x (batch_size, view_dim) -> (batch_size, n_views * hidden_dim)
+        #   Concatenate ensures that the latent spaces are aligned along the last dimension
+        drug_latents = torch.cat(
             [leaf(drug_input) for leaf, drug_input in zip(self.drug_leafs, drug_inputs)], dim=-1
-            ) if self.drug_multiview else self.drug_leafs[0](drug_inputs[0])
-        target_latents = torch.stack(
+            ) if self.drug_multiview else self.drug_leafs(drug_inputs[0])
+        target_latents = torch.cat(
             [leaf(target_input) for leaf, target_input in zip(self.target_leafs, target_inputs)], dim=-1
-            ) if self.target_multiview else self.target_leafs[0](target_inputs[0])
-        
-        # Compute view-wise attention weights
-        #   Both: (batch_size, latent_dim, n_views) -> (batch_size, 1, n_views)
-        #   Softmax ensures that the attention scores sum to 1 across views
-        drug_attn = self.drug_to_attn_logits(drug_latents).softmax(dim = -1) if self.drug_multiview else None
-        target_attn = self.target_to_attn_logits(target_latents).softmax(dim = -1) if self.target_multiview else None
+            ) if self.target_multiview else self.target_leafs(target_inputs[0])
 
-        # Scale drug and target latents by view-wise attention weights and sum
-        #   Both: (batch_size, latent_dim, n_views) * (batch_size, 1, n_views) -> (batch_size, latent_dim)
-        #   Summing across views gives a single latent vector for each drug and target (and we get an *importance score* for each view)
-        drug_latents = torch.sum(drug_latents * drug_attn, dim=-1) if self.drug_multiview else drug_latents
-        target_latents = torch.sum(target_latents * target_attn, dim=-1) if self.target_multiview else target_latents
+        # Encode drug and target latents to output space
+        #   Both: (batch_size, n_views * hidden_dim) -> (batch_size, output_dim)
+        drug_latents = self.drug_branch(drug_latents) if self.drug_multiview else drug_latents
+        target_latents = self.target_branch(target_latents) if self.target_multiview else target_latents
 
         # In case of variational inference, reparameterize the latent space
         #   Both: (batch_size, 2*latent_dim) -> (batch_size, latent_dim)
@@ -268,16 +262,10 @@ class DrugTargetTree(nn.Module):
         #   Dot product gives a single interaction score for each drug and target
         y_hat = torch.sum(drug_latents * target_latents, dim=1)
         
-        attn_weights = (
-            drug_attn.mean(dim=0).squeeze() if self.drug_multiview else None,
-            target_attn.mean(dim=0).squeeze() if self.target_multiview else None
-        ) if return_attn else None
-
         kl_loss = self._kl_divergence(drug_mean, drug_logvar) + self._kl_divergence(target_mean, target_logvar) if compute_kl_loss and self.variational else None
 
         return DrugTargetOutput(
             predictions=y_hat,
-            attention_weights=attn_weights,
             kl_loss=kl_loss
         )
 

@@ -1,0 +1,45 @@
+{
+    "datasets": {
+        "davis": {
+            "enabled": true
+        },
+        "kiba": {
+            "enabled": true
+        },
+        "bindingdb_ki": {
+            "enabled": true
+        },
+        "bindingdb_kd": {
+            "enabled": true
+        },
+        "metz": {
+            "enabled": true
+        }
+    },
+    "drug_embeddings": {
+        "fingerprints": {
+            "enabled": true
+        },
+        "biomed_smmv": {
+            "enabled": true,
+            "model_path": "data/checkpoints/Biomed_multiview_dir/biomed-smmv-base.pth"
+        }
+    },
+    "protein_embeddings": {
+        "fingerprints": {
+            "enabled": true
+        },
+        "prost5": {
+            "enabled": true,
+            "model_path": "data/checkpoints/ProstT5_model_dir"
+        },
+        "esm": {
+            "enabled": false
+        }
+    },
+    "filters": {
+        "max_heavy_atoms": 60,
+        "max_mol_weight": 600,
+        "max_seq_len": 1200
+    }
+} 
