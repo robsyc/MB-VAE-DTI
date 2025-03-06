@@ -19,5 +19,6 @@ from mb_vae_dti.loading.datasets import (
 from mb_vae_dti.loading.visualization import (
     plot_interaction_distribution,
     plot_dataset_statistics,
-    plot_dataset_overlap
+    plot_dataset_overlap,
+    plot_promiscuity_analysis
 )
