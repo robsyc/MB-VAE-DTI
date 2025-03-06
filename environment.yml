@@ -25,4 +25,5 @@ dependencies:
     - fuse-med-ml==0.3.0
     - pytorch-fast-transformers==0.4.0
     - fair-esm==2.0.0
-    - torch-geometric==2.3.1 
+    - torch-geometric==2.3.1
+    - upsetplot==0.8.0 

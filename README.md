@@ -1,63 +1,70 @@
 # Multi-branch Variational Encoders for Drug-target Interaction Prediction (MB-VAE-DTI)
 
-A machine learning framework for predicting drug-target interactions using multi-branch variational autoencoders with multiple embedding strategies.
+A machine learning framework for predicting drug-target interactions using multi-branch variational autoencoders leveraging pre-computed embeddings.
 
 ## Project Overview
 
 This project implements a novel approach to the dyadic Drug-Target Interaction (DTI) prediction problem using multi-branch variational autoencoders. The framework supports multiple embedding strategies for both drugs (molecules) and protein targets, allowing for flexible and powerful representation learning.
 
 Key features:
-- Multiple embedding strategies for drugs (fingerprints, graph embeddings, images, etc.)
-- Multiple embedding strategies for proteins (fingerprints, amino acid and DNA sequence embeddings, etc.)
+- Multiple drug representations (fingerprints, SMILES, graph embeddings, images)
+- Multiple protein representations (fingerprints, amino acid and DNA sequences)
 - Variational and non-variational encoder architectures
 - Inspection of latent spaces & exploration of generative capabilities
-- Comprehensive evaluation on standard DTI datasets (DAVIS, KIBA, BindingDB) and a new aggregated dataset of >400k interactions & pre-computed embeddings
+- Comprehensive evaluation on standard DTI datasets (DAVIS, KIBA, BindingDB and Metx) and a new aggregated dataset of >400k interactions & pre-computed embeddings
 
 ## Repository Structure
 
 ```
 MB-VAE-DTI/
-├── mb_vae_dti/              # Main Python package
-│   ├── loading/
-│   │   ├── __init__.py
-│   │   ├── datasets.py        # Loading initial DTI datasets
-│   │   ├── annotation.py      # FASTA files, CID, etc.
-│   │   └── visualization.py   # Plotting metrics for loaded data
-│   ├── processing/          # Data processing functionality
+├── mb_vae_dti/                 # Main Python package
+│   ├── loading/                # Loading and preprocessing datasets
+│   │   ├── datasets.py         # Loading initial DTI datasets
+│   │   ├── annotation.py       # FASTA files, CID, etc.
+│   │   └── visualization.py    # Plotting metrics for loaded data
+|   | 
+│   ├── processing/             # Embedding generation
 │   │   ├── h5torch_creation.py # Creating h5torch files
 │   │   ├── drug_embedding.py   # Drug embedding generation
 │   │   └── prot_embedding.py   # Protein embedding generation
-│   ├── training/            # Model training functionality
-│   │   ├── models.py        # Model architecture definitions
-│   │   ├── components.py    # Reusable model components
-│   │   └── trainer.py       # Training loop implementation
-│   └── validating/          # Validation and analysis functionality
-│       ├── metrics.py       # Accuracy metrics computation
-│       └── visualization.py # Result plotting and visualization
-├── external/                # External dependencies (gitignored)
-│   ├── bmfm_sm/             # Biomedical foundation models
-│   └── ESPF/                # Protein encoding utilities
-├── data/                    # Data directory
-│   ├── source/              # Original datasets
-│   ├── processed/           # Processed h5torch files
-│   ├── images/              # Generated plots and visualizations
-│   ├── checkpoints/         # Model checkpoints
-│   └── results/             # Model outputs and analysis
-├── notebooks/               # Jupyter notebooks for experiments
-│   ├── loading.ipynb        # Data loading and exploration
-│   ├── processing.ipynb     # Data processing and embedding generation
-│   ├── training.ipynb       # Model building and training
-│   └── validating.ipynb     # Result analysis and validation
-├── scripts/                 # Scripts for running experiments
-│   ├── configs/             # Configuration files
-│   │   ├── embedding_config.json # Embedding generation config
-│   │   └── model_config.json     # Model training config
-│   ├── embedding.sh         # Shell script for embedding generation
-│   ├── model.sh             # Shell script for model training
-│   └── hpc.pbs              # PBS script with batch indexing
-├── setup.py                 # Package installation script
-├── environment.yml          # Conda environment specification
-└── README.md                # Project documentation
+|   |
+│   ├── training/               # Model training
+│   │   ├── models.py           # Model architecture definitions
+│   │   ├── components.py       # Reusable model components
+│   │   └── trainer.py          # Training loop implementation
+|   |
+│   └── validating/             # Validation and analysis
+│       ├── metrics.py          # Accuracy metrics computation
+│       └── visualization.py    # Result plotting and visualization
+|
+├── external/                   # External dependencies (gitignored)
+│   ├── bmfm_sm/                # Biomedical foundation models
+│   └── ESPF/                   # Protein encoding utilities
+|
+├── data/                       # Data directory
+│   ├── source/                 # Original datasets
+│   ├── processed/              # Processed datasets & h5torch files
+│   ├── images/                 # Generated plots and visualizations
+│   ├── checkpoints/            # Model checkpoints
+│   └── results/                # Model outputs and analysis
+|
+├── notebooks/                  # Jupyter notebooks for reproducing experiments
+│   ├── loading.ipynb           # Data loading and exploration
+│   ├── processing.ipynb        # Data processing and embedding generation
+│   ├── training.ipynb          # Model building and training
+│   └── validating.ipynb        # Result analysis and validation
+|
+├── scripts/                    # Scripts for running experiments on HPC
+│   ├── configs/                # Configuration files
+│   │   ├── train_config.json   # 
+│   │   └── valid_config.json   # 
+│   ├── embedding.sh            # Shell script for embedding generation
+│   ├── model.sh                # Shell script for model training
+│   └── hpc.pbs                 # PBS script with batch indexing
+|
+├── setup.py                    # Package installation script
+├── environment.yml             # Conda environment specification
+└── README.md                   # Project documentation
 ```
 
 ## Installation
@@ -68,6 +75,17 @@ MB-VAE-DTI/
 - CUDA-compatible GPU (recommended)
 
 ### Setup
+
+## Quick Start
+
+You can either:
+
+1. **Download the complete repository** including all datasets and pre-trained models:
+   - Link: TBA (coming soon)
+   - This option provides everything needed to immediately start experimenting with the models.
+
+2. **Build from scratch** using the setup instructions below:
+
 
 ```bash
 # Clone the repository
@@ -83,7 +101,6 @@ pip install -e .
 
 # Create necessary directories
 mkdir -p data/source data/processed data/images data/checkpoints data/results
-mkdir -p external
 ```
 
 ### External Dependencies
@@ -96,15 +113,15 @@ mkdir -p external
 cd external
 
 # Clone the biomedical foundation models repository
-git clone https://github.com/path/to/bmfm_sm.git
+git clone git@github.com:BiomedSciAI/biomed-multi-view.git
 cd bmfm_sm
-# Follow installation instructions in the repository's README
+# Follow installation instructions in the [repository's README](https://github.com/BiomedSciAI/biomed-multi-view)
 cd ..
 
 # Clone the protein encoding utilities repository
-git clone https://github.com/path/to/ESPF.git
+git clone git@github.com:kexinhuang12345/ESPF.git
 cd ESPF
-# Follow installation instructions in the repository's README
+# Follow installation instructions in the [repository's README](https://github.com/kexinhuang12345/ESPF)
 cd ..
 
 # Return to project root
@@ -117,16 +134,16 @@ Some embedding methods require pre-trained models:
 
 ```bash
 # Create model directories
-mkdir -p models/bmfm_model_dir models/ProstT5_model_dir
+mkdir -p data/checkpoints/Biomed_multiview_dir data/checkpoints/ProstT5_model_dir
 
 # Download models (manual step)
 # 1. Download biomed-smmv-base.pth from:
 #    https://ad-prod-biomed.s3.us-east-1.amazonaws.com/biomed.multi-view/data_root_os_v1.tar.gz
-#    and place in models/bmfm_model_dir/
+#    and place in data/checkpoints/Biomed_multiview_dir/
 
 # 2. Download ProstT5 files from:
 #    https://huggingface.co/Rostlab/ProstT5/tree/main
-#    and place in models/ProstT5_model_dir/
+#    and place in data/checkpoints/ProstT5_model_dir/
 ```
 
 ## Usage
@@ -143,10 +160,10 @@ jupyter notebook notebooks/loading.ipynb
 
 This will:
 - Download DTI datasets (DAVIS, KIBA, BindingDB)
-- Apply filters and transformations
-- Generate intermediate files for embedding generation
+- Merge and apply filters
+- ... (add DNA seq and identifiers)
 
-2. **Generating embeddings and creating h5torch files**:
+1. **Generating embeddings and creating h5torch files**:
 ```bash
 # Run the processing notebook
 jupyter notebook notebooks/processing.ipynb
@@ -157,7 +174,7 @@ bash scripts/embedding.sh
 
 This will:
 - Generate embeddings for drugs and proteins
-- Create h5torch files for efficient data loading
+- Create [h5torch](https://h5torch.readthedocs.io/en/latest/) files for efficient storage & loading
 - Save processed data in the data/processed directory
 
 ### Model Training
@@ -206,12 +223,7 @@ The core model architecture is a multi-branch variational autoencoder that can p
 ## Results
 
 The model has been evaluated on standard DTI benchmark datasets:
-
-- **DAVIS**: 72 kinase targets and 442 drugs with Kd values
-- **KIBA**: 229 targets and 2,111 drugs
-- **BindingDB**: Larger dataset with Ki and Kd values
-
-Performance metrics include MSE, RMSE, Pearson correlation, and Spearman correlation.
+...
 
 ## Citation
 

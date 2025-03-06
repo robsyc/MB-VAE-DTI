@@ -27,6 +27,8 @@ setup(
         "wheel",
         "pandas",
         "numpy",
+        "matplotlib",
+        "seaborn",
         "ipykernel",
         "notebook",
         "rdkit",
@@ -40,6 +42,7 @@ setup(
         "fuse-med-ml==0.3.0",
         "pytorch-fast-transformers==0.4.0",
         "fair-esm",
+        "upsetplot",
     ],
     extras_require={
         "dev": [
