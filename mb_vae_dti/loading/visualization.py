@@ -342,7 +342,7 @@ def plot_promiscuity_analysis(
     ax1 = fig.add_subplot(gs[0, 0])
     
     # Boxplot on primary axis
-    sns.boxplot(x=drug_counts['interaction_count'], ax=ax1)
+    sns.boxplot(x=drug_counts['interaction_count'], ax=ax1, color='blue')
     ax1.set_xscale('log')
     ax1.set_title(f'Drug Interaction Counts (n={total_drugs:,})', fontsize=14)
     ax1.set_xlabel('Number of Interactions (log scale)')
@@ -374,7 +374,7 @@ def plot_promiscuity_analysis(
     ax2 = fig.add_subplot(gs[0, 1])
     
     # Boxplot on primary axis
-    sns.boxplot(x=target_counts['interaction_count'], ax=ax2)
+    sns.boxplot(x=target_counts['interaction_count'], ax=ax2, color='green')
     ax2.set_xscale('log')
     ax2.set_title(f'Target Interaction Counts (n={total_targets:,})', fontsize=14)
     ax2.set_xlabel('Number of Interactions (log scale)')
@@ -401,6 +401,8 @@ def plot_promiscuity_analysis(
     print(f"25th: {target_percentiles[0]:.0f}, 50th: {target_percentiles[1]:.0f}, 75th: {target_percentiles[2]:.0f}")
     print(f"90th: {target_percentiles[3]:.0f}, 95th: {target_percentiles[4]:.0f}, 99th: {target_percentiles[5]:.0f}")
     print()
+
+
     # ---- Bottom row: Lorenz curves ----
     
     # Function to calculate Lorenz curve and Gini coefficient
@@ -457,7 +459,7 @@ def plot_promiscuity_analysis(
     stats_text = (
         f"Gini coefficient: {gini_drug:.3f}\n"
         f"{(1-pct_drugs_50):.1%} of drugs account for 50% of interactions\n"
-        f"{(1-pct_drugs_80):.1%} of drugs account for 80% of interactions"
+        f"{(1-pct_drugs_80):.1%} of drugs account for 20% of interactions"
     )
     ax3.text(0.05, 0.95, stats_text, transform=ax3.transAxes, 
              verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
@@ -493,7 +495,7 @@ def plot_promiscuity_analysis(
     stats_text = (
         f"Gini coefficient: {gini_target:.3f}\n"
         f"{(1-pct_targets_50):.1%} of targets account for 50% of interactions\n"
-        f"{(1-pct_targets_80):.1%} of targets account for 80% of interactions"
+        f"{(1-pct_targets_80):.1%} of targets account for 20% of interactions"
     )
     ax4.text(0.05, 0.95, stats_text, transform=ax4.transAxes, 
              verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
