@@ -281,7 +281,7 @@ def add_potential_ids(
 
 def annotate_drugs(drugs: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
     """
-    Annotate all unique drugs in DTI dataset.
+    Annotate all unique drugs in DTI dataset. Without cached results, this will take a while.
 
     Args:
         drugs: DataFrame containing unique drugs with Drug_SMILES and Drug_ID columns
@@ -356,7 +356,7 @@ def annotate_drugs(drugs: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
 
 def annotate_targets(targets: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
     """
-    Annotate all unique targets in DTI dataset.
+    Annotate all unique targets in DTI dataset. Without cached results, this will take a while.
 
     Args:
         targets: DataFrame containing unique targets with Target_AA and Target_ID columns

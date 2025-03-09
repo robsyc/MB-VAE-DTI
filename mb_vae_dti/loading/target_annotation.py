@@ -500,8 +500,9 @@ def get_dna_sequence_from_uniprot(uniprot_id: str) -> Optional[str]:
         DNA sequence or None if not found
     """
     # Check cache first
-    if uniprot_id in uniprot_cache and "cds" in uniprot_cache[uniprot_id]:
-        return uniprot_cache[uniprot_id]["cds"]
+    cache_key = f"dna_{uniprot_id}"
+    if cache_key in uniprot_cache:
+        return uniprot_cache[cache_key]
     
     try:
         # Use UniProt API to get CDS specifically
@@ -536,13 +537,16 @@ def get_dna_sequence_from_uniprot(uniprot_id: str) -> Optional[str]:
                     if cds:
                         break
             
-            # Cache the result
-            if uniprot_id not in uniprot_cache:
-                uniprot_cache[uniprot_id] = {}
-            uniprot_cache[uniprot_id]["cds"] = cds
+            # Cache the result using a different key to avoid conflicts
+            uniprot_cache[cache_key] = cds
             save_cache()
             
             return cds
+        else:
+            # Cache negative result
+            uniprot_cache[cache_key] = None
+            save_cache()
+            return None
     
     except Exception as e:
         print(f"Error fetching CDS from UniProt: {e}")
