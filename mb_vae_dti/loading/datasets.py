@@ -59,10 +59,47 @@ def compute_heavy_atom_counts(smiles_list: List[str], verbose: bool = False) -> 
     return heavy_atoms_dict
 
 
+def canonicalize_smiles(smiles_list: List[str], verbose: bool = False) -> Dict[str, str]:
+    """
+    Convert SMILES strings to their canonical form.
+    
+    Args:
+        smiles_list: List of SMILES strings
+        verbose: Whether to print progress information
+        
+    Returns:
+        Dict[str, str]: Dictionary mapping original SMILES to canonical SMILES
+    """
+    if verbose:
+        print(f"Canonicalizing {len(smiles_list)} SMILES strings...")
+    
+    canonical_dict = {}
+    invalid_count = 0
+    
+    for smiles in smiles_list:
+        try:
+            mol = Chem.MolFromSmiles(smiles)
+            if mol:
+                canonical_dict[smiles] = Chem.MolToSmiles(mol, isomericSmiles=True)
+            else:
+                canonical_dict[smiles] = smiles  # Keep original if parsing fails
+                invalid_count += 1
+        except:
+            canonical_dict[smiles] = smiles  # Keep original if exception occurs
+            invalid_count += 1
+    
+    if verbose:
+        print(f"Canonicalized {len(smiles_list) - invalid_count} SMILES strings")
+        if invalid_count > 0:
+            print(f"Warning: {invalid_count} SMILES strings could not be parsed")
+    
+    return canonical_dict
+
+
 def load_metz() -> pd.DataFrame:
     """
     Load the Metz dataset from a CSV file.
-    
+
     Returns:
         pd.DataFrame: DataFrame containing the Metz dataset with columns:
             - SMILES: SMILES representation of the drug
@@ -81,8 +118,10 @@ def load_metz() -> pd.DataFrame:
         raise FileNotFoundError(f"Metz dataset not found at {metz_path}")
 
 
-def load_dataset(name: Literal["DAVIS", "BindingDB_Kd", "BindingDB_Ki", "KIBA", "Metz"], 
-                verbose: bool = False) -> pd.DataFrame:
+def load_dataset(
+        name: Literal["DAVIS", "BindingDB_Kd", "BindingDB_Ki", "KIBA", "Metz"], 
+        verbose: bool = False
+    ) -> pd.DataFrame:
     """
     Load a DTI dataset and transform it into a standardized format.
     
@@ -92,13 +131,10 @@ def load_dataset(name: Literal["DAVIS", "BindingDB_Kd", "BindingDB_Ki", "KIBA", 
         
     Returns:
         pd.DataFrame: DataFrame with standardized columns:
-            - Drug_SMILES: SMILES representation of the drug
+            - Drug_SMILES: SMILES representation of the drug (canonicalized)
             - Target_AA: Protein sequence of the target
             - Y: Binary interaction indicator (True if bound)
             - Y_{value}: Interaction value (e.g., Y_pKd, Y_pKi, Y_KIBA)
-            
-    Raises:
-        ValueError: If the dataset name is not recognized
     """
     if verbose:
         print(f"Loading {name} dataset...")
@@ -125,8 +161,6 @@ def load_dataset(name: Literal["DAVIS", "BindingDB_Kd", "BindingDB_Ki", "KIBA", 
             'ProteinSequence': 'Target_AA',
             'Ki': 'Y_pKi'
         }, inplace=True)
-        # Create binary interaction column based on threshold
-        df['Y'] = df['Y_pKi'] >= 7.6
     else:
         # Standardize TDC dataset columns
         df.rename(columns={
@@ -135,13 +169,21 @@ def load_dataset(name: Literal["DAVIS", "BindingDB_Kd", "BindingDB_Ki", "KIBA", 
         }, inplace=True)
         if name == "DAVIS" or name == "BindingDB_Kd":
             df.rename(columns={'Y': 'Y_pKd'}, inplace=True)
-            df['Y'] = df['Y_pKd'] >= 7.0
         elif name == "BindingDB_Ki":
             df.rename(columns={'Y': 'Y_pKi'}, inplace=True)
-            df['Y'] = df['Y_pKi'] >= 7.6
         elif name == "KIBA":
             df.rename(columns={'Y': 'Y_KIBA'}, inplace=True)
-            df['Y'] = df['Y_KIBA'] >= 12.1
+    
+    # Drop rows with missing values in key columns
+    rows_before = len(df)
+    df = df.dropna(subset=['Drug_SMILES', 'Target_AA'])
+    if verbose and len(df) < rows_before:
+        print(f"Dropped {rows_before - len(df)} rows with missing Drug_SMILES or Target_AA values")
+    
+    # Canonicalize SMILES strings
+    unique_smiles = df['Drug_SMILES'].unique()
+    canonical_dict = canonicalize_smiles(unique_smiles, verbose=verbose)
+    df['Drug_SMILES'] = df['Drug_SMILES'].map(canonical_dict)
     
     # Add binary interaction column based on threshold
     thresholds = {'Y_pKd': 7.0, 'Y_pKi': 7.6, 'Y_KIBA': 12.1}
@@ -149,12 +191,6 @@ def load_dataset(name: Literal["DAVIS", "BindingDB_Kd", "BindingDB_Ki", "KIBA", 
         if col in df.columns:
             df['Y'] = df[col] >= threshold
             break
-    
-    # Drop rows with missing values in key columns
-    rows_before = len(df)
-    df = df.dropna(subset=['Drug_SMILES', 'Target_AA'])
-    if verbose and len(df) < rows_before:
-        print(f"Dropped {rows_before - len(df)} rows with missing Drug_SMILES or Target_AA values")
     
     # Remove duplicate drug-target pairs (keeping the one with the highest affinity)
     if len(df) > df[['Drug_SMILES', 'Target_AA']].drop_duplicates().shape[0]:

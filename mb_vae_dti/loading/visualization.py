@@ -458,8 +458,8 @@ def plot_promiscuity_analysis(
     # Add text with statistics
     stats_text = (
         f"Gini coefficient: {gini_drug:.3f}\n"
-        f"{(1-pct_drugs_50):.1%} of drugs account for 50% of interactions\n"
-        f"{(1-pct_drugs_80):.1%} of drugs account for 20% of interactions"
+        f"Top {(1-pct_drugs_50):.1%} of drugs account for 50% of interactions\n"
+        f"Top {(1-pct_drugs_80):.1%} of drugs account for 20% of interactions"
     )
     ax3.text(0.05, 0.95, stats_text, transform=ax3.transAxes, 
              verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
@@ -494,8 +494,8 @@ def plot_promiscuity_analysis(
     # Add text with statistics
     stats_text = (
         f"Gini coefficient: {gini_target:.3f}\n"
-        f"{(1-pct_targets_50):.1%} of targets account for 50% of interactions\n"
-        f"{(1-pct_targets_80):.1%} of targets account for 20% of interactions"
+        f"Top {(1-pct_targets_50):.1%} of targets account for 50% of interactions\n"
+        f"Top {(1-pct_targets_80):.1%} of targets account for 20% of interactions"
     )
     ax4.text(0.05, 0.95, stats_text, transform=ax4.transAxes, 
              verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
