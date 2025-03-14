@@ -125,6 +125,9 @@ def get_molecule_from_pubchem_id(pubchem_id: str) -> Tuple[Optional[Chem.Mol], O
         if smiles:
             mol = Chem.MolFromSmiles(smiles)
             return mol, pubchem_cache[pubchem_id]
+        else:
+            # Return cached negative result
+            return None, None
     
     try:
         # Try to interpret the ID as a PubChem CID
@@ -152,10 +155,16 @@ def get_molecule_from_pubchem_id(pubchem_id: str) -> Tuple[Optional[Chem.Mol], O
                 
                 return mol, pubchem_cache[pubchem_id]
         
+        # Cache negative result
+        pubchem_cache[pubchem_id] = {'smiles': None, 'inchikey': None}
+        save_cache()
         return None, None
     
     except Exception as e:
         print(f"Error retrieving molecule from PubChem ID {pubchem_id}: {e}")
+        # Cache negative result
+        pubchem_cache[pubchem_id] = {'smiles': None, 'inchikey': None}
+        save_cache()
         return None, None
 
 
@@ -181,6 +190,9 @@ def get_molecule_from_chembl_id(chembl_id: str) -> Tuple[Optional[Chem.Mol], Opt
         if smiles:
             mol = Chem.MolFromSmiles(smiles)
             return mol, chembl_cache[chembl_id]
+        else:
+            # Return cached negative result
+            return None, None
     
     try:
         # Use ChEMBL API to get molecule information
@@ -207,10 +219,16 @@ def get_molecule_from_chembl_id(chembl_id: str) -> Tuple[Optional[Chem.Mol], Opt
                 
                 return mol, chembl_cache[chembl_id]
         
+        # Cache negative result
+        chembl_cache[chembl_id] = {'smiles': None, 'inchikey': None}
+        save_cache()
         return None, None
     
     except Exception as e:
         print(f"Error retrieving molecule from ChEMBL ID {chembl_id}: {e}")
+        # Cache negative result
+        chembl_cache[chembl_id] = {'smiles': None, 'inchikey': None}
+        save_cache()
         return None, None
 
 

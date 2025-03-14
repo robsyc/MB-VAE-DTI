@@ -17,6 +17,7 @@ from Bio.Blast import NCBIWWW, NCBIXML
 from io import StringIO
 import re
 import numpy as np
+import hashlib
 
 SEQ_SIMILARITY_THRESHOLD = 0.9  # Minimum similarity threshold for sequence matching
 TOP_N_MATCHES = 3               # Number of top matches to check from API search results
@@ -81,10 +82,12 @@ def save_cache() -> None:
 
 class TargetAnnotation(BaseModel):
     """Target annotation model."""
-    aa_sequence: str
-    dna_sequence: Optional[str] = None
     uniprot_id: Optional[str] = None
-    gene_id: Optional[str] = None
+    aa_sequence: str
+    gene_name: Optional[str] = None
+    refseq_id: Optional[str] = None
+    dna_sequence: Optional[str] = None
+    similarity: float = 0.0
     valid: bool = False
 
 
@@ -197,9 +200,11 @@ def compare_sequences(seq1: str, seq2: str, threshold: float = SEQ_SIMILARITY_TH
     if len(seq1) != len(seq2):
         # Check if the shorter sequence is a substring of the longer one
         if len(seq1) < len(seq2):
-            return seq1 in seq2
+            if seq1 in seq2:
+                return True
         else:
-            return seq2 in seq1
+            if seq2 in seq1:
+                return True
     
     # Calculate similarity
     matches = sum(a == b for a, b in zip(seq1, seq2))
@@ -236,19 +241,28 @@ def translate_dna_to_aa(dna_sequence: str) -> str:
         return ""
 
 
-def search_uniprot_by_id(uniprot_id: str) -> Optional[Dict[str, Any]]:
+class UniProtResult(BaseModel):
+    primaryAccession: str           # e.g. "Q2M2I8"
+    uniProtkbId: str                # e.g. "AAK1_HUMAN"
+    sequence: str                   # e.g. "MALWMRLLPLLALLALWGPDPAAA..."
+    geneName: Optional[str]         # e.g. "AAK1"
+    RefSeq_id: Optional[str]        # e.g. "NM_014911"
+    # EMBL_id: Optional[str]          # e.g. "AB028971"
+    # potentially also CCDS_id
+
+def search_uniprot_by_accession(uniprot_id: str) -> Optional[UniProtResult]:
     """
-    Search UniProt by ID.
+    Search UniProt by accession code.
     
     Args:
-        uniprot_id: UniProt ID to search for
+        uniprot_id: UniProt accession code to search for
         
     Returns:
-        Dictionary with protein information or None if not found
+        UniProtResult object with protein information or None if not found
     """
     # Check cache first
-    if uniprot_id in uniprot_cache:
-        return uniprot_cache[uniprot_id]
+    if f"{uniprot_id}_acc" in uniprot_cache:
+        return UniProtResult(**uniprot_cache[f"{uniprot_id}_acc"]) if uniprot_cache[f"{uniprot_id}_acc"] else None
     
     # UniProt API URL
     # e.g. https://rest.uniprot.org/uniprotkb/Q2M2I8.json
@@ -264,26 +278,37 @@ def search_uniprot_by_id(uniprot_id: str) -> Optional[Dict[str, Any]]:
             data = response.json()
             
             # Extract relevant information
-            result = {
-                'uniprot_id': uniprot_id,
-                'aa_sequence': data.get('sequence', {}).get('value', ''),
-                'gene_id': None
-            }
+            EMBL_id = None
+            refseq_id = None
             
-            # Try to get gene ID
-            for gene in data.get('genes', []):
-                if gene.get('geneName', {}).get('value'):
-                    result['gene_id'] = gene.get('geneName', {}).get('value')
+            for cross_reference in data.get('uniProtKBCrossReferences', []):
+                if EMBL_id and refseq_id:
                     break
+                if cross_reference.get('database') == 'EMBL' and EMBL_id is None:
+                    EMBL_id = cross_reference.get('id')
+                elif cross_reference.get('database') == 'RefSeq' and refseq_id is None:
+                    for property in cross_reference.get('properties', []):
+                        if property.get('key') == 'NucleotideSequenceId':
+                            refseq_id = property.get('value').split('.')[0]
+                            continue
+
+            result = UniProtResult(
+                primaryAccession=data.get('primaryAccession', ''),
+                uniProtkbId=data.get('uniProtkbId', ''),
+                sequence=data.get('sequence', {}).get('value', ''),
+                geneName=data.get('genes', [{}])[0].get('geneName', {}).get('value', None),
+                RefSeq_id=refseq_id,
+                # EMBL_id=EMBL_id
+            )
             
             # Cache the result
-            uniprot_cache[uniprot_id] = result
+            uniprot_cache[f"{uniprot_id}_acc"] = result.model_dump()
             save_cache()
             
             return result
         else:
             # Cache negative result
-            uniprot_cache[uniprot_id] = None
+            uniprot_cache[f"{uniprot_id}_acc"] = None
             save_cache()
             return None
             
@@ -292,20 +317,19 @@ def search_uniprot_by_id(uniprot_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def search_uniprot_by_gene(gene_id: str) -> Optional[List[Dict[str, Any]]]:
+def search_uniprot_by_gene(gene_id: str) -> Optional[UniProtResult]:
     """
-    Search UniProt by gene ID.
+    Search UniProt by gene symbol.
     
     Args:
-        gene_id: Gene ID to search for
+        gene_id: UniProt gene symbol to search for
         
     Returns:
-        List of dictionaries with protein information or None if not found
+        UniProtResult object with protein information or None if not found
     """
     # Check cache first
-    cache_key = f"gene_{gene_id}"
-    if cache_key in uniprot_cache:
-        return uniprot_cache[cache_key]
+    if f"{gene_id}_gene" in uniprot_cache:
+        return UniProtResult(**uniprot_cache[f"{gene_id}_gene"]) if uniprot_cache[f"{gene_id}_gene"] else None
     
     # UniProt API URL for gene search
     # e.g. https://rest.uniprot.org/uniprotkb/search?query=gene:AAK1+AND+reviewed:true
@@ -318,34 +342,48 @@ def search_uniprot_by_gene(gene_id: str) -> Optional[List[Dict[str, Any]]]:
         time.sleep(0.2)
         
         if response.status_code == 200:
-            data = response.json()
+            results = response.json()
             
             # Check if we have results
-            if data.get('results', []):
-                # Get up to TOP_N_MATCHES results
-                results = []
-                for entry in data['results'][:TOP_N_MATCHES]:
-                    # Extract relevant information
-                    result = {
-                        'uniprot_id': entry.get('primaryAccession'),
-                        'aa_sequence': entry.get('sequence', {}).get('value', ''),
-                        'gene_id': gene_id
-                    }
-                    results.append(result)
+            if results.get('results', []):
+                data = results['results'][0]
+                # Extract relevant information
+                EMBL_id = None
+                refseq_id = None
                 
-                # Cache the results
-                uniprot_cache[cache_key] = results
+                for cross_reference in data.get('uniProtKBCrossReferences', []):
+                    if EMBL_id and refseq_id:
+                        break
+                    if cross_reference.get('database') == 'EMBL' and EMBL_id is None:
+                        EMBL_id = cross_reference.get('id')
+                    elif cross_reference.get('database') == 'RefSeq' and refseq_id is None:
+                        for property in cross_reference.get('properties', []):
+                            if property.get('key') == 'NucleotideSequenceId':
+                                refseq_id = property.get('value').split('.')[0]
+                                continue
+
+                result = UniProtResult(
+                    primaryAccession=data.get('primaryAccession', ''),
+                    uniProtkbId=data.get('uniProtkbId', ''),
+                    sequence=data.get('sequence', {}).get('value', ''),
+                    geneName=data.get('genes', [{}])[0].get('geneName', {}).get('value', None),
+                    RefSeq_id=refseq_id,
+                    EMBL_id=EMBL_id
+                )
+                
+                # Cache the result
+                uniprot_cache[f"{gene_id}_gene"] = result.model_dump()
                 save_cache()
                 
-                return results
+                return result
             else:
                 # Cache negative result
-                uniprot_cache[cache_key] = None
+                uniprot_cache[f"{gene_id}_gene"] = None
                 save_cache()
                 return None
         else:
             # Cache negative result
-            uniprot_cache[cache_key] = None
+            uniprot_cache[f"{gene_id}_gene"] = None
             save_cache()
             return None
             
@@ -354,77 +392,61 @@ def search_uniprot_by_gene(gene_id: str) -> Optional[List[Dict[str, Any]]]:
         return None
 
 
-def get_gene_sequence_from_entrez(gene_id: str) -> Optional[Dict[str, Any]]:
+def get_cds_from_refseq(refseq_id: str) -> Optional[Dict[str, Any]]:
     """
-    Get gene sequence information from NCBI Entrez.
+    Retrieve the coding sequence (CDS) from a RefSeq ID.
     
     Args:
-        gene_id: Gene ID to search for
+        refseq_id: The RefSeq ID (e.g., "NM_014911")
         
     Returns:
-        Dictionary with gene information or None if not found
+        Dictionary containing CDS sequence and metadata
     """
     # Check cache first
-    if gene_id in entrez_cache:
-        return entrez_cache[gene_id]
+    if refseq_id in entrez_cache:
+        return entrez_cache[refseq_id]
     
-    try: 
-        # First, search for the gene
-        handle = Entrez.esearch(db="gene", term=f"{gene_id}[Gene Name] AND human[Organism]")
-        record = Entrez.read(handle)
+    # Fetch the record from NCBI
+    try:
+        handle = Entrez.efetch(db="nucleotide", id=refseq_id, rettype="gb", retmode="text")
+        record = SeqIO.read(handle, "genbank")
         handle.close()
+
+        # Respect rate limits
+        time.sleep(0.2)
         
-        if record["Count"] == "0":
-            return None
+        # Initialize result dictionary
+        result = {
+            "cds_sequences": [],
+            "cds_translations": []
+        }
         
-        # Get the gene ID
-        gene_id_num = record["IdList"][0]
+        # Extract CDS features
+        for feature in record.features:
+            if feature.type == "CDS":
+                # Get CDS sequence
+                cds_sequence = feature.extract(record.seq)
+                result["cds_sequences"].append(str(cds_sequence))
+                
+                # Get protein translation if available
+                if "translation" in feature.qualifiers:
+                    result["cds_translations"].append(feature.qualifiers["translation"][0])
         
-        # Get gene details
-        handle = Entrez.efetch(db="gene", id=gene_id_num, retmode="xml")
-        gene_record = Entrez.read(handle)
-        handle.close()
+        # Cache the result
+        entrez_cache[refseq_id] = result
+        save_cache()
         
-        # Extract information
-        gene_info = gene_record[0]
-        
-        # Get the mRNA/CDS sequences
-        for genomic_info in gene_info.get("Entrezgene_locus", []):
-            for ref in genomic_info.get("Gene-commentary_products", []):
-                if ref.get("Gene-commentary_type") == 3:  # mRNA
-                    # Get the accession
-                    accession = ref.get("Gene-commentary_accession")
-                    
-                    # Fetch the mRNA record
-                    handle = Entrez.efetch(db="nucleotide", id=accession, rettype="gb")
-                    gb_record = SeqIO.read(handle, "genbank")
-                    handle.close()
-                    
-                    # Find CDS features
-                    for feature in gb_record.features:
-                        if feature.type == "CDS":
-                            # Extract the CDS sequence
-                            cds = str(feature.extract(gb_record.seq))
-                            
-                            result = {
-                                "gene_id": gene_id,
-                                "dna_sequence": cds,
-                                "protein_id": feature.qualifiers.get("protein_id", [""])[0]
-                            }
-                            
-                            # Cache the result
-                            entrez_cache[gene_id] = result
-                            save_cache()
-                            
-                            return result
+        return result
     
     except Exception as e:
-        print(f"Error fetching gene from Entrez: {e}")
-    
-    return None
+        print(f"Error fetching RefSeq record {refseq_id}: {str(e)}")
+        # Cache negative result to avoid repeated failed requests
+        entrez_cache[refseq_id] = None
+        save_cache()
+        return None
 
 
-def search_by_blast(aa_sequence: str) -> Optional[List[Dict[str, Any]]]:
+def search_by_blast(aa_sequence: str) -> Optional[str]:
     """
     Search for a protein using BLAST.
     
@@ -432,20 +454,18 @@ def search_by_blast(aa_sequence: str) -> Optional[List[Dict[str, Any]]]:
         aa_sequence: Amino acid sequence to search for
         
     Returns:
-        List of dictionaries with protein information or None if not found
+        UniProt ID of best match or None if not found
     """
+    # Clean the sequence
+    aa_sequence = clean_sequence(aa_sequence)
+
     # Check cache first
     # Use a hash of the sequence as the key to avoid long keys
-    import hashlib
     sequence_hash = hashlib.md5(aa_sequence.encode()).hexdigest()
-    
     if sequence_hash in blast_cache:
         return blast_cache[sequence_hash]
     
-    try:
-        # Clean the sequence
-        aa_sequence = clean_sequence(aa_sequence)
-        
+    try:      
         # Run BLAST search
         result_handle = NCBIWWW.qblast("blastp", "swissprot", aa_sequence)
         
@@ -454,30 +474,13 @@ def search_by_blast(aa_sequence: str) -> Optional[List[Dict[str, Any]]]:
         
         # Check if we have any hits
         if blast_record.alignments:
-            # Get up to TOP_N_MATCHES hits
-            results = []
-            for alignment in blast_record.alignments[:TOP_N_MATCHES]:
-                hsp = alignment.hsps[0]
-                
-                # Extract the UniProt ID
-                uniprot_id = alignment.accession
-                
-                # Get the full protein information from UniProt
-                protein_info = search_uniprot_by_id(uniprot_id)
-                
-                if protein_info:
-                    results.append(protein_info)
-                    
-                    # If we have enough results, stop
-                    if len(results) >= TOP_N_MATCHES:
-                        break
+            result = blast_record.alignments[0].accession
             
-            if results:
-                # Cache the results
-                blast_cache[sequence_hash] = results
-                save_cache()
+            # Cache the results
+            blast_cache[sequence_hash] = result
+            save_cache()
                 
-                return results
+            return result
         
         # If we get here, we couldn't find a match
         blast_cache[sequence_hash] = None
@@ -486,136 +489,6 @@ def search_by_blast(aa_sequence: str) -> Optional[List[Dict[str, Any]]]:
         
     except Exception as e:
         print(f"Error searching by BLAST: {e}")
-        return None
-
-
-def get_dna_sequence_from_uniprot(uniprot_id: str) -> Optional[str]:
-    """
-    Get DNA sequence from UniProt API.
-    
-    Args:
-        uniprot_id: UniProt ID to search for
-        
-    Returns:
-        DNA sequence or None if not found
-    """
-    # Check cache first
-    cache_key = f"dna_{uniprot_id}"
-    if cache_key in uniprot_cache:
-        return uniprot_cache[cache_key]
-    
-    try:
-        # Use UniProt API to get CDS specifically
-        # e.g. https://rest.uniprot.org/uniprotkb/Q2M2I8.xml
-        url = f"https://rest.uniprot.org/uniprotkb/{uniprot_id}.xml"
-        response = requests.get(url)
-        
-        if response.status_code == 200:
-            # Extract CDS from XML
-            xml_data = response.text
-            record = SeqIO.read(StringIO(xml_data), "uniprot-xml")
-            
-            # Look for cross-references to EMBL/GenBank/DDBJ
-            cds = None
-            for dbref in record.dbxrefs:
-                if dbref.startswith("EMBL:") or dbref.startswith("GenBank:") or dbref.startswith("DDBJ:"):
-                    # Get the accession number
-                    acc = dbref.split(":", 1)[1]
-                    
-                    # Use Entrez to get the CDS
-                    handle = Entrez.efetch(db="nucleotide", id=acc, rettype="gb")
-                    gb_record = SeqIO.read(handle, "genbank")
-                    
-                    # Find CDS features
-                    for feature in gb_record.features:
-                        if feature.type == "CDS":
-                            if "protein_id" in feature.qualifiers:
-                                # Extract the CDS sequence
-                                cds = str(feature.extract(gb_record.seq))
-                                break
-                    
-                    if cds:
-                        break
-            
-            # Cache the result using a different key to avoid conflicts
-            uniprot_cache[cache_key] = cds
-            save_cache()
-            
-            return cds
-        else:
-            # Cache negative result
-            uniprot_cache[cache_key] = None
-            save_cache()
-            return None
-    
-    except Exception as e:
-        print(f"Error fetching CDS from UniProt: {e}")
-    
-    return None
-
-
-def get_dna_sequence_by_gene_symbol(gene_symbol: str) -> Optional[str]:
-    """
-    Get DNA sequence by gene symbol from NCBI Nucleotide database.
-    
-    Args:
-        gene_symbol: Gene symbol to search for
-        
-    Returns:
-        DNA sequence or None if not found
-    """
-    # Check cache first
-    cache_key = f"nucl_{gene_symbol}"
-    if cache_key in entrez_cache:
-        return entrez_cache[cache_key]
-    
-    try:
-        # Search for the gene in nucleotide database
-        handle = Entrez.esearch(db="nucleotide", term=f"{gene_symbol}[Gene Name] AND RefSeq[Filter] AND mRNA[Filter] AND human[Organism]")
-        record = Entrez.read(handle)
-        handle.close()
-        
-        # Respect rate limits
-        time.sleep(1)
-        
-        # Check if we found any results
-        if record["Count"] == "0":
-            # Try a broader search
-            handle = Entrez.esearch(db="nucleotide", term=f"{gene_symbol}[Gene Name] AND human[Organism]")
-            record = Entrez.read(handle)
-            handle.close()
-            
-            # Respect rate limits
-            time.sleep(1)
-            
-            if record["Count"] == "0":
-                # Cache negative result
-                entrez_cache[cache_key] = None
-                save_cache()
-                return None
-        
-        # Get the first nucleotide ID
-        nucleotide_id = record["IdList"][0]
-        
-        # Get the nucleotide sequence
-        handle = Entrez.efetch(db="nucleotide", id=nucleotide_id, rettype="fasta", retmode="text")
-        seq_record = SeqIO.read(handle, "fasta")
-        handle.close()
-        
-        # Respect rate limits
-        time.sleep(1)
-        
-        # Extract sequence
-        dna_sequence = str(seq_record.seq)
-        
-        # Cache the result
-        entrez_cache[cache_key] = dna_sequence
-        save_cache()
-        
-        return dna_sequence
-        
-    except Exception as e:
-        print(f"Error searching nucleotide database for gene {gene_symbol}: {e}")
         return None
 
 
@@ -720,18 +593,35 @@ def annotate_target(aa_sequence: str, potential_ids: Set[str], verbose: bool = F
         aa_sequence=clean_aa,
         dna_sequence=None,
         uniprot_id=None,
-        gene_id=None,
+        gene_name=None,
+        refseq_id=None,
+        similarity=0.0,
         valid=False
     )
     
     # Track the best DNA sequence match
+    valid_dna_found = False
     best_dna_sequence = None
     best_similarity_score = 0.0
-    valid_dna_threshold = SEQ_SIMILARITY_THRESHOLD  # Threshold for considering a DNA sequence valid
-    valid_dna_found = False
     
-    # Track whether we've found a valid protein/gene match
-    found_valid_match = False
+    # Function to check if we have all required information
+    def has_all_required_info():
+        return annotation.uniprot_id and annotation.gene_name and annotation.refseq_id and valid_dna_found
+    
+    # Function to update DNA information if better match is found
+    def update_dna_info(dna_seq, similarity):
+        nonlocal valid_dna_found, best_dna_sequence, best_similarity_score
+        
+        if similarity > best_similarity_score:
+            best_dna_sequence = dna_seq
+            best_similarity_score = similarity
+            
+            # Check if we've found a valid DNA sequence
+            if similarity >= SEQ_SIMILARITY_THRESHOLD:
+                valid_dna_found = True
+                return True  # Valid DNA found
+        
+        return False  # No improvement or not valid
     
     # Process potential IDs if available
     if potential_ids:
@@ -747,197 +637,102 @@ def annotate_target(aa_sequence: str, potential_ids: Set[str], verbose: bool = F
             if verbose:
                 print(f"Trying potential ID: {potential_id}")
             
-            # Skip further DNA sequence searches if we already have a valid one
-            skip_dna_search = valid_dna_found
+            # Stop if we have all required information
+            if has_all_required_info():
+                break
             
-            # Try as UniProt ID first
-            if not skip_dna_search:
-                protein_info = search_uniprot_by_id(potential_id)
-                print(f"Protein info: {protein_info}")
+            # Try as UniProt accession first
+            if not has_all_required_info():
+                result = search_uniprot_by_accession(potential_id)
                 
-                if protein_info and compare_sequences(clean_aa, protein_info['aa_sequence']):
-                    if verbose:
-                        print(f"Found match in UniProt for ID: {potential_id}")
-                    
+                if result and compare_sequences(clean_aa, result.sequence): 
                     # Update annotation with protein info
-                    annotation.uniprot_id = protein_info['uniprot_id']
-                    annotation.gene_id = protein_info['gene_id']
-                    annotation.valid = True
-                    found_valid_match = True
+                    annotation.uniprot_id = result.primaryAccession
+                    
+                    # Update gene ID if we don't have one or if this is from a direct UniProt match
+                    if not annotation.gene_name and result.geneName:
+                        annotation.gene_name = result.geneName
+                    
+                    if not annotation.refseq_id and result.RefSeq_id:
+                        annotation.refseq_id = result.RefSeq_id
                     
                     # Try to get DNA sequence if we don't have a valid one yet
                     if not valid_dna_found:
-                        dna_sequence = get_dna_sequence_from_uniprot(protein_info['uniprot_id'])
-                        
-                        if dna_sequence:
-                            # Validate the DNA sequence
-                            is_valid, similarity, best_segment = validate_dna_sequence(
-                                dna_sequence, clean_aa, verbose
-                            )
-                            
-                            # Update best DNA sequence if this one is better
-                            if similarity > best_similarity_score:
-                                best_similarity_score = similarity
-                                best_dna_sequence = best_segment
-                                
-                                # Check if we've found a valid DNA sequence
-                                if similarity >= valid_dna_threshold:
-                                    valid_dna_found = True
-                                    if verbose:
-                                        print(f"Found valid DNA sequence with similarity {similarity:.2f}")
+                        refseq_result = get_cds_from_refseq(result.RefSeq_id)
+                        if refseq_result:
+                            for dna, aa in zip(refseq_result['cds_sequences'], refseq_result['cds_translations']):
+                                is_valid, similarity, best_segment = validate_dna_sequence(
+                                    dna, clean_aa, verbose
+                                )
+                                if update_dna_info(best_segment, similarity):
+                                    annotation.refseq_id = result.RefSeq_id
+                                    break
             
-            # Try as gene ID if we haven't found a valid DNA sequence yet
-            if not valid_dna_found:
-                gene_results = search_uniprot_by_gene(potential_id)
-                print(f"Gene results: {gene_results}")
+            # Try as gene ID if we haven't found all required information
+            if not has_all_required_info():
+                result = search_uniprot_by_gene(potential_id)
                 
-                if gene_results:
-                    for gene_info in gene_results:
-                        if compare_sequences(clean_aa, gene_info['aa_sequence']):
-                            if verbose:
-                                print(f"Found match in UniProt for gene: {potential_id}")
-                            
-                            # Update annotation with gene info if we don't have valid info yet
-                            if not found_valid_match:
-                                annotation.uniprot_id = gene_info['uniprot_id']
-                                annotation.gene_id = potential_id
-                                annotation.valid = True
-                                found_valid_match = True
-                            
-                            # Try to get DNA sequence from Entrez
-                            entrez_info = get_gene_sequence_from_entrez(potential_id)
-                            print(f"Entrez info: {entrez_info}")
-                            if entrez_info:
-                                dna_sequence = entrez_info['dna_sequence']
-                                
-                                if dna_sequence:
-                                    # Validate the DNA sequence
-                                    is_valid, similarity, best_segment = validate_dna_sequence(
-                                        dna_sequence, clean_aa, verbose
-                                    )
-                                    
-                                    # Update best DNA sequence if this one is better
-                                    if similarity > best_similarity_score:
-                                        best_similarity_score = similarity
-                                        best_dna_sequence = best_segment
-                                        
-                                        # Check if we've found a valid DNA sequence
-                                        if similarity >= valid_dna_threshold:
-                                            valid_dna_found = True
-                                            if verbose:
-                                                print(f"Found valid DNA sequence with similarity {similarity:.2f}")
-                                            break  # Break out of the gene_results loop
-                            
-                            # If we still don't have a valid DNA sequence, try by gene symbol
-                            if not valid_dna_found:
-                                dna_sequence = get_dna_sequence_by_gene_symbol(potential_id)
-                                print(f"DNA sequence: {dna_sequence}")
-                                
-                                if dna_sequence:
-                                    # Validate the DNA sequence
-                                    is_valid, similarity, best_segment = validate_dna_sequence(
-                                        dna_sequence, clean_aa, verbose
-                                    )
-                                    
-                                    # Update best DNA sequence if this one is better
-                                    if similarity > best_similarity_score:
-                                        best_similarity_score = similarity
-                                        best_dna_sequence = best_segment
-                                        
-                                        # Check if we've found a valid DNA sequence
-                                        if similarity >= valid_dna_threshold:
-                                            valid_dna_found = True
-                                            if verbose:
-                                                print(f"Found valid DNA sequence with similarity {similarity:.2f}")
-                                            break  # Break out of the gene_results loop
-                            
-                            # If we still don't have a valid DNA sequence and we have a UniProt ID, try that
-                            if not valid_dna_found and gene_info['uniprot_id']:
-                                dna_sequence = get_dna_sequence_from_uniprot(gene_info['uniprot_id'])
-                                print(f"DNA sequence: {dna_sequence}")
-                                
-                                if dna_sequence:
-                                    # Validate the DNA sequence
-                                    is_valid, similarity, best_segment = validate_dna_sequence(
-                                        dna_sequence, clean_aa, verbose
-                                    )
-                                    
-                                    # Update best DNA sequence if this one is better
-                                    if similarity > best_similarity_score:
-                                        best_similarity_score = similarity
-                                        best_dna_sequence = best_segment
-                                        
-                                        # Check if we've found a valid DNA sequence
-                                        if similarity >= valid_dna_threshold:
-                                            valid_dna_found = True
-                                            if verbose:
-                                                print(f"Found valid DNA sequence with similarity {similarity:.2f}")
-                                            break  # Break out of the gene_results loop
-                        
-                        # If we've found a valid DNA sequence, break out of the gene_results loop
-                        if valid_dna_found:
-                            break
+                if result and compare_sequences(clean_aa, result.sequence):
+                    # Update UniProt ID if we don't have one
+                    if not annotation.uniprot_id:
+                        annotation.uniprot_id = result.primaryAccession
+                    
+                    # Update gene ID if we don't have one
+                    if not annotation.gene_name:
+                        annotation.gene_name = result.geneName
+                    
+                    if not annotation.refseq_id:
+                        annotation.refseq_id = result.RefSeq_id
+                    
+                    # Try to get DNA sequence if we don't have a valid one yet
+                    if not valid_dna_found:
+                        refseq_result = get_cds_from_refseq(result.RefSeq_id)
+                        if refseq_result:
+                            for dna, aa in zip(refseq_result['cds_sequences'], refseq_result['cds_translations']):
+                                is_valid, similarity, best_segment = validate_dna_sequence(
+                                    dna, clean_aa, verbose
+                                )
+                                if update_dna_info(best_segment, similarity):
+                                    annotation.uniprot_id = result.primaryAccession
+                                    annotation.refseq_id = result.RefSeq_id
+                                    break
+                    
+            # If we have all required information, break out of the potential_ids loop
+            if has_all_required_info():
+                break
     
-    # If we haven't found a valid match yet, try BLAST search
-    if not found_valid_match or not valid_dna_found:
+    # If we haven't found all required information, try BLAST search
+    if not has_all_required_info():
         if verbose:
             print("Falling back to BLAST search")
         
-        blast_results = search_by_blast(clean_aa)
-        print(f"BLAST results: {blast_results}")
-        if blast_results:
-            for blast_result in blast_results:
-                if verbose:
-                    print(f"Found match via BLAST: {blast_result['uniprot_id']}")
-                
-                # Update annotation with BLAST info
-                annotation.uniprot_id = blast_result['uniprot_id']
-                annotation.gene_id = blast_result['gene_id']
-                annotation.valid = True
-                
-                # Try to get DNA sequence if we don't have a valid one yet
-                if not valid_dna_found:
-                    if 'dna_sequence' in blast_result:
-                        dna_sequence = blast_result['dna_sequence']
-                    else:
-                        gene_info = get_gene_sequence_from_entrez(blast_result['gene_id'])
-                        if gene_info:
-                            dna_sequence = gene_info['dna_sequence']
-                        else:
-                            dna_sequence = get_dna_sequence_by_gene_symbol(blast_result['gene_id'])
-                        if not dna_sequence:
-                            dna_sequence = get_dna_sequence_from_uniprot(blast_result['uniprot_id'])
+        BLAST_uniprot_id = search_by_blast(clean_aa)
 
-                    # Validate the DNA sequence
-                    if dna_sequence:
-                        is_valid, similarity, best_segment = validate_dna_sequence(
-                            dna_sequence, clean_aa, verbose
-                        )
-                        # Update best DNA sequence if this one is better
-                        if similarity > best_similarity_score:
-                            best_similarity_score = similarity
-                            best_dna_sequence = best_segment
-                            
-                            # Check if we've found a valid DNA sequence
-                            if similarity >= valid_dna_threshold:
-                                valid_dna_found = True
-                                if verbose:
-                                    print(f"Found valid DNA sequence with similarity {similarity:.2f}")
-                                break  # Break out of the blast_results loop
+        if BLAST_uniprot_id:
+            annotation.uniprot_id = BLAST_uniprot_id
+            
+            result = search_uniprot_by_accession(BLAST_uniprot_id)
+
+            if result:
+                annotation.gene_name = result.geneName
+                annotation.refseq_id = result.RefSeq_id
                 
-                # If we've found a valid DNA sequence, break out of the blast_results loop
-                if valid_dna_found:
-                    break
-    
-    # Set the best DNA sequence we found (if any)
-    if best_dna_sequence:
-        annotation.dna_sequence = best_dna_sequence
-        
-        if verbose:
-            if valid_dna_found:
-                print(f"Using validated DNA sequence with similarity score {best_similarity_score:.2f}")
-            else:
-                print(f"Using best available DNA sequence with similarity score {best_similarity_score:.2f} (below validation threshold)")
-    
+                refseq_result = get_cds_from_refseq(result.RefSeq_id)
+                if refseq_result:
+                    for dna, aa in zip(refseq_result['cds_sequences'], refseq_result['cds_translations']):
+                        is_valid, similarity, best_segment = validate_dna_sequence(
+                            dna, clean_aa, verbose
+                        )
+                        if update_dna_info(best_segment, similarity):
+                            break
+
+    # Only mark as valid if we have all three required components
+    annotation.valid = annotation.uniprot_id and annotation.gene_name and annotation.refseq_id and valid_dna_found
+    annotation.similarity = best_similarity_score
+    annotation.dna_sequence = best_dna_sequence
+
+    if verbose and not annotation.valid:
+        print(f"Failed to annotate target {aa_sequence}")
+        print(f"Potential IDs: {potential_ids}")
     return annotation
 

@@ -159,9 +159,9 @@ jupyter notebook notebooks/loading.ipynb
 ```
 
 This will:
-- Download DTI datasets (DAVIS, KIBA, BindingDB)
+- Download DTI datasets (DAVIS, KIBA, BindingDB, Metz)
 - Merge and apply filters
-- ... (add DNA seq and identifiers)
+- Annotate drugs and targets with e.g. InChI keys, DNA sequences, etc.
 
 1. **Generating embeddings and creating h5torch files**:
 ```bash

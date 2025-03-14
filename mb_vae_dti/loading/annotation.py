@@ -370,6 +370,10 @@ def annotate_targets(targets: pd.DataFrame, verbose: bool = False) -> pd.DataFra
             - Target_DNA
             - Target_UniProt_ID
             - Target_Gene_ID
+            - Target_DNA_Similarity
+            - Target_UniProt_Source
+            - Target_Gene_Source
+            - Target_DNA_Source
     """
     if verbose:
         print("Annotating targets with potential IDs...")
@@ -382,6 +386,10 @@ def annotate_targets(targets: pd.DataFrame, verbose: bool = False) -> pd.DataFra
     annotated_targets['Target_UniProt_ID'] = None
     annotated_targets['Target_Gene_ID'] = None
     annotated_targets['Target_Valid'] = False
+    annotated_targets['Target_DNA_Similarity'] = 0.0
+    annotated_targets['Target_UniProt_Source'] = None
+    annotated_targets['Target_Gene_Source'] = None
+    annotated_targets['Target_DNA_Source'] = None
     
     # Track progress
     total_targets = len(annotated_targets)
@@ -409,13 +417,15 @@ def annotate_targets(targets: pd.DataFrame, verbose: bool = False) -> pd.DataFra
         # Update the dataframe with annotation results
         annotated_targets.at[idx, 'Target_DNA'] = annotation.dna_sequence
         annotated_targets.at[idx, 'Target_UniProt_ID'] = annotation.uniprot_id
-        annotated_targets.at[idx, 'Target_Gene_ID'] = annotation.gene_id
+        annotated_targets.at[idx, 'Target_Gene_name'] = annotation.gene_name
+        annotated_targets.at[idx, 'Target_RefSeq_ID'] = annotation.refseq_id
         annotated_targets.at[idx, 'Target_Valid'] = annotation.valid
+        annotated_targets.at[idx, 'Target_DNA_Similarity'] = annotation.similarity
         
         if annotation.valid:
             valid_count += 1
         
-        # Print progress every 100 targets if verbose
+        # Print progress every 10 targets if verbose
         if verbose and (idx + 1) % 10 == 0:
             print(f"Processed {idx + 1}/{total_targets} targets ({valid_count} valid so far)")
         
@@ -430,7 +440,8 @@ def annotate_targets(targets: pd.DataFrame, verbose: bool = False) -> pd.DataFra
         print(f"Annotation complete: {valid_count}/{total_targets} targets are valid")
         print(f"Added DNA sequences to {sum(annotated_targets['Target_DNA'].notna())} targets")
         print(f"Added UniProt IDs to {sum(annotated_targets['Target_UniProt_ID'].notna())} targets")
-        print(f"Added Gene IDs to {sum(annotated_targets['Target_Gene_ID'].notna())} targets")
-    
+        print(f"Added Gene IDs to {sum(annotated_targets['Target_Gene_name'].notna())} targets")
+        print(f"Added RefSeq IDs to {sum(annotated_targets['Target_RefSeq_ID'].notna())} targets")
+
     return annotated_targets
 

@@ -298,6 +298,78 @@ def plot_dataset_overlap(
     return str(save_path)
 
 
+def plot_interaction_counts_distribution(
+    df: pd.DataFrame,
+    save_path: Optional[str] = None,
+    show: bool = True
+) -> str:
+    """
+    Plot histograms showing the distribution of the number of targets per drug
+    and the number of drugs per target.
+    
+    Args:
+        df: DataFrame containing drug-target interaction data
+        save_path: Path to save the plot (if None, a default path is used)
+        show: Whether to display the plot
+        
+    Returns:
+        str: Path to the saved plot
+    """
+    set_plotting_style()
+    
+    # Count interactions per drug and per target
+    drug_counts = df.groupby('Drug_SMILES').size()
+    target_counts = df.groupby('Target_AA').size()
+    
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+    
+    # Plot histogram of targets per drug
+    sns.histplot(
+        drug_counts, 
+        bins=30, 
+        ax=ax1, 
+        color='blue', 
+        alpha=0.7,
+        kde=True
+    )
+    ax1.set_title(f'Distribution of Targets per Drug (n={len(drug_counts):,})')
+    ax1.set_xlabel('Number of Targets')
+    ax1.set_ylabel('Count of Drugs')
+    
+    # Plot histogram of drugs per target
+    sns.histplot(
+        target_counts, 
+        bins=30, 
+        ax=ax2, 
+        color='green', 
+        alpha=0.7,
+        kde=True
+    )
+    ax2.set_title(f'Distribution of Drugs per Target (n={len(target_counts):,})')
+    ax2.set_xlabel('Number of Drugs')
+    ax2.set_ylabel('Count of Targets')
+    
+    plt.tight_layout()
+    
+    # Save the plot if requested
+    if save_path is None:
+        save_path = IMAGES_DIR / "interaction_counts_distribution.png"
+    else:
+        save_path = Path(save_path)
+    
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    if show:
+        plt.show()
+    else:
+        plt.close()
+    
+    return str(save_path)
+
+
+
+
 def plot_promiscuity_analysis(
     df: pd.DataFrame,
     save_path: Optional[str] = None,
@@ -523,3 +595,5 @@ def plot_promiscuity_analysis(
         plt.close()
     
     return str(save_path)
+
+

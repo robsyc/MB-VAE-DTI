@@ -111,6 +111,7 @@ def load_metz() -> pd.DataFrame:
     """
     metz_path = SOURCE_DIR / "Metz.csv"
     try:
+        # Note: even though the column's name is Ki, it's actually pKi!
         return pd.read_csv(metz_path, usecols=['SMILES', 'ProteinSequence', 'Ki'])
     except FileNotFoundError:
         print(f'To run the Metz dataset, you need to download it from Kaggle and place it in {metz_path}')
@@ -247,7 +248,14 @@ def merge_datasets(names: List[str], verbose: bool = False) -> pd.DataFrame:
     # Phase 2: Merge datasets efficiently
     merged_df = datasets[0]
     
-    for df in datasets[1:]:
+    # Initialize counters for tracking merges and conflicts
+    total_merges = 0
+    conflicting_merges = 0
+    
+    for i, df in enumerate(datasets[1:], 1):
+        # Get the current dataset name
+        current_dataset_name = names[i]
+        
         # Merge on Drug_SMILES and Target_AA using outer join
         merged_df = pd.merge(
             merged_df, 
@@ -256,6 +264,20 @@ def merge_datasets(names: List[str], verbose: bool = False) -> pd.DataFrame:
             how='outer',
             suffixes=('', '_right')
         )
+
+        # Count pairs that appear in both datasets (require Y merging)
+        pairs_in_both = merged_df.dropna(subset=['Y', 'Y_right']).shape[0]
+        total_merges += pairs_in_both
+        
+        # Count pairs with conflicting Y values
+        if pairs_in_both > 0:
+            conflicts = ((merged_df['Y'] == True) & (merged_df['Y_right'] == False)) | \
+                        ((merged_df['Y'] == False) & (merged_df['Y_right'] == True))
+            current_conflicts = conflicts.sum()
+            conflicting_merges += current_conflicts
+            
+            if verbose and current_conflicts > 0:
+                print(f"Found {current_conflicts} conflicting Y values when merging with {current_dataset_name}")
 
         # Update binary interaction (OR operation)
         merged_df['Y'] = merged_df['Y'].fillna(False) | merged_df['Y_right'].fillna(False)
@@ -287,6 +309,11 @@ def merge_datasets(names: List[str], verbose: bool = False) -> pd.DataFrame:
     
     if verbose:
         print(f"Merged dataset contains {len(merged_df)} unique drug-target pairs")
+        if total_merges > 0:
+            print(f"Total Y-column merges performed: {total_merges}")
+            print(f"Conflicting Y-column merges: {conflicting_merges} ({(conflicting_merges/total_merges)*100:.2f}% of merges)")
+        else:
+            print("No Y-column merges were performed (no overlapping drug-target pairs)")
     
     return merged_df
 

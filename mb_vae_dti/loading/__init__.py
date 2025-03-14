@@ -18,7 +18,8 @@ from mb_vae_dti.loading.visualization import (
     plot_interaction_distribution,
     plot_dataset_statistics,
     plot_dataset_overlap,
-    plot_promiscuity_analysis
+    plot_interaction_counts_distribution,
+    plot_promiscuity_analysis,
 )
 
 from mb_vae_dti.loading.drug_annotation import annotate_drug
