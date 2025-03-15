@@ -421,3 +421,64 @@ def plot_lorenz_curves(
     return str(save_path)
 
 
+def plot_interaction_ratios(
+    df: pd.DataFrame,
+    save_path: Optional[str] = None,
+    show: bool = True
+) -> str:
+    """
+    Plots histograms of the ratio of positive to negative interactions for drugs and targets.
+    
+    Args:
+        df: DataFrame containing drug-target interaction data
+        save_path: Path to save the plot (if None, a default path is used)
+        show: Whether to display the plot
+
+    Returns:
+        str: Path to the saved plot
+    """
+    set_plotting_style()
+    
+    # Count observations per instance
+    drug_observations = df.groupby('Drug_SMILES').size()
+    target_observations = df.groupby('Target_AA').size()
+
+    # For each instance, count the number of positive interactions
+    drug_interactions = df.groupby('Drug_SMILES')['Y'].sum()
+    target_interactions = df.groupby('Target_AA')['Y'].sum()
+
+    # Calculate ratios
+    drug_ratios = drug_interactions / drug_observations
+    target_ratios = target_interactions / target_observations
+
+    # Create histograms
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Drug histogram
+    ax1.hist(drug_ratios, bins=30, color='blue', alpha=0.7)
+    ax1.set_title('Drug Interaction Ratio Distribution')
+    ax1.set_xlabel('Ratio of Positive to Negative Interactions')
+    ax1.set_ylabel('Count')
+    
+    # Target histogram
+    ax2.hist(target_ratios, bins=30, color='green', alpha=0.7)
+    ax2.set_title('Target Interaction Ratio Distribution')
+    ax2.set_xlabel('Ratio of Positive to Negative Interactions')
+    ax2.set_ylabel('Count')
+    
+    plt.tight_layout()
+
+    # Save the plot if requested
+    if save_path is None:
+        save_path = IMAGES_DIR / "interaction_ratios.png"
+    else:
+        save_path = Path(save_path)
+    
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+    return str(save_path)

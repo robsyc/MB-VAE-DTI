@@ -5,7 +5,6 @@ This module contains functionality for loading and preprocessing DTI datasets,
 visualizing dataset metrics, and handling FASTA files and identifiers.
 """
 
-# Export key functions for easier access
 from mb_vae_dti.loading.datasets import (
     load_dataset,
     merge_datasets,
@@ -19,6 +18,7 @@ from mb_vae_dti.loading.visualization import (
     plot_dataset_statistics,
     plot_dataset_overlap,
     plot_lorenz_curves,
+    plot_interaction_ratios
 )
 
 from mb_vae_dti.loading.drug_annotation import annotate_drug
