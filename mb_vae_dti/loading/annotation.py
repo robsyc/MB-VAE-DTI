@@ -384,12 +384,10 @@ def annotate_targets(targets: pd.DataFrame, verbose: bool = False) -> pd.DataFra
     # Initialize new columns
     annotated_targets['Target_DNA'] = None
     annotated_targets['Target_UniProt_ID'] = None
-    annotated_targets['Target_Gene_ID'] = None
+    annotated_targets['Target_Gene_name'] = None
+    annotated_targets['Target_RefSeq_ID'] = None
     annotated_targets['Target_Valid'] = False
     annotated_targets['Target_DNA_Similarity'] = 0.0
-    annotated_targets['Target_UniProt_Source'] = None
-    annotated_targets['Target_Gene_Source'] = None
-    annotated_targets['Target_DNA_Source'] = None
     
     # Track progress
     total_targets = len(annotated_targets)

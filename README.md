@@ -19,8 +19,8 @@ Key features:
 MB-VAE-DTI/
 ├── mb_vae_dti/                 # Main Python package
 │   ├── loading/                # Loading and preprocessing datasets
-│   │   ├── datasets.py         # Loading initial DTI datasets
-│   │   ├── annotation.py       # FASTA files, CID, etc.
+│   │   ├── datasets.py         # Loading, merging, filtering and saving initial DTI datasets
+│   │   ├── annotation.py       # Addition of DNA sequences, InChI keys, etc.
 │   │   └── visualization.py    # Plotting metrics for loaded data
 |   | 
 │   ├── processing/             # Embedding generation
