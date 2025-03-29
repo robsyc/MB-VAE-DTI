@@ -66,8 +66,8 @@ def save_cache() -> None:
 
 class DrugAnnotation(BaseModel):
     smiles: str
-    inchikey: str
-    valid: bool
+    inchikey: Optional[str] = None 
+    valid: bool = False
 
 
 def inchiKey_to_inchi(inchiKey: str) -> str:

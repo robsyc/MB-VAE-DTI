@@ -28,5 +28,6 @@ from mb_vae_dti.loading.annotation import (
     generate_unique_ids,
     add_potential_ids,
     annotate_drugs,
-    annotate_targets
+    annotate_targets,
+    annotate_dti
 )

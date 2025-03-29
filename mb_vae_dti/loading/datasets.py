@@ -26,7 +26,6 @@ PROCESSED_DIR = DATA_DIR / "processed"
 SOURCE_DIR.mkdir(parents=True, exist_ok=True)
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-
 def compute_heavy_atom_counts(smiles_list: List[str], verbose: bool = False) -> Dict[str, int]:
     """
     Compute heavy atom counts for a list of SMILES strings.
@@ -185,6 +184,12 @@ def load_dataset(
     unique_smiles = df['Drug_SMILES'].unique()
     canonical_dict = canonicalize_smiles(unique_smiles, verbose=verbose)
     df['Drug_SMILES'] = df['Drug_SMILES'].map(canonical_dict)
+
+    if verbose:
+        print(f"Unique drugs: {len(df['Drug_SMILES'].unique())}")
+        print(f"Unique targets: {len(df['Target_AA'].unique())}")
+        print(f"Unique drug-target pairs: {len(df)}")
+        print(f"Ratio observed: {round(len(df) / (len(df['Drug_SMILES'].unique()) * len(df['Target_AA'].unique())), 5)}")
     
     # Add binary interaction column based on threshold
     thresholds = {'Y_pKd': 7.0, 'Y_pKi': 7.6, 'Y_KIBA': 12.1}
@@ -230,6 +235,19 @@ def merge_datasets(names: List[str], verbose: bool = False) -> pd.DataFrame:
     Raises:
         ValueError: If no valid datasets are provided
     """
+    # Check if KIBA is in the list and reorder to ensure it's processed last for priority
+    if "KIBA" in names:
+        has_kiba = True
+        # Create a new list without KIBA, then append KIBA at the end
+        reordered_names = [name for name in names if name != "KIBA"]
+        reordered_names.append("KIBA")
+        names = reordered_names
+        
+        if verbose:
+            print("KIBA dataset detected. Reordering to prioritize KIBA values in conflicts.")
+    else:
+        has_kiba = False
+    
     # Phase 1: Load and transform individual datasets
     datasets = []
     for name in names:
@@ -255,6 +273,9 @@ def merge_datasets(names: List[str], verbose: bool = False) -> pd.DataFrame:
     for i, df in enumerate(datasets[1:], 1):
         # Get the current dataset name
         current_dataset_name = names[i]
+        
+        # Check if this is the KIBA dataset (which should be the last one if present)
+        is_kiba_dataset = current_dataset_name == "KIBA"
         
         # Merge on Drug_SMILES and Target_AA using outer join
         merged_df = pd.merge(
@@ -287,8 +308,15 @@ def merge_datasets(names: List[str], verbose: bool = False) -> pd.DataFrame:
         for col in value_cols:
             right_col = f"{col}_right"
             if right_col in merged_df.columns:
-                # Take max of the two columns, handling NaN values
-                merged_df[col] = merged_df[[col, right_col]].max(axis=1)
+                # If this is the KIBA dataset, prioritize its values over existing ones
+                if is_kiba_dataset:
+                    # Keep the KIBA values where they exist, otherwise keep existing values
+                    merged_df[col] = merged_df[right_col].fillna(merged_df[col])
+                    if verbose and col == "Y_KIBA":
+                        print(f"Prioritizing KIBA dataset values for column {col}")
+                else:
+                    # For non-KIBA datasets, take max of the two columns, handling NaN values
+                    merged_df[col] = merged_df[[col, right_col]].max(axis=1)
 
         # Drop all temporary right columns
         right_cols = [col for col in merged_df.columns if col.endswith('_right')]
@@ -314,6 +342,9 @@ def merge_datasets(names: List[str], verbose: bool = False) -> pd.DataFrame:
             print(f"Conflicting Y-column merges: {conflicting_merges} ({(conflicting_merges/total_merges)*100:.2f}% of merges)")
         else:
             print("No Y-column merges were performed (no overlapping drug-target pairs)")
+        
+        if has_kiba:
+            print("KIBA dataset values were prioritized in the final merge.")
     
     return merged_df
 
@@ -399,9 +430,12 @@ def load_or_create_merged_dataset(
         pd.DataFrame: Merged and optionally filtered DataFrame
     """
     # Generate a filename based on the dataset names and filtering
+    # Always sort dataset names for consistent filenames, but note that in the merging process
+    # KIBA will be processed last if present (prioritized by merge_datasets function)
     dataset_key = "_".join(sorted(dataset_names))
+    kiba_suffix = "_kiba_prioritized" if "KIBA" in dataset_names else ""
     filter_suffix = "_filtered" if apply_filters else ""
-    merged_filename = f"merged_{dataset_key}{filter_suffix}.csv"
+    merged_filename = f"merged_{dataset_key}{kiba_suffix}{filter_suffix}.csv"
     merged_path = PROCESSED_DIR / merged_filename
     
     # Check if the merged file already exists
@@ -413,6 +447,8 @@ def load_or_create_merged_dataset(
     # Create the merged dataset
     if verbose:
         print(f"Creating merged dataset from: {', '.join(dataset_names)}")
+        if "KIBA" in dataset_names:
+            print("KIBA dataset will be prioritized during merging")
     
     merged_df = merge_datasets(dataset_names, verbose=verbose)
     

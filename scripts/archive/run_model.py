@@ -17,19 +17,19 @@ parser.add_argument('--total_batches', type=int, default=1, help='Total number o
 args = parser.parse_args()
 
 CONFIGS = {
-    'single_view_fp_plain': {
-        'inputs_0': ['0/Drug_fp'],
-        'inputs_1': ['1/Target_fp'],
-        'model_type': 'plain',
-        'hyperparamter_grid': {
-            'learning_rate': [0.0001, 0.0005, 0.001],
-            'batch_size': [32, 64, 128],
-            'depth': [0, 1, 2, 3],
-            'hidden_dim': [64, 128, 256, 512],
-            'latent_dim': [128, 256, 512, 1024],
-            'dropout_prob': [0.1, 0.3]
-        }
-    },
+    # 'single_view_fp_plain': {
+    #     'inputs_0': ['0/Drug_fp'],
+    #     'inputs_1': ['1/Target_fp'],
+    #     'model_type': 'plain',
+    #     'hyperparamter_grid': {
+    #         'learning_rate': [0.0001, 0.0005, 0.001],
+    #         'batch_size': [32, 64, 128],
+    #         'depth': [0, 1, 2, 3],
+    #         'hidden_dim': [64, 128, 256, 512],
+    #         'latent_dim': [128, 256, 512, 1024],
+    #         'dropout_prob': [0.1, 0.3]
+    #     }
+    # },
     # 'single_view_emb_plain': {
     #     'inputs_0': ['0/Drug_emb_graph'],
     #     'inputs_1': ['1/Target_emb_T5'],

@@ -11,8 +11,6 @@ import pandas as pd
 from typing import Dict, Tuple, Literal, List, Set, Optional
 from tdc.multi_pred import DTI
 import json
-import numpy as np
-import warnings
 from tqdm import tqdm
 
 from mb_vae_dti.loading.datasets import canonicalize_smiles
@@ -230,8 +228,9 @@ def add_potential_ids(
     drug_potential_ids = {smiles: set() for smiles in unique_drugs['Drug_SMILES']}
     target_potential_ids = {aa: set() for aa in unique_targets['Target_AA']}
     
-    # Fetch IDs from all datasets
-    for dataset_name in dataset_names:
+    # Fetch IDs from all datasets - use tqdm for progress tracking
+    dataset_iterator = tqdm(dataset_names, desc="Fetching IDs from datasets") if not verbose else dataset_names
+    for dataset_name in dataset_iterator:
         try:
             if verbose:
                 print(f"Fetching IDs from {dataset_name}...")
@@ -314,8 +313,9 @@ def annotate_drugs(drugs: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
         drugs_with_ids = sum(1 for ids in annotated_drugs.get('Potential_ID', []) if isinstance(ids, set) and len(ids) > 0)
         print(f"Found {drugs_with_ids} drugs with potential IDs")
     
-    # Process each drug
-    for idx, row in annotated_drugs.iterrows():
+    # Process each drug - use tqdm for progress tracking regardless of verbose setting
+    iterator = tqdm(annotated_drugs.iterrows(), total=total_drugs, desc="Annotating drugs") if not verbose else annotated_drugs.iterrows()
+    for idx, row in iterator:
         # Get the SMILES and potential IDs
         smiles = row['Drug_SMILES']
         potential_ids = row.get('Potential_ID', set())
@@ -399,8 +399,9 @@ def annotate_targets(targets: pd.DataFrame, verbose: bool = False) -> pd.DataFra
         targets_with_ids = sum(1 for ids in annotated_targets.get('Potential_ID', []) if isinstance(ids, set) and len(ids) > 0)
         print(f"Found {targets_with_ids} targets with potential IDs")
     
-    # Process each target
-    for idx, row in annotated_targets.iterrows():
+    # Process each target - use tqdm for progress tracking regardless of verbose setting
+    iterator = tqdm(annotated_targets.iterrows(), total=total_targets, desc="Annotating targets") if not verbose else annotated_targets.iterrows()
+    for idx, row in iterator:
         # Get the amino acid sequence and potential IDs
         aa_sequence = row['Target_AA']
         potential_ids = row.get('Potential_ID', set())
@@ -442,4 +443,121 @@ def annotate_targets(targets: pd.DataFrame, verbose: bool = False) -> pd.DataFra
         print(f"Added RefSeq IDs to {sum(annotated_targets['Target_RefSeq_ID'].notna())} targets")
 
     return annotated_targets
+
+
+def annotate_dti(df: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
+    """
+    Annotate a drug-target interaction dataset.
+
+    Args:
+        df: DataFrame containing drug-target interactions with Drug_SMILES and Target_AA columns
+        verbose: Whether to print additional information
+
+    Returns:
+        Annotated DataFrame with the following columns:
+        - Drug_ID: Unique ID for the drug
+        - Drug_InChIKey: InChI key for the drug
+        - Drug_SMILES: SMILES string for the drug
+        - Target_ID: Unique ID for the target
+        - Target_UniProt_ID: UniProt ID for the target
+        - Target_Gene_name: Gene name for the target
+        - Target_RefSeq_ID: RefSeq ID for the target
+        - Target_AA: Amino acid sequence for the target
+        - Target_DNA: DNA sequence for the target
+        - Y: Binary interaction indicator
+        - Y_*: Interaction values (e.g., Y_pKd, Y_KIBA, Y_pKi)
+        - in_*: Dataset indicators (e.g., in_DAVIS, in_KIBA)
+    """
+    print("Starting annotation process...")
+    print(f"Input dataset contains {len(df)} drug-target interactions")
+    
+    # Step 1: Extract unique drugs and targets
+    print("\nStep 1: Extracting unique drugs and targets...")
+    unique_drugs = df[['Drug_SMILES']].drop_duplicates().reset_index(drop=True)
+    unique_targets = df[['Target_AA']].drop_duplicates().reset_index(drop=True)
+    
+    print(f"Found {len(unique_drugs)} unique drugs and {len(unique_targets)} unique targets")
+    
+    # Step 2: Add potential IDs from all datasets
+    print("\nStep 2: Adding potential IDs...")
+    unique_drugs, unique_targets = add_potential_ids(unique_drugs, unique_targets, verbose=verbose)
+    
+    # Step 3: Annotate drugs
+    print("\nStep 3: Annotating drugs...")
+    df_drugs = annotate_drugs(unique_drugs, verbose=verbose)
+    
+    # Step 4: Annotate targets
+    print("\nStep 4: Annotating targets...")
+    df_targets = annotate_targets(unique_targets, verbose=verbose)
+    
+    # Step 5: Filter for valid drugs and targets
+    print("\nStep 5: Filtering for valid drugs and targets...")
+    # Fill NA values in the validity columns with False to avoid filtering errors
+    df_drugs['Drug_Valid'] = df_drugs['Drug_Valid'].fillna(False)
+    df_targets['Target_Valid'] = df_targets['Target_Valid'].fillna(False)
+    valid_drugs = df_drugs[df_drugs['Drug_Valid']]
+    valid_targets = df_targets[df_targets['Target_Valid']]
+    
+    print(f"Found {len(valid_drugs)}/{len(df_drugs)} valid drugs")
+    print(f"Found {len(valid_targets)}/{len(df_targets)} valid targets")
+    
+    # Step 6: Generate unique IDs for valid drugs and targets
+    print("\nStep 6: Generating unique IDs for valid drugs and targets...")
+    
+    # Generate IDs directly in the DataFrames - only for valid drugs and targets
+    valid_drugs['Drug_ID'] = [f"D{i:06d}" for i in range(1, len(valid_drugs) + 1)]
+    valid_targets['Target_ID'] = [f"T{i:06d}" for i in range(1, len(valid_targets) + 1)]
+    
+    print(f"Generated {len(valid_drugs)} unique drug IDs and {len(valid_targets)} unique target IDs")
+    
+    # Step 7: Create a mapping between original data and annotated data
+    drug_map = valid_drugs.set_index('Drug_SMILES')
+    target_map = valid_targets.set_index('Target_AA')
+    
+    # Step 8: Filter the original dataset to only include valid drugs and targets
+    df_filtered = df[
+        df['Drug_SMILES'].isin(valid_drugs['Drug_SMILES']) &
+        df['Target_AA'].isin(valid_targets['Target_AA'])
+    ]
+    
+    filtered_interactions = len(df_filtered)
+    print(f"Filtered dataset contains {filtered_interactions}/{len(df)} interactions")
+    print(f"Retention rate: {filtered_interactions/len(df)*100:.2f}%")
+    
+    # Step 9: Create the final dataset by joining the filtered data with the annotations
+    # Add drug information
+    df_annotated = df_filtered.copy()
+    df_annotated['Drug_ID'] = df_annotated['Drug_SMILES'].map(drug_map['Drug_ID'])
+    df_annotated['Drug_InChIKey'] = df_annotated['Drug_SMILES'].map(drug_map['Drug_InChIKey'])
+    
+    # Add target information
+    df_annotated['Target_ID'] = df_annotated['Target_AA'].map(target_map['Target_ID'])
+    df_annotated['Target_UniProt_ID'] = df_annotated['Target_AA'].map(target_map['Target_UniProt_ID'])
+    df_annotated['Target_Gene_name'] = df_annotated['Target_AA'].map(target_map['Target_Gene_name'])
+    df_annotated['Target_RefSeq_ID'] = df_annotated['Target_AA'].map(target_map['Target_RefSeq_ID'])
+    df_annotated['Target_DNA'] = df_annotated['Target_AA'].map(target_map['Target_DNA'])
+    
+    # Reorder columns to match the desired output format
+    columns = [
+        'Drug_ID', 'Drug_InChIKey', 'Drug_SMILES',
+        'Target_ID', 'Target_UniProt_ID', 'Target_Gene_name', 'Target_RefSeq_ID', 'Target_AA', 'Target_DNA',
+        'Y'
+    ]
+    
+    # Add value columns
+    value_columns = [col for col in df_annotated.columns if col.startswith('Y_')]
+    columns.extend(value_columns)
+    
+    # Add dataset indicator columns
+    indicator_columns = [col for col in df_annotated.columns if col.startswith('in_')]
+    columns.extend(indicator_columns)
+    
+    # Reorder the columns
+    df_annotated = df_annotated[columns]
+    
+    if verbose:
+        print(f"\nFinal annotated dataset contains {len(df_annotated)} interactions")
+        print(f"Involving {df_annotated['Drug_ID'].nunique()} unique drugs and {df_annotated['Target_ID'].nunique()} unique targets")
+    
+    return df_annotated
 
