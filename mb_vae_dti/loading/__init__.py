@@ -18,7 +18,7 @@ from mb_vae_dti.loading.visualization import (
     plot_dataset_statistics,
     plot_dataset_overlap,
     plot_lorenz_curves,
-    plot_interaction_ratios
+    plot_interaction_stats
 )
 
 from mb_vae_dti.loading.drug_annotation import annotate_drug

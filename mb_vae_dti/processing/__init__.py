@@ -1,12 +1,12 @@
 """
 Processing module for MB-VAE-DTI.
 
-This module contains functionality for creating h5torch files,
-generating drug embeddings, and generating protein embeddings.
+This module contains functionality for splitting the data,
+creating the h5torch file, and generating drug/target embeddings.
 It makes use of external repositories like bmfm_sm and ESPF.
 """
 
-# Import submodules when they are created
-# from mb_vae_dti.processing import h5torch_creation
-# from mb_vae_dti.processing import drug_embedding
-# from mb_vae_dti.processing import prot_embedding
+from mb_vae_dti.processing.split import (
+    add_split_cols,
+    create_h5torch
+)

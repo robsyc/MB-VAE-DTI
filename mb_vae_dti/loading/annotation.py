@@ -500,6 +500,14 @@ def annotate_dti(df: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
     
     print(f"Found {len(valid_drugs)}/{len(df_drugs)} valid drugs")
     print(f"Found {len(valid_targets)}/{len(df_targets)} valid targets")
+
+    # Print sample invalid entries with formatting
+    print("\nSample invalid drugs (max 10):")
+    print(df_drugs[~df_drugs['Drug_Valid']].head(10).to_markdown(index=False))
+    
+    print("\nSample invalid targets (max 10):") 
+    print(df_targets[~df_targets['Target_Valid']].head(10).to_markdown(index=False))
+    print("\n")
     
     # Step 6: Generate unique IDs for valid drugs and targets
     print("\nStep 6: Generating unique IDs for valid drugs and targets...")

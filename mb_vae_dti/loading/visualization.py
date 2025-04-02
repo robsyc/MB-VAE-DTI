@@ -421,64 +421,123 @@ def plot_lorenz_curves(
     return str(save_path)
 
 
-def plot_interaction_ratios(
+def plot_interaction_stats(
     df: pd.DataFrame,
-    save_path: Optional[str] = None,
-    show: bool = True
 ) -> str:
     """
-    Plots histograms of the ratio of positive to negative interactions for drugs and targets.
+    Generates a table of interaction statistics for the dataset.
     
     Args:
         df: DataFrame containing drug-target interaction data
-        save_path: Path to save the plot (if None, a default path is used)
-        show: Whether to display the plot
 
     Returns:
-        str: Path to the saved plot
+        str: Table of interaction statistics
     """
     set_plotting_style()
-    
-    # Count observations per instance
-    drug_observations = df.groupby('Drug_SMILES').size()
-    target_observations = df.groupby('Target_AA').size()
+    # Unique drugs and targets
+    unique_drugs = df['Drug_SMILES'].unique()
+    unique_targets = df['Target_AA'].unique()
 
-    # For each instance, count the number of positive interactions
-    drug_interactions = df.groupby('Drug_SMILES')['Y'].sum()
-    target_interactions = df.groupby('Target_AA')['Y'].sum()
+    # n_total values
+    n_total_drugs = len(unique_drugs)
+    n_total_targets = len(unique_targets)
+    n_total_possible = n_total_drugs * n_total_targets
+    n_observed = len(df)
+    matrix_observation = (n_observed / n_total_possible)
 
-    # Calculate ratios
-    drug_ratios = drug_interactions / drug_observations
-    target_ratios = target_interactions / target_observations
+    # Observed interactions per instance and positive interactions per instance
+    drug_to_n_observations = {drug: 0 for drug in unique_drugs}
+    drug_to_n_interactions = {drug: 0 for drug in unique_drugs}
+    target_to_n_observations = {target: 0 for target in unique_targets}
+    target_to_n_interactions = {target: 0 for target in unique_targets}
+    
+    for _, row in df.iterrows():
+        drug_to_n_observations[row['Drug_SMILES']] += 1
+        target_to_n_observations[row['Target_AA']] += 1
+        drug_to_n_interactions[row['Drug_SMILES']] += 1 if row['Y'] == 1 else 0
+        target_to_n_interactions[row['Target_AA']] += 1 if row['Y'] == 1 else 0
+    
+    # Calculate positive/observation ratios
+    drug_ratios = {
+        drug: drug_to_n_interactions[drug] / drug_to_n_observations[drug]
+        for drug in unique_drugs
+    }
+    target_ratios = {
+        target: target_to_n_interactions[target] / target_to_n_observations[target]
+        for target in unique_targets
+    }
+    
+    # Calculate observed/potential ratios
+    drug_coverage = {
+        drug: drug_to_n_observations[drug] / n_total_targets
+        for drug in unique_drugs
+    }
+    target_coverage = {
+        target: target_to_n_observations[target] / n_total_drugs
+        for target in unique_targets
+    }
 
-    # Create histograms
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    # Convert to DataFrames for easy sorting and plotting
+    drug_df = pd.DataFrame({
+        'ID': list(drug_ratios.keys()),
+        'Binding_Ratio': list(drug_ratios.values()),
+        'Coverage': list(drug_coverage.values()),
+        'Observations': [drug_to_n_observations[drug] for drug in drug_ratios.keys()],
+        'Interactions': [drug_to_n_interactions[drug] for drug in drug_ratios.keys()]
+    }).sort_values('Binding_Ratio')
     
-    # Drug histogram
-    ax1.hist(drug_ratios, bins=30, color='blue', alpha=0.7)
-    ax1.set_title('Drug Interaction Ratio Distribution')
-    ax1.set_xlabel('Ratio of Positive to Negative Interactions')
-    ax1.set_ylabel('Count')
+    target_df = pd.DataFrame({
+        'ID': list(target_ratios.keys()),
+        'Binding_Ratio': list(target_ratios.values()),
+        'Coverage': list(target_coverage.values()),
+        'Observations': [target_to_n_observations[target] for target in target_ratios.keys()],
+        'Interactions': [target_to_n_interactions[target] for target in target_ratios.keys()]
+    }).sort_values('Binding_Ratio')
     
-    # Target histogram
-    ax2.hist(target_ratios, bins=30, color='green', alpha=0.7)
-    ax2.set_title('Target Interaction Ratio Distribution')
-    ax2.set_xlabel('Ratio of Positive to Negative Interactions')
-    ax2.set_ylabel('Count')
+    # Calculate average and median statistics
+    drug_avg_observations = drug_df['Observations'].mean()
+    drug_median_observations = drug_df['Observations'].median()
+    drug_avg_interaction_ratio = drug_df['Binding_Ratio'].mean() * 100
+    drug_median_interaction_ratio = drug_df['Binding_Ratio'].median() * 100
     
-    plt.tight_layout()
-
-    # Save the plot if requested
-    if save_path is None:
-        save_path = IMAGES_DIR / "interaction_ratios.png"
-    else:
-        save_path = Path(save_path)
+    target_avg_observations = target_df['Observations'].mean()
+    target_median_observations = target_df['Observations'].median()
+    target_avg_interaction_ratio = target_df['Binding_Ratio'].mean() * 100
+    target_median_interaction_ratio = target_df['Binding_Ratio'].median() * 100
     
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    # Calculate extreme statistics
+    drug_single_observation = (drug_df['Observations'] == 1).sum()
+    drug_zero_interactions = (drug_df['Binding_Ratio'] == 0).sum()
+    drug_all_interactions = (drug_df['Binding_Ratio'] == 1).sum()
     
-    if show:
-        plt.show()
-    else:
-        plt.close()
-
-    return str(save_path)
+    target_single_observation = (target_df['Observations'] == 1).sum()
+    target_zero_interactions = (target_df['Binding_Ratio'] == 0).sum()
+    target_all_interactions = (target_df['Binding_Ratio'] == 1).sum()
+    
+    # Format the statistics into a readable string
+    result = (
+        f"Matrix Coverage: {matrix_observation:.4f} ({n_observed:,} observations out of {n_total_possible:,} possible)\n\n"
+        
+        f"Drug Statistics:\n"
+        f"  Unique Drugs: {n_total_drugs:,}\n"
+        f"  Average Observations per Drug: {drug_avg_observations:.2f}\n"
+        f"  Median Observations per Drug: {drug_median_observations:.0f}\n"
+        f"  Average Positive Interaction Rate: {drug_avg_interaction_ratio:.2f}%\n"
+        f"  Median Positive Interaction Rate: {drug_median_interaction_ratio:.2f}%\n"
+        f"  Drugs with Single Observation: {drug_single_observation:,} ({drug_single_observation/n_total_drugs*100:.2f}%)\n"
+        f"  Drugs with Zero Positive Interactions: {drug_zero_interactions:,} ({drug_zero_interactions/n_total_drugs*100:.2f}%)\n"
+        f"  Drugs with 100% Positive Interactions: {drug_all_interactions:,} ({drug_all_interactions/n_total_drugs*100:.2f}%)\n\n"
+        
+        f"Target Statistics:\n"
+        f"  Unique Targets: {n_total_targets:,}\n"
+        f"  Average Observations per Target: {target_avg_observations:.2f}\n"
+        f"  Median Observations per Target: {target_median_observations:.0f}\n"
+        f"  Average Positive Interaction Rate: {target_avg_interaction_ratio:.2f}%\n"
+        f"  Median Positive Interaction Rate: {target_median_interaction_ratio:.2f}%\n"
+        f"  Targets with Single Observation: {target_single_observation:,} ({target_single_observation/n_total_targets*100:.2f}%)\n"
+        f"  Targets with Zero Positive Interactions: {target_zero_interactions:,} ({target_zero_interactions/n_total_targets*100:.2f}%)\n"
+        f"  Targets with 100% Positive Interactions: {target_all_interactions:,} ({target_all_interactions/n_total_targets*100:.2f}%)\n"
+    )
+    
+    return result
+    
