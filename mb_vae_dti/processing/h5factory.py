@@ -66,6 +66,15 @@ def create_h5torch(
     df = df.copy()
     print(f"Creating h5torch file from dataframe with {len(df)} rows...")
     
+    # Check for duplicate (drug, target) pairs
+    pair_counts = df.groupby([drug_id_col, target_id_col]).size()
+    duplicates = pair_counts[pair_counts > 1]
+    if len(duplicates) > 0:
+        print(f"WARNING: Found {len(duplicates)} duplicate (drug, target) pairs. "
+              f"This can cause inconsistencies in the unstructured data.")
+        # Optional: remove duplicates or raise an error
+        # df = df.drop_duplicates(subset=[drug_id_col, target_id_col])
+    
     # Get unique drugs and targets and map them to integer indices
     unique_drugs = pd.unique(df[drug_id_col])
     unique_targets = pd.unique(df[target_id_col])
@@ -79,8 +88,13 @@ def create_h5torch(
     df["Drug_index"] = df[drug_id_col].map(drug_id2int)
     df["Target_index"] = df[target_id_col].map(target_id2int)
 
+    # CRITICAL: Sort the dataframe by (Drug_index, Target_index) to ensure consistent order
+    # This ensures that the order of interactions in the COO matrix and unstructured data is well-defined
+    # and consistent with how h5torch's COO sampling will retrieve them
+    df = df.sort_values(["Drug_index", "Target_index"]).reset_index(drop=True)
+
     # Generate COO matrix data for the central object (binary interaction matrix)
-    # Interactions are ordered according to the input DataFrame rows
+    # Interactions are now ordered by Drug_index (primary) and Target_index (secondary)
     coo_matrix_indices = df[["Drug_index", "Target_index"]].values.T  # Shape: (2, n_interactions)
     coo_matrix_values = df[interaction_col].values.astype(bool)       # Shape: (n_interactions,)
     coo_matrix_shape = (len(unique_drugs), len(unique_targets))       # Shape of the full matrix
@@ -93,13 +107,16 @@ def create_h5torch(
     # Process drug features aligned to axis 0
     drug_features = {} # dict of feature arrays indexed by Drug_index
     print("Processing drug features...")
-    for col in [drug_id_col] + drug_feature_cols:
+    for col in drug_feature_cols:
         if col in df.columns:
             # Ensure we get one feature value per unique drug, ordered by Drug_index
-            drug_df_unique = df[["Drug_index", col]].drop_duplicates(subset=["Drug_index"]).sort_values("Drug_index")
+            drug_df_unique = df[[drug_id_col, "Drug_index", col]].drop_duplicates(subset=[drug_id_col]).sort_values("Drug_index")
 
             # Check if we have features for all unique drugs
-            assert len(drug_df_unique) == len(unique_drugs), f"Found features for {len(drug_df_unique)} drugs in column '{col}', but expected {len(unique_drugs)}."
+            assert len(drug_df_unique) == len(unique_drugs), (
+                f"Found features for {len(drug_df_unique)} drugs in column '{col}', "
+                f"but expected {len(unique_drugs)}."
+            )
 
             drug_features[col] = drug_df_unique[col].values
         else:
@@ -108,13 +125,16 @@ def create_h5torch(
     # Process target features aligned to axis 1
     target_features = {} # dict of feature arrays indexed by Target_index
     print("Processing target features...")
-    for col in [target_id_col] + target_feature_cols:
+    for col in target_feature_cols:
         if col in df.columns:
-            # Use drop_duplicates based on Target_ID
-            target_df_unique = df[["Target_index", col]].drop_duplicates(subset=["Target_index"]).sort_values("Target_index")
+            # Ensure we get one feature value per unique target, ordered by Target_index
+            target_df_unique = df[[target_id_col, "Target_index", col]].drop_duplicates(subset=[target_id_col]).sort_values("Target_index")
 
             # Check if we have features for all unique targets
-            assert len(target_df_unique) == len(unique_targets), f"Found features for {len(target_df_unique)} targets in column '{col}', but expected {len(unique_targets)}."
+            assert len(target_df_unique) == len(unique_targets), (
+                f"Found features for {len(target_df_unique)} targets in column '{col}', "
+                f"but expected {len(unique_targets)}."
+            )
 
             target_features[col] = target_df_unique[col].values
         else:
@@ -142,10 +162,23 @@ def create_h5torch(
             f.register(values, 1, name=name, dtype_save="bytes", dtype_load="str")
 
         # --- Register Unstructured Data (Interaction-Level) ---
+        # Save the exact drug and target indices used for the COO matrix as unstructured data
+        # This can be used for debugging and verification
+        f.register(df["Drug_index"].values, "unstructured", name="Drug_index", dtype_save="int32")
+        f.register(df["Target_index"].values, "unstructured", name="Target_index", dtype_save="int32")
+        
+        # For future verification, also save the original drug and target IDs
+        f.register(df[drug_id_col].values, "unstructured", name="Drug_ID_orig", dtype_save="bytes", dtype_load="str")
+        f.register(df[target_id_col].values, "unstructured", name="Target_ID_orig", dtype_save="bytes", dtype_load="str")
+        
         # Register split information
         for col in split_cols:
             if col in df.columns:
                 # Splits are strings ('train', 'valid', 'test')
+                assert len(df[col]) == len(coo_matrix_values), (
+                    f"Split column '{col}' has {len(df[col])} values, "
+                    f"but expected {len(coo_matrix_values)}."
+                )
                 f.register(df[col].values, "unstructured", name=col, dtype_save="bytes", dtype_load="str")
             else:
                 print(f"Warning: Split column '{col}' not found in DataFrame.")
@@ -154,6 +187,10 @@ def create_h5torch(
         for col in provenance_cols:
             if col in df.columns:
                 # Provenance flags are boolean flags
+                assert len(df[col]) == len(coo_matrix_values), (
+                    f"Provenance flag column '{col}' has {len(df[col])} values, "
+                    f"but expected {len(coo_matrix_values)}."
+                )
                 f.register(df[col].values, "unstructured", name=col, dtype_save="bool")
             else:
                 print(f"Warning: Provenance flag column '{col}' not found in DataFrame.")
@@ -162,6 +199,10 @@ def create_h5torch(
         for col in additional_y_cols:
             if col in df.columns:
                 # These are float values (e.g., pKd), but may be NaN
+                assert len(df[col]) == len(coo_matrix_values), (
+                    f"Additional Y column '{col}' has {len(df[col])} values, "
+                    f"but expected {len(coo_matrix_values)}."
+                )
                 f.register(df[col].values, "unstructured", name=col, dtype_save="float32", dtype_load="float32")
             else:
                 print(f"Warning: Additional Y column '{col}' not found in DataFrame.")
@@ -174,6 +215,21 @@ def create_h5torch(
         f.attrs["created_at"] = pd.Timestamp.now().isoformat()
 
     print(f"Created h5torch file at {output_path}")
+    
+    # Verify the h5torch file structure
+    with h5py.File(str(output_path), 'r') as f:
+        print("\nH5torch file structure verification:")
+        print(f"Central group exists: {'central' in f}")
+        print(f"Unstructured group exists: {'unstructured' in f}")
+        if 'central' in f and 'indices' in f['central']:
+            print(f"Central indices shape: {f['central/indices'].shape}")
+        if 'central' in f and 'data' in f['central']:
+            print(f"Central data shape: {f['central/data'].shape}")
+        if 'unstructured' in f:
+            print("Unstructured datasets:")
+            for key in f['unstructured'].keys():
+                print(f"  {key}: {f['unstructured'][key].shape}")
+    
     return None
 
 
@@ -204,26 +260,88 @@ class DTIDataset(h5torch.Dataset):
                 during __getitem__. These are typically continuous interaction values.
             subset: Boolean mask of length n_interactions.
         """
+        # Initialize the h5torch Dataset with COO sampling mode
         super().__init__(filename, subset=subset, sampling="coo", in_memory=True)
-        self.additional_y_cols = additional_y_cols
         
-        # Verify that all additional_y_cols exist in the unstructured group
-        existing_cols = []
+        # Verify that the file has the expected structure
+        if "central" not in self.f:
+            raise ValueError("H5torch file does not contain a 'central' group")
+        
+        if "unstructured" not in self.f:
+            raise ValueError("H5torch file does not contain an 'unstructured' group")
+            
+        # Filter additional_y_cols to only include those that exist
+        self.additional_y_cols = []
         for col in additional_y_cols:
-            try:
-                test = self.f[f"unstructured/{col}"][:]
-                existing_cols.append(col)
-            except KeyError:
+            if col in self.f["unstructured"].keys():
+                self.additional_y_cols.append(col)
+            else:
                 print(f"Warning: Column '{col}' not found in unstructured group. It will be ignored.")
         
-        self.additional_y_cols = existing_cols
+        # Get the mapping between filtered indices and original COO indices
+        self._setup_index_mapping(subset)
+        
+        # Verify alignment between central and unstructured data
+        self._verify_alignment()
+        
+    def _setup_index_mapping(self, subset):
+        """
+        Set up the mapping from filtered indices to original unstructured data indices.
+        
+        Args:
+            subset: The subset parameter used to filter the dataset
+        """
+        # If we have subset_indices from h5torch, use those
+        if hasattr(self, 'subset_indices') and self.subset_indices is not None:
+            # This is the indices into the original COO data that were selected by the subset
+            self.idx_mapping = self.subset_indices
+            print(f"Using h5torch subset_indices for mapping ({len(self.idx_mapping)} indices)")
+        elif hasattr(self, '_dataset'):
+            # Try to get from h5torch's internal _dataset attribute for COO format
+            if hasattr(self._dataset, 'indices') and self._dataset.indices is not None:
+                self.idx_mapping = self._dataset.indices
+                print(f"Using h5torch internal indices for mapping ({len(self.idx_mapping)} indices)")
+            else:
+                # Default to sequential mapping and warn
+                print("WARNING: Could not find h5torch indices mapping, using sequential indices")
+                self.idx_mapping = np.arange(len(self))
+        else:
+            # If no information from h5torch is available, try to determine from subset
+            if isinstance(subset, np.ndarray) and subset.dtype == bool:
+                # If subset is a boolean mask, get the indices where True
+                self.idx_mapping = np.where(subset)[0]
+                print(f"Using boolean mask for mapping ({len(self.idx_mapping)} indices)")
+            else:
+                # Unable to determine mapping, use sequential indices
+                print("WARNING: Could not determine indices mapping, using sequential indices")
+                self.idx_mapping = np.arange(len(self))
+    
+    def _verify_alignment(self):
+        """
+        Verify that the central data and unstructured data are properly aligned.
+        This checks that all unstructured datasets have the expected length.
+        """
+        # Get expected length from central indices
+        if "indices" in self.f["central"].keys():
+            expected_length = self.f["central/indices"].shape[1]
+            for col in self.additional_y_cols:
+                actual_length = len(self.f[f"unstructured/{col}"])
+                if actual_length != expected_length:
+                    raise ValueError(
+                        f"Misalignment detected: unstructured/{col} has {actual_length} elements, "
+                        f"but central/indices has {expected_length} elements."
+                    )
+            print(f"Verified alignment: all unstructured data has {expected_length} elements")
+        else:
+            print("WARNING: Could not verify alignment, central/indices not found")
     
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """
         Get an item from the dataset.
         
         This overrides the parent method to additionally fetch the interaction-specific
-        values from the 'unstructured' group.
+        values from the 'unstructured' group, correctly mapping filtered indices to
+        the original indices in the unstructured data.
         
         Args:
             idx: Index of the item to fetch
@@ -235,10 +353,18 @@ class DTIDataset(h5torch.Dataset):
         """
         # Get the base item from the parent class
         item = super().__getitem__(idx)
+        orig_idx = self.idx_mapping[idx]
         
-        # Add the additional interaction values
+        # Add the additional interaction values using the original index
         for col in self.additional_y_cols:
-            item[f'unstructured/{col}'] = self.f[f'unstructured/{col}'][idx]
+            unstructured_key = f"unstructured/{col}"
+            try:
+                item[unstructured_key] = self.f[unstructured_key][orig_idx]
+            except IndexError:
+                raise IndexError(
+                    f"Index {orig_idx} out of bounds for unstructured data '{col}' "
+                    f"with {len(self.f[unstructured_key])} items"
+                )
             
         return item
 
