@@ -117,7 +117,7 @@ def create_h5torch(
                 f"Found features for {len(drug_df_unique)} drugs in column '{col}', "
                 f"but expected {len(unique_drugs)}."
             )
-
+            drugs_unique_array = drug_df_unique[drug_id_col].values
             drug_features[col] = drug_df_unique[col].values
         else:
             print(f"Warning: Drug feature column '{col}' not found in DataFrame.")
@@ -135,7 +135,7 @@ def create_h5torch(
                 f"Found features for {len(target_df_unique)} targets in column '{col}', "
                 f"but expected {len(unique_targets)}."
             )
-
+            targets_unique_array = target_df_unique[target_id_col].values
             target_features[col] = target_df_unique[col].values
         else:
             print(f"Warning: Target feature column '{col}' not found in DataFrame.")
@@ -154,23 +154,16 @@ def create_h5torch(
 
         # --- Register Axis-Aligned Features ---
         # Register drug features aligned to axis 0
+        f.register(drugs_unique_array, 0, name=drug_id_col, dtype_save="bytes", dtype_load="str")
         for name, values in drug_features.items():
             f.register(values, 0, name=name, dtype_save="bytes", dtype_load="str")
 
         # Register target features aligned to axis 1
+        f.register(targets_unique_array, 1, name=target_id_col, dtype_save="bytes", dtype_load="str")
         for name, values in target_features.items():
             f.register(values, 1, name=name, dtype_save="bytes", dtype_load="str")
 
         # --- Register Unstructured Data (Interaction-Level) ---
-        # Save the exact drug and target indices used for the COO matrix as unstructured data
-        # This can be used for debugging and verification
-        f.register(df["Drug_index"].values, "unstructured", name="Drug_index", dtype_save="int32")
-        f.register(df["Target_index"].values, "unstructured", name="Target_index", dtype_save="int32")
-        
-        # For future verification, also save the original drug and target IDs
-        f.register(df[drug_id_col].values, "unstructured", name="Drug_ID_orig", dtype_save="bytes", dtype_load="str")
-        f.register(df[target_id_col].values, "unstructured", name="Target_ID_orig", dtype_save="bytes", dtype_load="str")
-        
         # Register split information
         for col in split_cols:
             if col in df.columns:
@@ -214,22 +207,7 @@ def create_h5torch(
         f.attrs["sparsity"] = len(coo_matrix_values) / (len(unique_drugs) * len(unique_targets))
         f.attrs["created_at"] = pd.Timestamp.now().isoformat()
 
-    print(f"Created h5torch file at {output_path}")
-    
-    # Verify the h5torch file structure
-    with h5py.File(str(output_path), 'r') as f:
-        print("\nH5torch file structure verification:")
-        print(f"Central group exists: {'central' in f}")
-        print(f"Unstructured group exists: {'unstructured' in f}")
-        if 'central' in f and 'indices' in f['central']:
-            print(f"Central indices shape: {f['central/indices'].shape}")
-        if 'central' in f and 'data' in f['central']:
-            print(f"Central data shape: {f['central/data'].shape}")
-        if 'unstructured' in f:
-            print("Unstructured datasets:")
-            for key in f['unstructured'].keys():
-                print(f"  {key}: {f['unstructured'][key].shape}")
-    
+    print(f"Created h5torch file at {output_path}")    
     return None
 
 
