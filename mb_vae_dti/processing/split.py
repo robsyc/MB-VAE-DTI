@@ -233,3 +233,33 @@ def add_split_cols(
         df['split_cold'] = df['Drug_ID'].map(drug_to_split)
     
     return df
+
+
+def add_split_cols_drug_generation(
+    df: pd.DataFrame,
+    frac: Tuple[float, float, float] = (0.8, 0.1, 0.1),
+    seed: int = 42
+) -> pd.DataFrame:
+    """
+    Adds split columns to the dataframe based on the given fractions.
+    """
+    df = df.copy()
+    
+    # Validate fractions
+    if sum(frac) != 1.0:
+        raise ValueError(f"Split fractions must sum to 1.0, got {sum(frac)}")
+    
+    # Set random seed for reproducibility
+    np.random.seed(seed)
+    
+    # Add random train/valid/test split
+    df['split'] = np.random.choice(
+        ['train', 'valid', 'test'], 
+        size=len(df), 
+        p=frac
+    )
+    
+    return df
+
+
+    

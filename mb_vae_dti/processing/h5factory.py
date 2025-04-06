@@ -1,5 +1,5 @@
 """
-This module provides functionality for loading the h5torch file as a Dataset object.
+This module provides functionality for creating the h5torch files and datasets.
 """
 
 from typing import List, Dict, Union, Optional, Any, Tuple, Literal
@@ -351,9 +351,10 @@ def load_h5torch_DTI(
     filename: str = "data/processed/data.h5torch",
     setting: Literal["split_rand", "split_cold"] = "split_rand",
     split: Literal["train", "valid", "test"] = "train",
-    datasets: Optional[List[str]] = None,
+    datasets: Optional[List[
+        Literal["in_DAVIS", "in_BindingDB_Kd", "in_BindingDB_Ki", "in_Metz", "in_KIBA"]
+    ]] = None,
     additional_y_cols: List[str] = ["Y_pKd", "Y_pKi", "Y_KIBA"],
-    transform: Optional[Any] = None,
 ) -> DTIDataset:
     """
     Load a DTIDataset from an h5torch file with specific filtering options.
@@ -370,7 +371,6 @@ def load_h5torch_DTI(
         datasets: Optional list of dataset sources to include (e.g. ['in_DAVIS', 'in_Metz']).
                  If None, all interactions are included regardless of source.
         additional_y_cols: List of additional Y columns to include in the dataset
-        transform: Optional transform to apply to the data
         
     Returns:
         A DTIDataset object containing the specified subset of data
@@ -413,3 +413,163 @@ def load_h5torch_DTI(
         additional_y_cols=additional_y_cols,
         subset=subset_mask
     )
+
+
+def create_h5torch_smiles(
+    df: pd.DataFrame,
+    output_filename: str = "data_drug_generation.h5torch",
+    smiles_col: str = "smiles",
+    split_col: str = "split"
+) -> None:
+    """
+    Creates and saves an h5torch file for SMILES data for drug generation.
+
+    This function takes a DataFrame containing SMILES strings and converts it to an h5torch
+    file format optimized for sampling during model training and generation.
+
+    Args:
+        df: DataFrame containing SMILES data
+        output_filename: Name of the output file (without path)
+        smiles_col: Column name for the SMILES strings
+        split_col: Column name for train/valid/test split information
+
+    Returns:
+        None: The function saves the h5torch file to disk in the PROCESSED_DIR
+    """
+    print(f"Creating h5torch file from dataframe with {len(df)} SMILES strings...")
+    
+    # Check if smiles column exists
+    if smiles_col not in df.columns:
+        raise ValueError(f"Column '{smiles_col}' not found in DataFrame")
+    
+    # Remove any rows with missing SMILES
+    if df[smiles_col].isna().any():
+        original_len = len(df)
+        df = df.dropna(subset=[smiles_col])
+        print(f"Removed {original_len - len(df)} rows with missing SMILES values")
+    
+    # Create the h5torch file
+    output_path = PROCESSED_DIR / output_filename
+    with h5torch.File(str(output_path), 'w') as f:
+        # Create a 1D dummy array as the central object
+        # We'll use an integer range as an index (0 to len(df)-1)
+        central_data = np.arange(len(df))
+        f.register(
+            central_data,
+            "central"
+        )
+        
+        # Register the SMILES strings as features aligned to axis 0
+        f.register(
+            df[smiles_col].values,
+            0,  # Align with the central axis
+            name="smiles",
+            dtype_save="bytes", 
+            dtype_load="str"
+        )
+        
+        # Register split information
+        if split_col in df.columns:
+            f.register(
+                df[split_col].values,
+                0,  # Align with the central axis
+                name="split",
+                dtype_save="bytes", 
+                dtype_load="str"
+            )
+        
+        # Add dataset attributes
+        f.attrs["n_smiles"] = len(df)
+        f.attrs["created_at"] = pd.Timestamp.now().isoformat()
+    
+    print(f"Created h5torch file for SMILES data at {output_path}")
+    return None
+
+
+class SMILESDataset(h5torch.Dataset):
+    """
+    A dataset class for SMILES data stored in h5torch format.
+    
+    This dataset is designed for simple sampling of SMILES strings for 
+    drug generation tasks.
+    
+    Attributes:
+        smiles_key: The key in the h5torch file for accessing SMILES strings
+    """
+    
+    def __init__(
+        self, 
+        filename: str,
+        split: Optional[str] = None
+    ):
+        """
+        Initialize the SMILESDataset.
+        
+        Args:
+            filename: Path to the h5torch file
+            split: Optional split to filter by ('train', 'valid', 'test')
+        """
+        # Initialize split_mask as None by default
+        split_mask = None
+        
+        # If split is specified, create a subset based on the split
+        if split is not None:
+            with h5torch.File(filename, 'r') as f:
+                if "0/split" not in f:
+                    raise ValueError("Split information not found in h5torch file")
+                
+                # Get split values and create mask
+                split_values = np.array([s.decode('utf-8') if isinstance(s, bytes) 
+                                        else s for s in f["0/split"][:]])
+                split_mask = split_values == split
+        
+        # Initialize the h5torch Dataset with standard sampling mode
+        super().__init__(filename, subset=split_mask, in_memory=True)
+        
+        # In h5torch.Dataset.__getitem__, the aligned features are returned with a different key format
+        # We need to check what format is used by examining what's returned
+        test_item = super().__getitem__(0)
+        test_keys = list(test_item.keys())
+        
+        # Find the key containing 'smiles'
+        self.smiles_key = None
+        for key in test_keys:
+            if 'smiles' in key:
+                self.smiles_key = key
+                break
+        
+        if self.smiles_key is None:
+            # If we couldn't find it, check the file structure directly
+            if "0/smiles" in self.f:
+                # This is the key in the file, but h5torch.Dataset might transform it
+                self.smiles_key = "0/smiles"
+            else:
+                raise ValueError("Could not find SMILES data in the h5torch file")
+    
+    def __getitem__(self, idx: int) -> str:
+        """
+        Get a SMILES string from the dataset.
+        
+        Args:
+            idx: Index of the item to fetch
+            
+        Returns:
+            A SMILES string
+        """
+        # Get the item from the parent class (will be a dict)
+        item = super().__getitem__(idx)
+        # print(item)
+        
+        # Extract and return just the SMILES string
+        return item[self.smiles_key]
+    
+    @property
+    def smiles(self) -> List[str]:
+        """
+        Get all SMILES strings in the dataset.
+        
+        Returns:
+            List of all SMILES strings
+        """
+        return [self[i] for i in range(len(self))]
+

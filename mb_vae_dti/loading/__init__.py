@@ -31,3 +31,5 @@ from mb_vae_dti.loading.annotation import (
     annotate_targets,
     annotate_dti
 )
+
+from mb_vae_dti.loading.drugs import load_drug_generation_datasets
