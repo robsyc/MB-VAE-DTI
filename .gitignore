@@ -3,8 +3,10 @@ notebooks/results/
 
 external/nucleotide-transformer/*
 !external/nucleotide-transformer/script.py
+
 external/bmfm_sm/*
 !external/bmfm_sm/script.py
+
 external/ESM/cache/
 external/temp/
 
