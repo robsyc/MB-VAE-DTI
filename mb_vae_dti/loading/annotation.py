@@ -635,6 +635,21 @@ def annotate_dti(df: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
     print(f"Generated {len(valid_drugs)} unique drug IDs and {len(valid_targets)} unique target IDs")
     
     # Step 7: Create a mapping between original data and annotated data
+    # Check for duplicate SMILES strings in valid_drugs
+    if valid_drugs['Drug_SMILES'].duplicated().any():
+        print(f"Warning: Found {valid_drugs['Drug_SMILES'].duplicated().sum()} duplicate drug SMILES strings")
+        # Keep only the first occurrence of each SMILES string
+        valid_drugs = valid_drugs.drop_duplicates(subset=['Drug_SMILES'], keep='first')
+        print(f"After removing duplicates: {len(valid_drugs)} unique drugs")
+    
+    # Check for duplicate AA sequences in valid_targets
+    if valid_targets['Target_AA'].duplicated().any():
+        print(f"Warning: Found {valid_targets['Target_AA'].duplicated().sum()} duplicate target sequences")
+        # Keep only the first occurrence of each AA sequence
+        valid_targets = valid_targets.drop_duplicates(subset=['Target_AA'], keep='first')
+        print(f"After removing duplicates: {len(valid_targets)} unique targets")
+    
+    # Now create the mapping with unique indices
     drug_map = valid_drugs.set_index('Drug_SMILES')
     target_map = valid_targets.set_index('Target_AA')
     

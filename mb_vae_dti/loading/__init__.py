@@ -32,4 +32,7 @@ from mb_vae_dti.loading.annotation import (
     annotate_dti
 )
 
-from mb_vae_dti.loading.drugs import load_drug_generation_datasets
+from mb_vae_dti.loading.load_pretrain_drugs import (
+    load_drug_generation_datasets,
+    save_filtered_dataset
+)
