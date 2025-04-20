@@ -12,8 +12,10 @@ from typing import Dict, Tuple, Literal, List, Set, Optional
 from tdc.multi_pred import DTI
 import json
 from tqdm import tqdm
+from rdkit import Chem
+import hashlib
+import traceback
 
-from mb_vae_dti.loading.datasets import canonicalize_smiles
 from mb_vae_dti.loading.drug_annotation import annotate_drug, save_cache as save_drug_cache
 from mb_vae_dti.loading.target_annotation import annotate_target, save_cache as save_target_cache
 
@@ -42,11 +44,63 @@ if POTENTIAL_IDS_CACHE_FILE.exists():
 
 def save_potential_ids_cache() -> None:
     """Save potential IDs cache to disk."""
-    try:  
+    try:
+        # Ensure directory exists
+        ANNOTATION_DIR.mkdir(parents=True, exist_ok=True)
+        
+        # Make a backup of the existing cache file if it exists
+        if POTENTIAL_IDS_CACHE_FILE.exists():
+            import shutil
+            backup_file = POTENTIAL_IDS_CACHE_FILE.with_suffix('.json.bak')
+            shutil.copy2(POTENTIAL_IDS_CACHE_FILE, backup_file)
+        
+        # Save the cache
         with open(POTENTIAL_IDS_CACHE_FILE, 'w') as f:
             json.dump(potential_ids_cache, f)
+            
+        print(f"Successfully saved potential IDs cache to {POTENTIAL_IDS_CACHE_FILE}")
     except Exception as e:
+        import traceback
         print(f"Failed to save potential IDs cache: {e}")
+        print(traceback.format_exc())
+
+
+def canonicalize_smiles(smiles_list: List[str], verbose: bool = False) -> Dict[str, str]:
+    """
+    Canonicalize a list of SMILES strings.
+    
+    Args:
+        smiles_list: List of SMILES strings to canonicalize
+        verbose: Whether to print additional information
+
+    Returns:
+        Dictionary mapping original SMILES strings to their canonical forms
+    """
+    if verbose:
+        print(f"Canonicalizing {len(smiles_list)} SMILES strings...")
+    
+    result = {}
+    for smiles in smiles_list:
+        try:
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is not None:
+                canonical_smiles = Chem.MolToSmiles(mol, isomericSmiles=False)
+                result[smiles] = canonical_smiles
+            else:
+                if verbose:
+                    print(f"Warning: Could not parse SMILES: {smiles}")
+                # Use original SMILES as fallback
+                result[smiles] = smiles
+        except Exception as e:
+            if verbose:
+                print(f"Error canonicalizing SMILES {smiles}: {str(e)}")
+            # Use original SMILES as fallback
+            result[smiles] = smiles
+    
+    if verbose:
+        print(f"Canonicalized {len(result)} SMILES strings")
+    
+    return result
 
 
 def load_metz_ids() -> Tuple[Dict[str, str], Dict[str, str]]:
@@ -94,47 +148,86 @@ def load_dataset_ids(
     if verbose:
         print(f"Loading {name} dataset...")
     
-    # Load dataset
-    if name == "Metz":
-        drug_ids, target_ids = load_metz_ids()
-        canonical_dict = canonicalize_smiles(list(drug_ids.keys()), verbose=verbose)
-        drug_ids = {smiles: drug_ids[original_smiles] for original_smiles, smiles in canonical_dict.items()}
-    else:
-        data = DTI(name=name, path=str(SOURCE_DIR))
-
-        df = data.get_data()
-        df = df.drop_duplicates(subset=['Drug', 'Target'])
-
-        # Clean and convert IDs properly
-        def clean_id(id_val):
+    try:
+        # Load dataset
+        if name == "Metz":
             try:
-                float_val = float(id_val)
-                if pd.isna(float_val):
+                drug_ids, target_ids = load_metz_ids()
+                canonical_dict = canonicalize_smiles(list(drug_ids.keys()), verbose=verbose)
+                drug_ids = {canonical_dict[original_smiles]: drug_ids[original_smiles] 
+                            for original_smiles in drug_ids.keys() 
+                            if original_smiles in canonical_dict}
+            except Exception as e:
+                if verbose:
+                    print(f"Error processing Metz dataset: {str(e)}")
+                    print(traceback.format_exc())
+                return {}, {}
+        else:
+            try:
+                data = DTI(name=name, path=str(SOURCE_DIR))
+                df = data.get_data()
+                df = df.drop_duplicates(subset=['Drug', 'Target'])
+            except Exception as e:
+                if verbose:
+                    print(f"Error loading dataset {name}: {str(e)}")
+                    print(traceback.format_exc())
+                return {}, {}
+
+            # Clean and convert IDs properly
+            def clean_id(id_val):
+                try:
+                    if pd.isna(id_val):
+                        return None
+                    try:
+                        float_val = float(id_val)
+                        if pd.isna(float_val):
+                            return None
+                        if float_val.is_integer():
+                            return str(int(float_val))
+                        return str(float_val)
+                    except (ValueError, TypeError):
+                        return str(id_val)
+                except Exception:
                     return None
-                if float_val.is_integer():
-                    return str(int(float_val))
-                return str(float_val)
-            except (ValueError, TypeError):
-                return str(id_val) if not pd.isna(id_val) else None
-        
-        df['Drug_ID'] = df['Drug_ID'].apply(clean_id)
-        df['Target_ID'] = df['Target_ID'].apply(clean_id)
-        
-        # Filter out entries with None/NaN IDs
-        drug_ids = {drug: drug_id for drug, drug_id in zip(df['Drug'], df['Drug_ID']) 
-                   if drug_id is not None}
-        target_ids = {target: target_id for target, target_id in zip(df['Target'], df['Target_ID']) 
-                     if target_id is not None}
+            
+            try:
+                df['Drug_ID'] = df['Drug_ID'].apply(clean_id)
+                df['Target_ID'] = df['Target_ID'].apply(clean_id)
+            except Exception as e:
+                if verbose:
+                    print(f"Error cleaning IDs in {name}: {str(e)}")
+                    print(traceback.format_exc())
+                return {}, {}
+            
+            # Filter out entries with None/NaN IDs
+            drug_ids = {drug: drug_id for drug, drug_id in zip(df['Drug'], df['Drug_ID']) 
+                      if drug_id is not None}
+            target_ids = {target: target_id for target, target_id in zip(df['Target'], df['Target_ID']) 
+                         if target_id is not None}
 
-        # Canonicalize SMILES strings
-        unique_smiles = df['Drug'].unique()
-        canonical_dict = canonicalize_smiles(unique_smiles, verbose=verbose)
-        df['Drug'] = df['Drug'].map(canonical_dict)
+            # Canonicalize SMILES strings
+            try:
+                unique_smiles = list(drug_ids.keys())
+                canonical_dict = canonicalize_smiles(unique_smiles, verbose=verbose)
+                # Create new drug_ids dict with canonical SMILES as keys
+                drug_ids = {canonical_dict[smiles]: drug_id 
+                           for smiles, drug_id in drug_ids.items() 
+                           if smiles in canonical_dict}
+            except Exception as e:
+                if verbose:
+                    print(f"Error canonicalizing SMILES in {name}: {str(e)}")
+                    print(traceback.format_exc())
 
-    if verbose:
-        print(f"Gathered {len(drug_ids)} unique drugs and {len(target_ids)} unique targets")
+        if verbose:
+            print(f"Gathered {len(drug_ids)} unique drugs and {len(target_ids)} unique targets from {name}")
 
-    return drug_ids, target_ids
+        return drug_ids, target_ids
+    
+    except Exception as e:
+        if verbose:
+            print(f"Unexpected error loading {name}: {str(e)}")
+            print(traceback.format_exc())
+        return {}, {}
 
 
 def generate_unique_ids(df: pd.DataFrame, verbose: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -187,13 +280,36 @@ def add_potential_ids(
     if verbose:
         print("Adding potential IDs from all datasets...")
     
-    # Create a cache key based on the input data and dataset names
-    drug_smiles_list = sorted(unique_drugs['Drug_SMILES'].tolist())
-    target_aa_list = sorted(unique_targets['Target_AA'].tolist())
-    dataset_names_sorted = sorted(dataset_names)
+    # Create a hash-based cache key using the counts and first few items
     
-    # Create a cache key
-    cache_key = f"{','.join(drug_smiles_list)}|{','.join(target_aa_list)}|{','.join(dataset_names_sorted)}"
+    # Get basic stats for drugs and targets
+    n_drugs = len(unique_drugs)
+    n_targets = len(unique_targets)
+    
+    # Get a sample of drugs and targets for the hash (first 5 and last 5)
+    if n_drugs > 0:
+        drug_sample = unique_drugs['Drug_SMILES'].iloc[:5].tolist()
+        if n_drugs > 10:
+            drug_sample.extend(unique_drugs['Drug_SMILES'].iloc[-5:].tolist())
+    else:
+        drug_sample = []
+        
+    if n_targets > 0:
+        target_sample = unique_targets['Target_AA'].iloc[:5].tolist()
+        if n_targets > 10:
+            target_sample.extend(unique_targets['Target_AA'].iloc[-5:].tolist())
+    else:
+        target_sample = []
+    
+    # Create a string with counts, samples, and dataset names
+    hash_input = f"{n_drugs},{n_targets},{','.join(sorted(dataset_names))},{','.join(drug_sample)},{','.join(target_sample)}"
+    
+    # Generate a hash for the cache key
+    hash_obj = hashlib.md5(hash_input.encode())
+    cache_key = hash_obj.hexdigest()
+    
+    if verbose:
+        print(f"Generated cache key: {cache_key} for {n_drugs} drugs and {n_targets} targets")
     
     # Check if we have cached results for this input
     if cache_key in potential_ids_cache:
@@ -229,13 +345,13 @@ def add_potential_ids(
     target_potential_ids = {aa: set() for aa in unique_targets['Target_AA']}
     
     # Fetch IDs from all datasets - use tqdm for progress tracking
-    dataset_iterator = tqdm(dataset_names, desc="Fetching IDs from datasets") if not verbose else dataset_names
+    dataset_iterator = tqdm(dataset_names, desc="Fetching IDs from datasets") if verbose else dataset_names
     for dataset_name in dataset_iterator:
         try:
             if verbose:
                 print(f"Fetching IDs from {dataset_name}...")
             
-            drug_ids, target_ids = load_dataset_ids(dataset_name, verbose=False)
+            drug_ids, target_ids = load_dataset_ids(dataset_name, verbose=verbose)
             
             # Add IDs to potential IDs dictionaries if the SMILES/AA is in our dataset
             for smiles, id_val in drug_ids.items():

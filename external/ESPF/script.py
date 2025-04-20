@@ -80,7 +80,6 @@ def main():
     # Save fingerprints
     np.save(args.output, fingerprints_array)
     print(f"Saved fingerprints with shape {fingerprints_array.shape} to {args.output}")
-    print(f"Each fingerprint has {fingerprints_array.shape[1]} features")
 
 if __name__ == "__main__":
     main()

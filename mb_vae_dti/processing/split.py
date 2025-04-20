@@ -1,11 +1,5 @@
 """
 This module provides functionality for adding the data-splits to the DTI data 
-and storing the DTI data in an `h5torch` file.
-
-`h5torch` is a binary file format for storing and accessing large datasets efficiently. 
-It is structured as a matrix of drug-target interactions, 
-where the rows correspond to drugs and the columns correspond to targets. 
-The value at the intersection of a row and a column is the interaction strength between the drug and the target.
 """
 
 import pandas as pd
@@ -260,6 +254,3 @@ def add_split_cols_drug_generation(
     )
     
     return df
-
-
-    

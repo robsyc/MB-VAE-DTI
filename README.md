@@ -1,19 +1,19 @@
 # Multi-branch Variational Encoders for Drug-target Interaction Prediction (MB-VAE-DTI)
 
-A machine learning framework for predicting drug-target interactions using multi-branch variational autoencoders leveraging pre-computed embeddings.
+A machine learning framework for predicting drug-target interactions using multi-branch variational autoencoders leveraging pre-computed embeddings and target-conditioned discrete-diffusion drug-decoding.
 
 ## Project Overview
 
-This project implements a novel approach to the dyadic Drug-Target Interaction (DTI) prediction problem using multi-branch variational autoencoders. The framework supports multiple embedding strategies for both drugs (molecules) and protein targets, allowing for flexible and powerful representation learning.
+This project implements a novel approach to the dyadic Drug-Target Interaction (DTI) prediction problem using multi-branch variational autoencoders and a diffusion-based drug decoder based on [DiGress](https://github.com/cvignac/DiGress) and [DiffMS](https://github.com/coleygroup/DiffMS). The framework supports multiple embedding strategies for both drugs (molecules) and targets (proteins), allowing for flexible and powerful representation learning.
 
 Key features:
-- Multiple drug representations (fingerprints, SMILES, graph embeddings, images)
-- Multiple protein representations (fingerprints, amino acid and DNA sequences)
-- Variational and non-variational encoder architectures
+- Multiple drug representations: Morgan fingerprints, graph, image and text (smiles) from [biomed-multi-view](https://github.com/BiomedSciAI/biomed-multi-view)
+- Multiple protein representations: ESPF fingerprints, amino acid ([ESM](https://github.com/facebookresearch/esm)) and DNA sequences ([nucleotide-transformer](https://github.com/instadeepai/nucleotide-transformer))
+- Variational (with discrete-diffusion decoding) and non-variational encoder architectures
 - Inspection of latent spaces & exploration of generative capabilities
-- Comprehensive evaluation on standard DTI datasets (DAVIS, KIBA, BindingDB and Metx) and a new aggregated dataset of >400k interactions & pre-computed embeddings
+- Comprehensive evaluation on standard DTI datasets through [tdc](https://tdcommons.ai/) (DAVIS, KIBA, BindingDB and Metz) and a new aggregated dataset of ±400k interactions & pre-computed embeddings, as well as a pre-training strategy for the full drug branch.
 
-## Repository Structure
+## Repository Structure (simplified)
 
 ```
 MB-VAE-DTI/
@@ -23,43 +23,51 @@ MB-VAE-DTI/
 │   │   ├── annotation.py       # Addition of DNA sequences, InChI keys, etc.
 │   │   └── visualization.py    # Plotting metrics for loaded data
 |   | 
-│   ├── processing/             # Embedding generation
-│   │   ├── h5torch_creation.py # Creating h5torch files
-│   │   ├── drug_embedding.py   # Drug embedding generation
-│   │   └── prot_embedding.py   # Protein embedding generation
+│   ├── processing/             # Embedding & h5torch file creation
+│   │   ├── embedding.py        # Embedding generation
+│   │   ├── h5factory.py        # h5torch file creation
+│   │   └── split.py            # Dataset splitting utilities
 |   |
-│   ├── training/               # Model training
+│   ├── training/               # Model training (in progress)
 │   │   ├── models.py           # Model architecture definitions
 │   │   ├── components.py       # Reusable model components
 │   │   └── trainer.py          # Training loop implementation
 |   |
-│   └── validating/             # Validation and analysis
+│   └── validating/             # Validation and analysis (in progress)
 │       ├── metrics.py          # Accuracy metrics computation
 │       └── visualization.py    # Result plotting and visualization
 |
-├── external/                   # External dependencies (gitignored)
-│   ├── bmfm_sm/                # Biomedical foundation models
-│   └── ESPF/                   # Protein encoding utilities
+├── external/                   # External dependencies
+│   ├── rdMorganFP/             # Drug fingerprinting utilities
+│   ├── biomed-multi-view/      # Multiple drug representation models (graph image, text)
+│   ├── ESPF/                   # Protein fingerprinting utilities
+│   ├── ESM/                    # Protein language model (ESM-C 6B)
+│   ├── nucleotide-transformer/ # DNA sequence transformer (nucleotide-transformer)
+│   └── run_embeddings.sh       # Script to run embedding generation
 |
-├── data/                       # Data directory
-│   ├── source/                 # Original datasets
-│   ├── processed/              # Processed datasets & h5torch files
+├── data/                       # Data directory (gitignored, download from [here](https://test.com))
+│   ├── source/                 # Original datasets, populated by loading notebook & tdc
+│   ├── processed/              # Processed datasets & embeddings
+│   ├── input/                  # Input datasets (h5torch)
 │   ├── images/                 # Generated plots and visualizations
 │   ├── checkpoints/            # Model checkpoints
 │   └── results/                # Model outputs and analysis
 |
 ├── notebooks/                  # Jupyter notebooks for reproducing experiments
-│   ├── loading.ipynb           # Data loading and exploration
-│   ├── processing.ipynb        # Data processing and embedding generation
-│   ├── training.ipynb          # Model building and training
-│   └── validating.ipynb        # Result analysis and validation
+│   ├── loading.ipynb           # Data loading, pre-processing and exploration
+│   ├── processing.ipynb        # Embedding generation and h5torch file creation
+│   ├── training.ipynb          # Model inspection and training processes (in progress)
+│   └── validating.ipynb        # Result analysis and validation (in progress)
 |
 ├── scripts/                    # Scripts for running experiments on HPC
 │   ├── configs/                # Configuration files
-│   │   ├── train_config.json   # 
-│   │   └── valid_config.json   # 
+│   │   ├── pretrain.json
+│   │   ├── train.json
+│   │   └── valid.json
 │   ├── embedding.sh            # Shell script for embedding generation
-│   ├── model.sh                # Shell script for model training
+│   ├── pretrain.sh             # Shell script for pretraining
+│   ├── train.sh                # Shell script for training
+│   ├── validate.sh             # Shell script for validation
 │   └── hpc.pbs                 # PBS script with batch indexing
 |
 ├── setup.py                    # Package installation script
@@ -71,154 +79,72 @@ MB-VAE-DTI/
 
 ### Prerequisites
 
-- Python 3.11
+- Python 3.9 or higher
 - CUDA-compatible GPU (recommended)
+- Conda package manager
 
 ### Setup
 
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/robsyc/MB-VAE-DTI.git
+   cd MB-VAE-DTI
+   ```
+
+2. **Run the setup script**
+   ```bash
+   ./setup_env.sh
+   ```
+   This script will:
+   - Create a conda environment with the necessary CUDA dependencies
+   - Install all required Python packages
+   - Set up the package in development mode
+
+3. **Activate the environment**
+   ```bash
+   conda activate mb-vae-dti
+   ```
+
 ## Quick Start
 
-You can either:
-
-1. **Download the complete repository** including all datasets and pre-trained models:
+**Download the complete data folder** including all datasets and pre-trained models:
    - Link: TBA (coming soon)
-   - This option provides everything needed to immediately start experimenting with the models.
+   - This provides everything needed to immediately start experimenting with the models.
 
-2. **Build from scratch** using the setup instructions below:
+**Note:** This project is currently in development, with the processing section implemented and training/validation components in progress.
 
+## Current Progress
 
-```bash
-# Clone the repository
-git clone https://github.com/robsyc/MB-VAE-DTI.git
-cd MB-VAE-DTI
+- ✅ Data loading and preprocessing
+- 🔄 Embedding generation and processing (in progress)
+- 🔄 h5torch file creation and dataset splitting (in progress)
+- 🔄 Model training (later)
+- 🔄 Model validation and analysis (later)
 
-# Create and activate a conda environment
-conda env create -f environment.yml
-conda activate mbvae_env
+The training section has not yet been refactored to the new codebase. We are actively working on implementing and testing the quickstart. There currently are still some `archive` folders spread throughout the repository, which contain old code to be refactored.
 
-# Install the package in development mode
-pip install -e .
+## Scripts
 
-# Create necessary directories
-mkdir -p data/source data/processed data/images data/checkpoints data/results
-```
-
-### External Dependencies
-
-The project relies on two external repositories that need to be set up separately:
+These scripts are designed to run on an HPC cluster with `Python 3.9`, `PyTorch 2.1.2` and `CUDA 12.1.1`.
+They require seperate package-management.
 
 ```bash
-# Create external directory for dependencies
-mkdir -p external
-cd external
-
-# Clone the biomedical foundation models repository
-git clone git@github.com:BiomedSciAI/biomed-multi-view.git
-cd bmfm_sm
-# Follow installation instructions in the [repository's README](https://github.com/BiomedSciAI/biomed-multi-view)
-cd ..
-
-# Clone the protein encoding utilities repository
-git clone git@github.com:kexinhuang12345/ESPF.git
-cd ESPF
-# Follow installation instructions in the [repository's README](https://github.com/kexinhuang12345/ESPF)
-cd ..
-
-# Return to project root
-cd ..
-```
-
-### Pre-trained Models
-
-Some embedding methods require pre-trained models:
-
-```bash
-# Create model directories
-mkdir -p data/checkpoints/Biomed_multiview_dir data/checkpoints/ProstT5_model_dir
-
-# Download models (manual step)
-# 1. Download biomed-smmv-base.pth from:
-#    https://ad-prod-biomed.s3.us-east-1.amazonaws.com/biomed.multi-view/data_root_os_v1.tar.gz
-#    and place in data/checkpoints/Biomed_multiview_dir/
-
-# 2. Download ProstT5 files from:
-#    https://huggingface.co/Rostlab/ProstT5/tree/main
-#    and place in data/checkpoints/ProstT5_model_dir/
-```
-
-## Usage
-
-### Data Preparation
-
-The data preparation workflow consists of two main steps:
-
-1. **Loading and preprocessing datasets**:
-```bash
-# Run the loading notebook
-jupyter notebook notebooks/loading.ipynb
-```
-
-This will:
-- Download DTI datasets (DAVIS, KIBA, BindingDB, Metz)
-- Merge and apply filters
-- Annotate drugs and targets with e.g. InChI keys, DNA sequences, etc.
-
-1. **Generating embeddings and creating h5torch files**:
-```bash
-# Run the processing notebook
-jupyter notebook notebooks/processing.ipynb
-
-# Or use the shell script for batch processing
+# Generate embeddings (to be implemented)
 bash scripts/embedding.sh
+
+# Pre-training (to be implemented)
+bash scripts/pretrain.sh
+
+# Training (to be implemented)
+bash scripts/train.sh
+
+# Validation (to be implemented)
+bash scripts/validate.sh
 ```
 
-This will:
-- Generate embeddings for drugs and proteins
-- Create [h5torch](https://h5torch.readthedocs.io/en/latest/) files for efficient storage & loading
-- Save processed data in the data/processed directory
+### Notebooks
 
-### Model Training
-
-For interactive experimentation, use the training notebook:
-
-```bash
-jupyter notebook notebooks/training.ipynb
-```
-
-For large-scale experiments on HPC:
-
-```bash
-# Submit job to HPC cluster
-qsub scripts/hpc.pbs
-
-# Or run locally with specific batch index
-bash scripts/model.sh --batch_index 0 --total_batches 12
-```
-
-### Analysis and Validation
-
-Analyze results using the validation notebook:
-
-```bash
-jupyter notebook notebooks/validating.ipynb
-```
-
-## Model Architecture
-
-The core model architecture is a multi-branch variational autoencoder that can process different types of drug and target representations:
-
-1. **Input Branches**:
-   - Drug branch: Processes molecular fingerprints or graph embeddings
-   - Target branch: Processes protein fingerprints or sequence embeddings
-
-2. **Encoder**:
-   - Each branch has its own encoder network
-   - Encoders map inputs to a shared latent space
-   - Variational encoders produce mean and variance for sampling
-
-3. **Decoder**:
-   - Joint decoder processes latent representations
-   - Predicts interaction values (binding affinity)
+...
 
 ## Results
 
@@ -236,3 +162,7 @@ If you use this code in your research, please cite:
   year={2025}
 }
 ```
+
+## Acknowledgments
+
+This work builds upon several open-source projects, including [DiGress](https://github.com/cvignac/DiGress), [DiffMS](https://github.com/coleygroup/DiffMS), and the various embedding models mentioned above.

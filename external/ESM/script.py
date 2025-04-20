@@ -14,6 +14,7 @@ import pickle
 
 import numpy as np
 from pathlib import Path
+import tqdm
 
 from esm.sdk import client
 from esm.sdk.api import (
@@ -27,6 +28,9 @@ from esm.sdk.api import (
 from concurrent.futures import ThreadPoolExecutor
 from typing import Sequence, List, Dict, Optional
 
+# Constants
+BATCH_SIZE = 100  # Default batch size for processing
+
 dotenv.load_dotenv()
 ESM_TOKEN = os.getenv("ESM_TOKEN")
 
@@ -35,12 +39,11 @@ model = client(
 )
 
 EMBEDDING_CONFIG = LogitsConfig(
-    sequence=True, return_hidden_states=True, ith_hidden_layer=80 # alternative: layer 55 ?
-)
+    sequence=True, return_hidden_states=True, ith_hidden_layer=80
+) # See: https://github.com/evolutionaryscale/esm/issues/176#issuecomment-2784146081
 
 # Cache directory path
-CACHE_DIR = Path(os.path.dirname(os.path.abspath(__file__))) / "cache"
-CACHE_FILE = CACHE_DIR / "embedding_cache.pkl"
+CACHE_FILE = Path(os.path.dirname(os.path.abspath(__file__))) / "embedding_cache.pkl"
 
 def load_cache() -> Dict[str, np.ndarray]:
     """Load the embedding cache from disk"""
@@ -159,15 +162,14 @@ def esm_batch_embed(
 def parse_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description="Generate ESM embeddings for protein sequences")
-    parser.add_argument("--input", required=True, help="TXT file with one sequence per line e.g. SMILES, Amino acid seq, etc.")
+    parser.add_argument("--input", required=True, help="TXT file with one amino acid sequence per line e.g. dti_aa.txt")
     parser.add_argument("--output", required=True, help="Output numpy file for embeddings")
-    parser.add_argument("--no-cache", action="store_true", help="Disable caching of embeddings")
     return parser.parse_args()
 
 def main():
     """Main function to handle file I/O and call the embedding functions"""
     args = parse_args()
-    use_cache = not args.no_cache
+    use_cache = True
     
     # Print cache statistics
     if use_cache:
@@ -184,11 +186,12 @@ def main():
     # Generate embeddings in batches
     if len(sequences) > 1:
         embeddings = []
-        batches = [sequences[i:i+100] for i in range(0, len(sequences), 100)]
-        print(f"Batch processing {len(batches)} batches of {len(batches[0])} sequences...")
-        for i, batch in enumerate(batches):
-            print(f"Processing batch {i+1}/{len(batches)}...")
-            embeddings.extend(esm_batch_embed(batch, use_cache=use_cache))
+        batches = [sequences[i:i+BATCH_SIZE] for i in range(0, len(sequences), BATCH_SIZE)]
+        print(f"Batch processing {len(batches)} batches with size {BATCH_SIZE}...")
+        
+        for batch in tqdm.tqdm(batches, desc="Processing batches"):
+            batch_embeddings = esm_batch_embed(batch, use_cache=use_cache)
+            embeddings.extend(batch_embeddings)
     else:
         print(f"Processing single sequence...")
         embeddings = esm_embed_sequence(sequences[0], use_cache=use_cache)

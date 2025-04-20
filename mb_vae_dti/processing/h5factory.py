@@ -348,7 +348,7 @@ class DTIDataset(h5torch.Dataset):
 
 
 def load_h5torch_DTI(
-    filename: str = "data/processed/data.h5torch",
+    filename: str = "DTI.h5torch",
     setting: Literal["split_rand", "split_cold"] = "split_rand",
     split: Literal["train", "valid", "test"] = "train",
     datasets: Optional[List[
@@ -375,7 +375,8 @@ def load_h5torch_DTI(
     Returns:
         A DTIDataset object containing the specified subset of data
     """
-    with h5torch.File(filename, 'r') as f:
+    path = str(PROCESSED_DIR / filename)
+    with h5torch.File(path, 'r') as f:
 
         subset_mask = np.zeros(f["central/indices"][:].shape[-1], dtype=bool)
 
@@ -409,7 +410,7 @@ def load_h5torch_DTI(
                 
     # Create and return the dataset with the filtered indices
     return DTIDataset(
-        filename=filename,
+        filename=path,
         additional_y_cols=additional_y_cols,
         subset=subset_mask
     )

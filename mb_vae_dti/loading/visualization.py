@@ -9,10 +9,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pathlib import Path
 from upsetplot import UpSet, from_indicators
-from mb_vae_dti.loading.datasets import compute_heavy_atom_counts
+
+from rdkit import Chem
+from rdkit.Chem import Descriptors
 
 # Define paths
 DATA_DIR = Path("data")
@@ -20,6 +22,19 @@ IMAGES_DIR = DATA_DIR / "images"
 
 # Ensure directories exist
 IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def compute_heavy_atom_counts(smiles_list: List[str]) -> Dict[str, int]:
+    """
+    Compute the number of heavy atoms for each SMILES string.
+        
+    Args:
+        smiles_list: List of SMILES strings
+        
+    Returns:
+        Dictionary mapping SMILES strings to their number of heavy atoms
+    """
+    return {smiles: Descriptors.HeavyAtomCount(Chem.MolFromSmiles(smiles)) for smiles in smiles_list}
 
 
 def set_plotting_style():
