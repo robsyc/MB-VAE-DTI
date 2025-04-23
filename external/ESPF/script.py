@@ -6,13 +6,14 @@ See: https://github.com/kexinhuang12345/ESPF
 import pandas as pd
 import numpy as np
 import os
-import argparse
-from tqdm import tqdm
-
+import sys
+from pathlib import Path
 import codecs
 from subword_nmt.apply_bpe import BPE
 
-from pathlib import Path
+# Add the parent directory to the Python path to import utils
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from utils import parse_args, process_embeddings_in_batches
 
 # Define paths
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -50,36 +51,17 @@ def get_target_fingerprint(s: str) -> np.ndarray:
     v[i] = 1
     return v
 
-def parse_args():
-    """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description="Generate ESP fingerprints for protein sequences")
-    parser.add_argument("--input", required=True, help="TXT file with one sequence per line or a single sequence")
-    parser.add_argument("--output", required=True, help="Output numpy file for fingerprints")
-    return parser.parse_args()
-
 def main():
     """Main function to handle file I/O and call the fingerprinting functions"""
     args = parse_args()
     
-    # Check if input is a file or a single sequence
-    if os.path.isfile(args.input):
-        with open(args.input, 'r') as f:
-            sequences = [line.strip() for line in f if line.strip()]
-    else:
-        # Treat input as a single sequence string
-        sequences = [args.input]
-    
-    print(f"Processing {len(sequences)} sequences...")
-    
-    # Generate fingerprints
-    fingerprints = [get_target_fingerprint(seq) for seq in tqdm(sequences, desc="Generating ESP fingerprints")]
-    
-    # Convert to numpy array
-    fingerprints_array = np.array(fingerprints)
-    
-    # Save fingerprints
-    np.save(args.output, fingerprints_array)
-    print(f"Saved fingerprints with shape {fingerprints_array.shape} to {args.output}")
+    # Process the HDF5 file in batches
+    process_embeddings_in_batches(
+        h5_file_path=args.input,
+        embedding_function=get_target_fingerprint,
+        embedding_name="FP",
+        batch_size=128
+    )
 
 if __name__ == "__main__":
     main()
