@@ -84,56 +84,6 @@ class BiomedMultiViewMoleculeEncoder(nn.Module):
         text_embeddings = self.forward_text(smiles)
         return graph_embeddings, image_embeddings, text_embeddings
 
-def batch_get_drug_embeddings(smiles_list, batch_size=32):
-    """
-    Get embeddings for a list of SMILES strings in batches.
-    
-    Args:
-        smiles_list (list): List of SMILES strings
-        batch_size (int): Size of batches to process
-        
-    Returns:
-        dict: Dictionary with keys 'graph', 'image', 'text' containing the respective embeddings
-    """
-    # Initialize model once
-    model = BiomedMultiViewMoleculeEncoder()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    model.eval()
-    
-    all_graph_embeddings = []
-    all_image_embeddings = []
-    all_text_embeddings = []
-    
-    # Process in batches
-    for i in tqdm(range(0, len(smiles_list), batch_size), desc="Processing batches"):
-        batch = smiles_list[i:i+batch_size]
-        
-        with torch.no_grad():
-            embeddings = model(batch)
-            
-            # Extract the embeddings from the three views
-            graph_emb = embeddings[0].cpu().numpy() # shape: (batch_size, 512)
-            image_emb = embeddings[1].cpu().numpy() # shape: (batch_size, 512)
-            text_emb = embeddings[2].cpu().numpy() # shape: (batch_size, 768)
-            
-            all_graph_embeddings.append(graph_emb)
-            all_image_embeddings.append(image_emb)
-            all_text_embeddings.append(text_emb)
-    
-    # Concatenate all batches
-    if len(all_graph_embeddings) > 0:
-        return {
-            'graph': np.vstack(all_graph_embeddings),
-            'image': np.vstack(all_image_embeddings),
-            'text': np.vstack(all_text_embeddings)
-        }
-    else:
-        return {
-            'graph': np.array([]),
-            'image': np.array([]),
-            'text': np.array([])
-        }
 
 def process_embeddings_batch(h5_file_path, batch_size=32):
     """
@@ -230,7 +180,7 @@ def process_embeddings_batch(h5_file_path, batch_size=32):
             ('text', text_dataset)
         ]:
             dataset.attrs['name'] = embedding_name
-            dataset.attrs['shape'] = dataset.shape[1:]
+            dataset.attrs['shape'] = dataset.shape[1]
             dataset.attrs['dtype'] = str(dataset.dtype)
         
         print(f"Successfully added multiview embeddings to {h5_file_path}")

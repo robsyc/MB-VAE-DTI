@@ -1,5 +1,5 @@
 """
-Script to generate ESP fingerprint for targets.
+Script to generate ESP fingerprints for targets.
 See: https://github.com/kexinhuang12345/ESPF
 """
 

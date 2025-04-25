@@ -204,15 +204,21 @@ def plot_dataset_statistics(
     heavy_atom_counts = pd.Series([heavy_atoms_dict[smiles] for smiles in df['Drug_SMILES']])
     
     sns.histplot(heavy_atom_counts, bins=30, ax=ax1, color='blue', alpha=0.7)
-    ax1.set_title('Drug Heavy Atom Count Distribution')
+    ax1.set_title('Drug Distribution')
     ax1.set_xlabel('Number of Heavy Atoms')
     ax1.set_ylabel('Count')
     
     # 2. Plot protein sequence length distribution
     sns.histplot(df['Target_AA'].str.len(), bins=30, ax=ax2, color='green', alpha=0.7)
-    ax2.set_title('Protein Sequence Length Distribution')
-    ax2.set_xlabel('Sequence Length')
-    ax2.set_ylabel('Count')
+    ax2.set_title('Target Distribution')
+    ax2.set_xlabel('Amino Acid Sequence Length')
+    ax2.set_ylabel('')
+
+    # # 3. Plot nucleotide sequence length distribution
+    # sns.histplot(df['Target_DNA'].str.len(), bins=30, ax=ax3, color='red', alpha=0.7)
+    # ax3.set_title('Target Distribution')
+    # ax3.set_xlabel('Nucleotide Sequence Length')
+    # ax3.set_ylabel('')
     
     plt.tight_layout()
     
