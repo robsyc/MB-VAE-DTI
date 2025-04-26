@@ -26,7 +26,7 @@ BATCH_SIZE = 16 # Smaller batch size suitable for local GPU processing
 MODEL_NAME = "esmc_600m"
 EMBEDDING_NAME = "EMB-ESM" # Simplified name
 # EMBEDDING_LAYER = 36 # Not needed when using output.embeddings
-LIMIT_SEQ = True # limit amino acid sequences for testing purposes
+LIMIT_SEQ = False # limit amino acid sequences for testing purposes
 
 # Determine device
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

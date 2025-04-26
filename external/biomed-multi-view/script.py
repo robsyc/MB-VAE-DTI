@@ -35,9 +35,8 @@ BATCH_SIZE = 32 # Adjust based on GPU memory for the largest view (likely text)
 
 # Get the current script directory and find the path to the model checkpoint
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent.parent
 # Construct path robustly
-MODEL_PATH = PROJECT_ROOT.joinpath("data", "checkpoints", "Biomed-smmv", f"{MODEL_NAME}.pth")
+MODEL_PATH = SCRIPT_DIR.joinpath(f"{MODEL_NAME}.pth")
 
 if not MODEL_PATH.exists():
     raise FileNotFoundError(f"Model checkpoint not found at: {MODEL_PATH}")

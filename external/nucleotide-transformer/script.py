@@ -24,7 +24,7 @@ BATCH_SIZE = 16       # Adjust based on GPU memory
 EMBEDDING_LAYER = 29  # Using layer 29 (last layer for this model config? check docs)
 PADDING_LENGTH = 650  # Max length = 640 6-mers + margin
 
-LIMIT_SEQ = True # limit DNA sequences for testing purposes
+LIMIT_SEQ = False # limit DNA sequences for testing purposes
 if LIMIT_SEQ:
     PADDING_LENGTH = 16
 

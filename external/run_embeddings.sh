@@ -11,8 +11,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 # Parse arguments
 if [ "$#" -lt 2 ]; then
     echo "Usage: $0 <repo_name> <h5_file>"
-    echo "Available repos: $(find $SCRIPT_DIR -maxdepth 1 -mindepth 1 -type d -not -name 'temp' -not -name '_*' -exec basename {} \; | tr '
-' ' ')"
+    echo "Available repos: $(find $SCRIPT_DIR -maxdepth 1 -mindepth 1 -type d -not -name 'temp' -not -name '_*' -exec basename {} \; | tr '\n' ' ')"
     exit 1
 fi
 
@@ -23,18 +22,22 @@ H5_FILE=$2
 REPO_DIR="${SCRIPT_DIR}/${REPO_NAME}"
 if [ ! -d "$REPO_DIR" ]; then
     echo "Error: Repository '$REPO_NAME' not found in $SCRIPT_DIR"
-    echo "Available repos: $(find $SCRIPT_DIR -maxdepth 1 -mindepth 1 -type d -not -name 'temp' -not -name '_*' -exec basename {} \; | tr '
-' ' ')"
+    echo "Available repos: $(find $SCRIPT_DIR -maxdepth 1 -mindepth 1 -type d -not -name 'temp' -not -name '_*' -exec basename {} \; | tr '\n' ' ')"
     exit 1
 fi
 
 # Define the path to the venv for this repo
 VENV_PATH="${REPO_DIR}/venv"
 
-# Check if venv exists
+# Check if venv exists, create if it doesn't
 if [ ! -d "$VENV_PATH" ]; then
-    echo "Error: Virtual environment not found at $VENV_PATH"
-    exit 1
+    echo "Virtual environment not found at $VENV_PATH. Creating it..."
+    python3 -m venv "$VENV_PATH" # Assuming python3 is available
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to create virtual environment at $VENV_PATH"
+        exit 1
+    fi
+    echo "Virtual environment created successfully."
 fi
 
 # Check if script.py exists
