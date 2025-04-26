@@ -3,12 +3,12 @@ notebooks/results/
 external/biomed-multi-view/bmfm_sm/resources/
 external/biomed-multi-view/bmfm_sm/predictive/tests/test-data/finetune/
 *.ckpt
+*.hdf5
+*.h5torch
 
-external/nucleotide-transformer/*
-!external/nucleotide-transformer/script.py
-
-external/bmfm_sm/*
-!external/bmfm_sm/script.py
+# ignore all folders called `archive` and their contents no matter where they are
+archive/
+**/archive/*
 
 external/ESM/cache/
 external/temp/
@@ -154,10 +154,4 @@ dmypy.json
 
 .DS_Store
 .vscode
-data/
-!bmfm_sm/data/
-outputs/
-lightning_logs
-output*
-*.sh
 expt_summ*

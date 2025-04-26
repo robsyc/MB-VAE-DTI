@@ -1,212 +1,121 @@
 """
-Script to embed protein sequences using ESM-C 6B (using API) -> size 2560 (80 layers)
+Script to embed protein sequences using ESM-C 600M (open model with 36 layers i.e. `esmc-600m-2024-12`)
 See: https://github.com/evolutionaryscale/esm
-Alternatively, we could use `esmc-600m-2024-12` (smaller open source model with 36 layers)
+Resources:
+    - ESM-C blog post: https://www.evolutionaryscale.ai/blog/esm-cambrian
+    - Paper: https://pmc.ncbi.nlm.nih.gov/articles/PMC11601519/ on how medium-sized models with mean embeddings are good (+ implementation details for locally run ESM-C)
+    - Paper: https://www.biorxiv.org/content/10.1101/2024.02.05.578959v2 on how last-hidden-state embeddings are generally quite good
 """
 
 import os
-import dotenv
-import json
-import argparse
 import sys
-import hashlib
-import pickle
-
-import numpy as np
 from pathlib import Path
-import tqdm
+import numpy as np
+import torch
+from typing import List
 
-from esm.sdk import client
-from esm.sdk.api import (
-    ESM3InferenceClient,
-    ESMProtein,
-    ESMProteinError,
-    LogitsConfig,
-    LogitsOutput,
-    ProteinType,
-)
-from concurrent.futures import ThreadPoolExecutor
-from typing import Sequence, List, Dict, Optional
+# Add the parent directory to the Python path to import utils
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from utils import parse_args, add_embeddings_to_hdf5
 
-# Constants
-BATCH_SIZE = 100  # Default batch size for processing
+from esm.models.esmc import ESMC
+from esm.sdk.api import ESMProtein, LogitsConfig
 
-dotenv.load_dotenv()
-ESM_TOKEN = os.getenv("ESM_TOKEN")
+# Define constants for this script
+BATCH_SIZE = 16 # Smaller batch size suitable for local GPU processing
+MODEL_NAME = "esmc_600m"
+EMBEDDING_NAME = "EMB-ESM" # Simplified name
+# EMBEDDING_LAYER = 36 # Not needed when using output.embeddings
+LIMIT_SEQ = True # limit amino acid sequences for testing purposes
 
-model = client(
-    model="esmc-6b-2024-12", url="https://forge.evolutionaryscale.ai", token=ESM_TOKEN
-)
+# Determine device
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {DEVICE}")
 
-EMBEDDING_CONFIG = LogitsConfig(
-    sequence=True, return_hidden_states=True, ith_hidden_layer=80
-) # See: https://github.com/evolutionaryscale/esm/issues/176#issuecomment-2784146081
+# Load Model
+print(f"Loading ESM model ({MODEL_NAME})...")
+client = ESMC.from_pretrained(MODEL_NAME).to(DEVICE)
+client.eval()  # Set model to evaluation mode
+print(f"ESM model ({MODEL_NAME}) loaded.")
+# print(f"Assuming {MODEL_NAME} has 36 layers and extracting embeddings from index: {EMBEDDING_LAYER}")
 
-# Cache directory path
-CACHE_FILE = Path(os.path.dirname(os.path.abspath(__file__))) / "embedding_cache.pkl"
+# Define Logits Configuration - Removed as not used with direct model call
+# EMBEDDING_CONFIG = LogitsConfig(sequence=True, return_hidden_states=True)
 
-def load_cache() -> Dict[str, np.ndarray]:
-    """Load the embedding cache from disk"""
-    if CACHE_FILE.exists():
-        try:
-            with open(CACHE_FILE, 'rb') as f:
-                return pickle.load(f)
-        except Exception as e:
-            print(f"Error loading cache: {e}")
-    return {}
-
-def save_cache(cache: Dict[str, np.ndarray]) -> None:
-    """Save the embedding cache to disk"""
-    # Ensure cache directory exists
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    try:
-        with open(CACHE_FILE, 'wb') as f:
-            pickle.dump(cache, f)
-    except Exception as e:
-        print(f"Error saving cache: {e}")
-
-# Initialize the cache
-_EMBEDDING_CACHE = load_cache()
-
-def esm_embed_sequence(
-    sequence: str, model: ESM3InferenceClient = model, use_cache: bool = True
-) -> np.ndarray:
+def embed_batch(sequences: List[str]) -> List[np.ndarray]:
     """
-    Embed a protein sequence using the ESM-C (6B with 80 layers) model.
-    Returns the mean of the hidden states over the residues.
-    
+    Embed a batch of protein sequences using the loaded local ESM-C model.
+    Extracts the final output embeddings and performs mean pooling over non-padding tokens.
+
     Args:
-        sequence: Protein sequence as string
-        model: ESM model client
-        use_cache: Whether to use caching (default: True)
-    
+        sequences: List of protein sequences as strings
+
     Returns:
-        numpy.ndarray: The embedding vector
+        List[numpy.ndarray]: List of mean embedding vectors for the batch.
     """
-    global _EMBEDDING_CACHE
+    if not sequences:
+        return []
     
-    # Check cache if enabled
-    if use_cache and sequence in _EMBEDDING_CACHE:
-        return _EMBEDDING_CACHE[sequence]
-    
-    # Generate embedding if not in cache
-    protein = ESMProtein(sequence=sequence)
-    protein_tensor = model.encode(protein)
-    output = model.logits(protein_tensor, EMBEDDING_CONFIG)
-    emb = output.hidden_states.mean(dim=-2) # average over residues
-    embedding = emb.squeeze().numpy()
-    
-    # Update cache if enabled
-    if use_cache:
-        _EMBEDDING_CACHE[sequence] = embedding
-        # Save cache periodically (every 10 new entries)
-        if len(_EMBEDDING_CACHE) % 10 == 0:
-            save_cache(_EMBEDDING_CACHE)
-    
-    return embedding
-
-def esm_batch_embed(
-    inputs: Sequence[ProteinType], model: ESM3InferenceClient = model, use_cache: bool = True
-) -> List[np.ndarray]:
-    """Forge supports auto-batching. So batch_embed() is as simple as running a collection
-    of embed calls in parallel using asyncio.
-    """
-    global _EMBEDDING_CACHE
-    
-    # Filter sequences that are already in cache
-    if use_cache:
-        to_compute = [seq for seq in inputs if seq not in _EMBEDDING_CACHE]
-        cached_results = [_EMBEDDING_CACHE[seq] for seq in inputs if seq in _EMBEDDING_CACHE]
+    if LIMIT_SEQ:
+        sequences = [s[:10] for s in sequences]
         
-        if not to_compute:
-            return cached_results
-    else:
-        to_compute = inputs
+    tokenizer = client.tokenizer
     
-    # Compute embeddings for sequences not in cache
-    with ThreadPoolExecutor() as executor:
-        futures = [
-            executor.submit(esm_embed_sequence, protein, model, False) for protein in to_compute
-        ]
-        computed_results = []
-        for i, future in enumerate(futures):
-            try:
-                result = future.result()
-                computed_results.append(result)
-                # Update cache for computed results
-                if use_cache:
-                    _EMBEDDING_CACHE[to_compute[i]] = result
-            except Exception as e:
-                computed_results.append(ESMProteinError(500, str(e)))
-    
-    # Save updated cache
-    if use_cache and computed_results:
-        save_cache(_EMBEDDING_CACHE)
-    
-    # Combine cached and computed results in original order
-    if use_cache:
-        results = []
-        cache_idx = 0
-        compute_idx = 0
-        for seq in inputs:
-            if seq in _EMBEDDING_CACHE and cache_idx < len(cached_results):
-                results.append(cached_results[cache_idx])
-                cache_idx += 1
-            else:
-                results.append(computed_results[compute_idx])
-                compute_idx += 1
-        return results
-    else:
-        return computed_results
+    with torch.no_grad():
+        try:
+            protein_tensors = tokenizer(
+                sequences,
+                padding="longest",
+                truncation=True,
+                return_tensors="pt",
+            )
+        except Exception as e:
+            print(f"Error during batch tokenization: {e}")
+            raise RuntimeError("Failed to tokenize batch.") from e
 
-def parse_args():
-    """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description="Generate ESM embeddings for protein sequences")
-    parser.add_argument("--input", required=True, help="TXT file with one amino acid sequence per line e.g. dti_aa.txt")
-    parser.add_argument("--output", required=True, help="Output numpy file for embeddings")
-    return parser.parse_args()
+        protein_tensors = {k: v.to(DEVICE) for k, v in protein_tensors.items()}
+        
+        # Direct model call (forward pass) using only input_ids
+        output = client(protein_tensors['input_ids'])
+        # Output object likely contains embeddings, logits, hidden_states etc.
+        
+        # Extract the final output embeddings
+        # Shape: (batch_size, seq_len, hidden_dim)
+        embeddings = output.embeddings 
+        
+        # Get attention mask from the tokenized batch output
+        attention_mask = protein_tensors['attention_mask']
+        
+        # Calculate sequence lengths (sum of non-padding tokens in the mask)
+        lengths = attention_mask.sum(dim=1)
+        
+        # Mask padding tokens in the embeddings before pooling
+        masked_embeddings = embeddings * attention_mask.unsqueeze(-1)
+        
+        # Calculate mean embedding over non-padding tokens
+        mean_embeddings = masked_embeddings.sum(dim=1) / (lengths.unsqueeze(-1).to(masked_embeddings.device) + 1e-8)
+        
+        # Convert to list of numpy arrays (move to CPU first)
+        embeddings_np = [emb.cpu().numpy() for emb in mean_embeddings]
+        
+    return embeddings_np
 
 def main():
-    """Main function to handle file I/O and call the embedding functions"""
-    args = parse_args()
-    use_cache = True
+    """Main function to parse args and call the HDF5 processing utility."""
+    args = parse_args() # Gets only --input
     
-    # Print cache statistics
-    if use_cache:
-        print(f"Using embedding cache: {len(_EMBEDDING_CACHE)} entries found")
-    
-    # Check if input is a file or a single sequence
-    if os.path.isfile(args.input):
-        with open(args.input, 'r') as f:
-            sequences = [line.strip() for line in f if line.strip()]
-    else:
-        # Treat input as a single sequence string
-        sequences = [args.input]
-    
-    # Generate embeddings in batches
-    if len(sequences) > 1:
-        embeddings = []
-        batches = [sequences[i:i+BATCH_SIZE] for i in range(0, len(sequences), BATCH_SIZE)]
-        print(f"Batch processing {len(batches)} batches with size {BATCH_SIZE}...")
-        
-        for batch in tqdm.tqdm(batches, desc="Processing batches"):
-            batch_embeddings = esm_batch_embed(batch, use_cache=use_cache)
-            embeddings.extend(batch_embeddings)
-    else:
-        print(f"Processing single sequence...")
-        embeddings = esm_embed_sequence(sequences[0], use_cache=use_cache)
-    
-    # Convert to numpy array
-    embeddings_array = np.array(embeddings)
-    
-    # Save embeddings
-    np.save(args.output, embeddings_array)
-    print(f"Saved embeddings with shape {embeddings_array.shape} to {args.output}")
-    
-    # Save final cache
-    if use_cache:
-        save_cache(_EMBEDDING_CACHE)
-        print(f"Updated cache with {len(_EMBEDDING_CACHE)} entries")
+    # Prepare model metadata
+    model_metadata = {
+        'model_name': MODEL_NAME,
+    }
+
+    add_embeddings_to_hdf5(
+        h5_file_path=args.input,
+        embedding_name=EMBEDDING_NAME,
+        batch_processing_function=embed_batch, 
+        batch_size=BATCH_SIZE,
+        model_metadata=model_metadata 
+    )
 
 if __name__ == "__main__":
     main()

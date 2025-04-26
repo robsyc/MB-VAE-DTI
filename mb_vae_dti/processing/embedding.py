@@ -89,7 +89,7 @@ def save_representations_to_h5(
 def run_embedding_script(
     hdf5_file_name: str,
     external_repo_name: Literal[
-        "rdMorganFP", "biomed-multi-view",      # drugs
+        "MorganFP", "biomed-multi-view",      # drugs
         "ESPF", "ESM", "nucleotide-transformer" # targets
     ]
 ) -> None:
