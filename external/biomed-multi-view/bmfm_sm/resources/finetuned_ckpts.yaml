@@ -1,0 +1,414 @@
+GRAPH:
+  BACE:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/BACE/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/BACE/best-101.ckpt
+  BBBP:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/BBBP/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/BBBP/best-101.ckpt
+  CLINTOX:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/CLINTOX/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/CLINTOX/best-101.ckpt
+  ESOL:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/ESOL/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/ESOL/best-101.ckpt
+  FREESOLV:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/FREESOLV/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/FREESOLV/best-101.ckpt
+  HIV:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/HIV/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/HIV/best-101.ckpt
+  LIPOPHILICITY:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/LIPOPHILICITY/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/LIPOPHILICITY/best-101.ckpt
+  MUV:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/MUV/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/MUV/best-101.ckpt
+  QM7:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/QM7/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/QM7/best-101.ckpt
+  QM9:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/QM9/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/QM9/best-101.ckpt
+  SIDER:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/SIDER/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/SIDER/best-101.ckpt
+  TOX21:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/TOX21/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/TOX21/best-101.ckpt
+  TOXCAST:
+    ligand_random_scaffold: GRAPH_MODEL/MoleculeNet/ligand_random_scaffold/TOXCAST/best-101.ckpt
+    ligand_scaffold: GRAPH_MODEL/MoleculeNet/ligand_scaffold/TOXCAST/best-101.ckpt
+  CYP1A2:
+    ligand_scaffold_balanced: GRAPH_MODEL/CYP/ligand_scaffold_balanced/CYP1A2/best-101.ckpt
+  CYP2C19:
+    ligand_scaffold_balanced: GRAPH_MODEL/CYP/ligand_scaffold_balanced/CYP2C19/best-101.ckpt
+  CYP2C9:
+    ligand_scaffold_balanced: GRAPH_MODEL/CYP/ligand_scaffold_balanced/CYP2C9/best-101.ckpt
+  CYP2D6:
+    ligand_scaffold_balanced: GRAPH_MODEL/CYP/ligand_scaffold_balanced/CYP2D6/best-101.ckpt
+  CYP3A4:
+    ligand_scaffold_balanced: GRAPH_MODEL/CYP/ligand_scaffold_balanced/CYP3A4/best-101.ckpt
+IMAGE:
+  BACE:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/BACE/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/BACE/best-101.ckpt
+  BBBP:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/BBBP/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/BBBP/best-101.ckpt
+  CLINTOX:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/CLINTOX/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/CLINTOX/best-101.ckpt
+  ESOL:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/ESOL/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/ESOL/best-101.ckpt
+  FREESOLV:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/FREESOLV/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/FREESOLV/best-101.ckpt
+  HIV:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/HIV/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/HIV/best-101.ckpt
+  LIPOPHILICITY:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/LIPOPHILICITY/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/LIPOPHILICITY/best-101.ckpt
+  MUV:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/MUV/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/MUV/best-101.ckpt
+  QM7:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/QM7/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/QM7/best-101.ckpt
+  QM9:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/QM9/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/QM9/best-101.ckpt
+  SIDER:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/SIDER/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/SIDER/best-101.ckpt
+  TOX21:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/TOX21/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/TOX21/best-101.ckpt
+  TOXCAST:
+    ligand_random_scaffold: IMAGE_MODEL/MoleculeNet/ligand_random_scaffold/TOXCAST/best-101.ckpt
+    ligand_scaffold: IMAGE_MODEL/MoleculeNet/ligand_scaffold/TOXCAST/best-101.ckpt
+  CYP1A2:
+    ligand_scaffold_balanced: IMAGE_MODEL/CYP/ligand_scaffold_balanced/CYP1A2/best-101.ckpt
+  CYP2C19:
+    ligand_scaffold_balanced: IMAGE_MODEL/CYP/ligand_scaffold_balanced/CYP2C19/best-101.ckpt
+  CYP2C9:
+    ligand_scaffold_balanced: IMAGE_MODEL/CYP/ligand_scaffold_balanced/CYP2C9/best-101.ckpt
+  CYP2D6:
+    ligand_scaffold_balanced: IMAGE_MODEL/CYP/ligand_scaffold_balanced/CYP2D6/best-101.ckpt
+  CYP3A4:
+    ligand_scaffold_balanced: IMAGE_MODEL/CYP/ligand_scaffold_balanced/CYP3A4/best-101.ckpt
+MULTIVIEW:
+  5HT1A:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/5HT1A/best-101.ckpt
+  5HT1B:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/5HT1B/best-101.ckpt
+  5HT1D:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/5HT1D/best-101.ckpt
+  5HT1E:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/5HT1E/best-101.ckpt
+  5HT1F:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/5HT1F/best-101.ckpt
+  5HT2A:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/5HT2A/best-101.ckpt
+  5HT2B:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/5HT2B/best-101.ckpt
+  5HT2C:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/5HT2C/best-101.ckpt
+  5HT4R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/5HT4R/best-101.ckpt
+  5HT5A:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/5HT5A/best-101.ckpt
+  5HT6R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/5HT6R/best-101.ckpt
+  5HT7R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/5HT7R/best-101.ckpt
+  AA1R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/AA1R/best-101.ckpt
+  AA2AR:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/AA2AR/best-101.ckpt
+  AA2BR:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/AA2BR/best-101.ckpt
+  AA3R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/AA3R/best-101.ckpt
+  ACM1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ACM1/best-101.ckpt
+  ACM2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ACM2/best-101.ckpt
+  ACM3:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ACM3/best-101.ckpt
+  ACM4:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ACM4/best-101.ckpt
+  ACM5:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ACM5/best-101.ckpt
+  ADA1A:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ADA1A/best-101.ckpt
+  ADA1B:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ADA1B/best-101.ckpt
+  ADA1D:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ADA1D/best-101.ckpt
+  ADA2A:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ADA2A/best-101.ckpt
+  ADA2B:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ADA2B/best-101.ckpt
+  ADA2C:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ADA2C/best-101.ckpt
+  ADRB1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ADRB1/best-101.ckpt
+  ADRB2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ADRB2/best-101.ckpt
+  ADRB3:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/ADRB3/best-101.ckpt
+  AGTR1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/AGTR1/best-101.ckpt
+  AGTR2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/AGTR2/best-101.ckpt
+  APJ:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/APJ/best-101.ckpt
+  BACE:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/BACE/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/BACE/best-101.ckpt
+  BBBP:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/BBBP/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/BBBP/best-101.ckpt
+  BKRB1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/BKRB1/best-101.ckpt
+  BKRB2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/BKRB2/best-101.ckpt
+  CALRL:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/CALRL/best-101.ckpt
+  CCKAR:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/CCKAR/best-101.ckpt
+  CCR1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/CCR1/best-101.ckpt
+  CCR2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/CCR2/best-101.ckpt
+  CCR3:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/CCR3/best-101.ckpt
+  CCR5:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/CCR5/best-101.ckpt
+  CLINTOX:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/CLINTOX/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/CLINTOX/best-101.ckpt
+  CNR1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/CNR1/best-101.ckpt
+  CNR2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/CNR2/best-101.ckpt
+  CRFR1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/CRFR1/best-101.ckpt
+  CXCR2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/CXCR2/best-101.ckpt
+  CXCR3:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/CXCR3/best-101.ckpt
+  DRD1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/DRD1/best-101.ckpt
+  DRD2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/DRD2/best-101.ckpt
+  DRD3:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/DRD3/best-101.ckpt
+  DRD4:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/DRD4/best-101.ckpt
+  DRD5:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/DRD5/best-101.ckpt
+  EDNRA:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/EDNRA/best-101.ckpt
+  EDNRB:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/EDNRB/best-101.ckpt
+  ESOL:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/ESOL/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/ESOL/best-101.ckpt
+  FFAR1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/FFAR1/best-101.ckpt
+  FPR1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/FPR1/best-101.ckpt
+  FREESOLV:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/FREESOLV/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/FREESOLV/best-101.ckpt
+  GASR:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/GASR/best-101.ckpt
+  GHSR:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/GHSR/best-101.ckpt
+  GLR:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/GLR/best-101.ckpt
+  GNRHR:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/GNRHR/best-101.ckpt
+  GRM2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/GRM2/best-101.ckpt
+  GRM5:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/GRM5/best-101.ckpt
+  HIV:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/HIV/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/HIV/best-101.ckpt
+  HRH1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/HRH1/best-101.ckpt
+  HRH2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/HRH2/best-101.ckpt
+  HRH3:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/HRH3/best-101.ckpt
+  HRH4:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/HRH4/best-101.ckpt
+  LIPOPHILICITY:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/LIPOPHILICITY/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/LIPOPHILICITY/best-101.ckpt
+  LT4R1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/LT4R1/best-101.ckpt
+  MC3R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/MC3R/best-101.ckpt
+  MC4R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/MC4R/best-101.ckpt
+  MC5R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/MC5R/best-101.ckpt
+  MCHR1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/MCHR1/best-101.ckpt
+  MSHR:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/MSHR/best-101.ckpt
+  MTR1A:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/MTR1A/best-101.ckpt
+  MTR1B:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/MTR1B/best-101.ckpt
+  MUV:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/MUV/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/MUV/best-101.ckpt
+  NK1R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/NK1R/best-101.ckpt
+  NK2R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/NK2R/best-101.ckpt
+  NK3R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/NK3R/best-101.ckpt
+  NPY1R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/NPY1R/best-101.ckpt
+  NPY2R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/NPY2R/best-101.ckpt
+  NPY5R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/NPY5R/best-101.ckpt
+  OPRD:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/OPRD/best-101.ckpt
+  OPRK:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/OPRK/best-101.ckpt
+  OPRM:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/OPRM/best-101.ckpt
+  OPRX:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/OPRX/best-101.ckpt
+  OX1R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/OX1R/best-101.ckpt
+  OX2R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/OX2R/best-101.ckpt
+  OXYR:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/OXYR/best-101.ckpt
+  P2RY1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/P2RY1/best-101.ckpt
+  P2Y12:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/P2Y12/best-101.ckpt
+  PD2R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/PD2R/best-101.ckpt
+  PD2R2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/PD2R2/best-101.ckpt
+  PE2R1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/PE2R1/best-101.ckpt
+  PE2R2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/PE2R2/best-101.ckpt
+  PE2R3:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/PE2R3/best-101.ckpt
+  PE2R4:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/PE2R4/best-101.ckpt
+  PI2R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/PI2R/best-101.ckpt
+  PRLHR:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/PRLHR/best-101.ckpt
+  QM7:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/QM7/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/QM7/best-101.ckpt
+  QM9:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/QM9/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/QM9/best-101.ckpt
+  S1PR1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/S1PR1/best-101.ckpt
+  SIDER:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/SIDER/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/SIDER/best-101.ckpt
+  SSR1:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/SSR1/best-101.ckpt
+  SSR2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/SSR2/best-101.ckpt
+  SSR3:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/SSR3/best-101.ckpt
+  SSR4:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/SSR4/best-101.ckpt
+  SSR5:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/SSR5/best-101.ckpt
+  TA2R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/TA2R/best-101.ckpt
+  TOX21:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/TOX21/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/TOX21/best-101.ckpt
+  TOXCAST:
+    ligand_random_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_random_scaffold/TOXCAST/best-101.ckpt
+    ligand_scaffold: MULTIVIEW_MODEL/MoleculeNet/ligand_scaffold/TOXCAST/best-101.ckpt
+  CYP1A2:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/CYP/ligand_scaffold_balanced/CYP1A2/best-101.ckpt
+  CYP2C19:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/CYP/ligand_scaffold_balanced/CYP2C19/best-101.ckpt
+  CYP2C9:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/CYP/ligand_scaffold_balanced/CYP2C9/best-101.ckpt
+  CYP2D6:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/CYP/ligand_scaffold_balanced/CYP2D6/best-101.ckpt
+  CYP3A4:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/CYP/ligand_scaffold_balanced/CYP3A4/best-101.ckpt
+  UR2R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/UR2R/best-101.ckpt
+  V1AR:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/V1AR/best-101.ckpt
+  V1BR:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/V1BR/best-101.ckpt
+  V2R:
+    ligand_scaffold_balanced: MULTIVIEW_MODEL/GPCR/ligand_scaffold_balanced/V2R/best-101.ckpt
+TEXT:
+  BACE:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/BACE/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/BACE/best-101.ckpt
+  BBBP:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/BBBP/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/BBBP/best-101.ckpt
+  CLINTOX:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/CLINTOX/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/CLINTOX/best-101.ckpt
+  ESOL:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/ESOL/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/ESOL/best-101.ckpt
+  FREESOLV:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/FREESOLV/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/FREESOLV/best-101.ckpt
+  HIV:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/HIV/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/HIV/best-101.ckpt
+  LIPOPHILICITY:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/LIPOPHILICITY/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/LIPOPHILICITY/best-101.ckpt
+  MUV:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/MUV/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/MUV/best-101.ckpt
+  QM7:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/QM7/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/QM7/best-101.ckpt
+  QM9:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/QM9/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/QM9/best-101.ckpt
+  SIDER:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/SIDER/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/SIDER/best-101.ckpt
+  TOX21:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/TOX21/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/TOX21/best-101.ckpt
+  TOXCAST:
+    ligand_random_scaffold: TEXT_MODEL/MoleculeNet/ligand_random_scaffold/TOXCAST/best-101.ckpt
+    ligand_scaffold: TEXT_MODEL/MoleculeNet/ligand_scaffold/TOXCAST/best-101.ckpt
+  CYP1A2:
+    ligand_scaffold_balanced: TEXT_MODEL/CYP/ligand_scaffold_balanced/CYP1A2/best-101.ckpt
+  CYP2C19:
+    ligand_scaffold_balanced: TEXT_MODEL/CYP/ligand_scaffold_balanced/CYP2C19/best-101.ckpt
+  CYP2C9:
+    ligand_scaffold_balanced: TEXT_MODEL/CYP/ligand_scaffold_balanced/CYP2C9/best-101.ckpt
+  CYP2D6:
+    ligand_scaffold_balanced: TEXT_MODEL/CYP/ligand_scaffold_balanced/CYP2D6/best-101.ckpt
+  CYP3A4:
+    ligand_scaffold_balanced: TEXT_MODEL/CYP/ligand_scaffold_balanced/CYP3A4/best-101.ckpt

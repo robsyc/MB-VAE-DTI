@@ -1,6 +1,6 @@
 data/
 notebooks/results/
-external/biomed-multi-view/bmfm_sm/resources/
+# external/biomed-multi-view/bmfm_sm/resources/
 external/biomed-multi-view/bmfm_sm/predictive/tests/test-data/finetune/
 *.ckpt
 *.hdf5

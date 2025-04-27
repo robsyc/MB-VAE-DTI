@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 
+sys.path.append(str(Path(__file__).resolve().parent))
+
 from bmfm_sm.api.smmv_api import SmallMoleculeMultiViewModel
 from bmfm_sm.core.data_modules.namespace import LateFusionStrategy
 from bmfm_sm.predictive.data_modules.graph_finetune_dataset import Graph2dFinetuneDataPipeline

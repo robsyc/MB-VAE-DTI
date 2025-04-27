@@ -32,7 +32,7 @@ assert EXTERNAL_DIR.exists(), f"External directory {EXTERNAL_DIR} does not exist
 
 # Helper functions
 
-def save_representations_to_h5(
+def save_dti_to_h5(
     df: pd.DataFrame,
     representation_column: Literal["Drug_SMILES", "Target_AA", "Target_DNA"],
     output_file_name: str
@@ -85,6 +85,55 @@ def save_representations_to_h5(
     
     logger.info(f"Created H5 file with {len(unique_ids)} unique {entity_id}s at {output_path}")
     return output_path
+
+
+def save_pretrain_to_h5(
+    df: pd.DataFrame,
+    representation_column: Literal["smiles", "aa", "dna"],
+    output_file_name: str
+) -> Path:
+    """
+    Save string representations (to be used for embedding) to an HDF5 file.
+    Simplified version without an ID column.
+    
+    Args:
+        df: DataFrame containing the data
+        representation_column: Column name for the string representation ('smiles', 'aa', or 'dna')
+        output_file_name: Name for the output HDF5 file
+    
+    Returns:
+        Path to the created HDF5 file
+    """
+    if not output_file_name.endswith(".hdf5"):
+        if "." in output_file_name:
+            output_file_name = output_file_name.split(".")[0]
+        output_file_name = output_file_name + ".hdf5"
+
+    # Get unique representations
+    unique_representations = df[representation_column].drop_duplicates().values
+    
+    # Create output path
+    output_path = TEMP_DIR / output_file_name
+    
+    # Determine entity type
+    entity_type = 'drug' if representation_column == "smiles" else 'target'
+    
+    # Save to HDF5 file
+    with h5py.File(output_path, 'w') as f:
+        # Store representations as string dataset
+        repr_dataset = f.create_dataset('data', (len(unique_representations),), dtype=h5py.special_dtype(vlen=str))
+        repr_dataset[:] = unique_representations
+        
+        # Create empty group for embeddings that will be populated later
+        f.create_group('embeddings')
+        
+        # Add metadata
+        f.attrs['representation_type'] = representation_column
+        f.attrs['entity_type'] = entity_type
+    
+    logger.info(f"Created H5 file with {len(unique_representations)} unique representations at {output_path}")
+    return output_path
+
 
 def run_embedding_script(
     hdf5_file_name: str,
