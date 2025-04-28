@@ -110,7 +110,7 @@ def save_pretrain_to_h5(
         output_file_name = output_file_name + ".hdf5"
 
     # Get unique representations
-    unique_representations = df[representation_column].drop_duplicates().values
+    unique_representations = df[representation_column].values
     
     # Create output path
     output_path = TEMP_DIR / output_file_name

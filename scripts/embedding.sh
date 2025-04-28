@@ -22,14 +22,37 @@ echo "Starting embedding generation..."
 
 # --- Add calls to run_embeddings.sh below ---
 
-echo "Running MorganFP embeddings..."
-bash "$RUN_EMBEDDINGS_SCRIPT" "MorganFP" "${TEMP_DIR}/${SMILES_H5}"
+# echo "Running DTI embeddings..."
+
+# echo "Running MorganFP embeddings..."
+# bash "$RUN_EMBEDDINGS_SCRIPT" "MorganFP" "${TEMP_DIR}/${SMILES_H5}"
+
+# echo "Running ESPF embeddings..."
+# bash "$RUN_EMBEDDINGS_SCRIPT" "ESPF" "${TEMP_DIR}/${AA_H5}"
+
+# echo "Running biomed-multi-view embeddings..."
+# bash "$RUN_EMBEDDINGS_SCRIPT" "biomed-multi-view" "${TEMP_DIR}/${SMILES_H5}"
+
+# echo "Running ESM embeddings..."
+# bash "$RUN_EMBEDDINGS_SCRIPT" "ESM" "${TEMP_DIR}/${AA_H5}"
+
+# echo "Running nucleotide-transformer embeddings..."
+# bash "$RUN_EMBEDDINGS_SCRIPT" "nucleotide-transformer" "${TEMP_DIR}/${DNA_H5}"
+
+echo "Running pre-training embeddings..."
+
+SMILES_H5="pretrain_smiles.hdf5"
+AA_H5="pretrain_aa.hdf5"
+DNA_H5="pretrain_dna.hdf5"
+
+# echo "Running MorganFP embeddings..."
+# bash "$RUN_EMBEDDINGS_SCRIPT" "MorganFP" "${TEMP_DIR}/${SMILES_H5}"
 
 echo "Running ESPF embeddings..."
 bash "$RUN_EMBEDDINGS_SCRIPT" "ESPF" "${TEMP_DIR}/${AA_H5}"
 
-echo "Running biomed-multi-view embeddings..."
-bash "$RUN_EMBEDDINGS_SCRIPT" "biomed-multi-view" "${TEMP_DIR}/${SMILES_H5}"
+# echo "Running biomed-multi-view embeddings..."
+# bash "$RUN_EMBEDDINGS_SCRIPT" "biomed-multi-view" "${TEMP_DIR}/${SMILES_H5}"
 
 echo "Running ESM embeddings..."
 bash "$RUN_EMBEDDINGS_SCRIPT" "ESM" "${TEMP_DIR}/${AA_H5}"
