@@ -9,7 +9,7 @@ This project implements a novel approach to the dyadic Drug-Target Interaction (
 Key features:
 - Multiple drug representations: Morgan fingerprints, graph, image and text (smiles) from [biomed-multi-view](https://github.com/BiomedSciAI/biomed-multi-view)
 - Multiple protein representations: ESPF fingerprints, amino acid ([ESM](https://github.com/facebookresearch/esm)) and DNA sequences ([nucleotide-transformer](https://github.com/instadeepai/nucleotide-transformer))
-- Variational (with discrete-diffusion decoding) and non-variational encoder architectures
+- Variational encoder and discrete-diffusion decoder (GiGress/DiffMS)
 - Inspection of latent spaces & exploration of generative capabilities
 - Comprehensive evaluation on standard DTI datasets through [tdc](https://tdcommons.ai/) (DAVIS, KIBA, BindingDB and Metz) and a new aggregated dataset of ±400k interactions & pre-computed embeddings, as well as a pre-training strategy for the full drug branch.
 
@@ -116,40 +116,12 @@ MB-VAE-DTI/
 ## Current Progress
 
 - ✅ Data loading and preprocessing
-- 🔄 Embedding generation and processing (in progress)
+- ✅ Embedding generation and processing
 - 🔄 h5torch file creation and dataset splitting (in progress)
 - 🔄 Model training (later)
 - 🔄 Model validation and analysis (later)
 
 The training section has not yet been refactored to the new codebase. We are actively working on implementing and testing the quickstart. There currently are still some `archive` folders spread throughout the repository, which contain old code to be refactored.
-
-## Scripts
-
-These scripts are designed to run on an HPC cluster with `Python 3.9`, `PyTorch 2.1.2` and `CUDA 12.1.1`.
-They require seperate package-management.
-
-```bash
-# Generate embeddings (to be implemented)
-bash scripts/embedding.sh
-
-# Pre-training (to be implemented)
-bash scripts/pretrain.sh
-
-# Training (to be implemented)
-bash scripts/train.sh
-
-# Validation (to be implemented)
-bash scripts/validate.sh
-```
-
-### Notebooks
-
-...
-
-## Results
-
-The model has been evaluated on standard DTI benchmark datasets:
-...
 
 ## Citation
 

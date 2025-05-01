@@ -94,8 +94,7 @@ def save_pretrain_to_h5(
 ) -> Path:
     """
     Save string representations (to be used for embedding) to an HDF5 file.
-    Simplified version without an ID column.
-    
+       
     Args:
         df: DataFrame containing the data
         representation_column: Column name for the string representation ('smiles', 'aa', or 'dna')
