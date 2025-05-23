@@ -1,19 +1,23 @@
 # Multi-branch Variational Encoders for Drug-target Interaction Prediction (MB-VAE-DTI)
 
-A machine learning framework for predicting drug-target interactions using multi-branch variational autoencoders leveraging pre-computed embeddings and target-conditioned discrete-diffusion drug-decoding.
+A machine learning framework for the dyadic drug-target interaction (DTI) prediction problem that combines multi-branch variational autoencoders with discrete diffusion processes. Our architecture uniquely integrates multi-modal drug & target representations - graph structures, fingerprints, images, and SMILES for drug molecules and DNA, amino acid sequences, and functional fingerprints for proteins - for large-scale pre-training as target-conditioned discrete generation of drug candidates.
 
-## Project Overview
-
-This project implements a novel approach to the dyadic Drug-Target Interaction (DTI) prediction problem using multi-branch variational autoencoders and a diffusion-based drug decoder based on [DiGress](https://github.com/cvignac/DiGress) and [DiffMS](https://github.com/coleygroup/DiffMS). The framework supports multiple embedding strategies for both drugs (molecules) and targets (proteins), allowing for flexible and powerful representation learning.
-
-Key features:
-- Multiple drug representations: Morgan fingerprints, graph, image and text (smiles) from [biomed-multi-view](https://github.com/BiomedSciAI/biomed-multi-view)
-- Multiple protein representations: ESPF fingerprints, amino acid ([ESM](https://github.com/facebookresearch/esm)) and DNA sequences ([nucleotide-transformer](https://github.com/instadeepai/nucleotide-transformer))
-- Variational encoder and discrete-diffusion decoder (GiGress/DiffMS)
+**Key features of this project:**
+- Multiple drug representations: Morgan fingerprints, graph, image and text (smiles)
+- Multiple protein representations: ESPF fingerprints, amino acid and DNA sequences
+- Variational encoder and discrete-diffusion decoder
 - Inspection of latent spaces & exploration of generative capabilities
-- Comprehensive evaluation on standard DTI datasets through [tdc](https://tdcommons.ai/) (DAVIS, KIBA, BindingDB and Metz) and a new aggregated dataset of ±400k interactions & pre-computed embeddings, as well as a pre-training strategy for the full drug branch.
+- Comprehensive evaluation on standard DTI datasets through [tdc](https://tdcommons.ai/) (DAVIS, KIBA, BindingDB and Metz) and a new aggregated dataset of ±400k interactions & pre-computed embeddings.
 
-## Repository Structure (simplified)
+**Prior work which this project builds upon:**
+- [`DiGress`](https://github.com/cvignac/DiGress) and [`DiffMS`](https://github.com/coleygroup/DiffMS) which inspired the diffusion-based drug-decoding.
+- [`RDKit`](https://www.rdkit.org/) with Morgan fingerprints for generating drug fingerprints.
+- [`MMELON`](https://github.com/BiomedSciAI/biomed-multi-view) model by [Suryanarayanan et al.](https://arxiv.org/abs/2410.19704) for generating drug representation embeddings (graph, image and text).
+- [`ESPF`](https://github.com/kexinhuang12345/ESPF) by [Huang et al.](https://static1.squarespace.com/static/58f7aae1e6f2e1a0f9a56616/t/5e370e2d12092f15876d5753/1580666413389/paper.pdf) for generating protein fingerprints.
+- [`ESM-C 600M`](https://github.com/evolutionaryscale/esm) by the [ESM Team](https://evolutionaryscale.ai/blog/esm-cambrian) for generating protein language model embeddings.
+- [`nucleotide-transformer 500M_multi_species_v2`](https://github.com/instadeepai/nucleotide-transformer) by [Dalla-Torre et al.](https://www.biorxiv.org/content/10.1101/2023.01.11.523679v2) for the generation of DNA sequence embeddings.
+
+## Repository Structure
 
 ```
 MB-VAE-DTI/
@@ -29,29 +33,28 @@ MB-VAE-DTI/
 │   │   └── split.py            # Dataset splitting utilities
 |   |
 │   ├── training/               # Model training (in progress)
-│   │   ├── models.py           # Model architecture definitions
-│   │   ├── components.py       # Reusable model components
-│   │   └── trainer.py          # Training loop implementation
+│   │   ├── ...
+│   │   └── ...
 |   |
 │   └── validating/             # Validation and analysis (in progress)
-│       ├── metrics.py          # Accuracy metrics computation
-│       └── visualization.py    # Result plotting and visualization
+│       ├── ...
+│       └── ...
 |
-├── external/                   # External dependencies
+├── external/                   # External dependencies (each folder has it's own venv and script.py)
 │   ├── rdMorganFP/             # Drug fingerprinting utilities
-│   ├── biomed-multi-view/      # Multiple drug representation models (graph image, text)
+│   ├── biomed-multi-view/      # Biomed-multi-view embedding models
 │   ├── ESPF/                   # Protein fingerprinting utilities
 │   ├── ESM/                    # Protein language model (ESM-C 6B)
-│   ├── nucleotide-transformer/ # DNA sequence transformer (nucleotide-transformer)
-│   └── run_embeddings.sh       # Script to run embedding generation
+│   ├── nucleotide-transformer/ # DNA sequence transformer (500M_multi_species_v2)
+│   └── run_embeddings.sh       # Shell script to run embedding generation
 |
-├── data/                       # Data directory (gitignored, download from [here](https://test.com))
+├── data/                       # Data directory (gitignored)
 │   ├── source/                 # Original datasets, populated by loading notebook & tdc
 │   ├── processed/              # Processed datasets & embeddings
 │   ├── input/                  # Input datasets (h5torch)
-│   ├── images/                 # Generated plots and visualizations
+│   ├── images/                 # Plots and visualizations
 │   ├── checkpoints/            # Model checkpoints
-│   └── results/                # Model outputs and analysis
+│   └── results/                # Model outputs and analyses
 |
 ├── notebooks/                  # Jupyter notebooks for reproducing experiments
 │   ├── loading.ipynb           # Data loading, pre-processing and exploration
@@ -59,20 +62,20 @@ MB-VAE-DTI/
 │   ├── training.ipynb          # Model inspection and training processes (in progress)
 │   └── validating.ipynb        # Result analysis and validation (in progress)
 |
-├── scripts/                    # Scripts for running experiments on HPC
+├── scripts/                    # Scripts for running experiments on HPC (in progress)
 │   ├── configs/                # Configuration files
 │   │   ├── pretrain.json
 │   │   ├── train.json
 │   │   └── valid.json
-│   ├── embedding.sh            # Shell script for embedding generation
-│   ├── pretrain.sh             # Shell script for pretraining
-│   ├── train.sh                # Shell script for training
-│   ├── validate.sh             # Shell script for validation
-│   └── hpc.pbs                 # PBS script with batch indexing
+│   ├── embedding.sh            # Shell script for embedding generation (assumes data & external folders are correctly set up)
+│   ├── pretrain.sh             # Shell script for pretraining (in progress)
+│   ├── train.sh                # Shell script for training (in progress)
+│   ├── validate.sh             # Shell script for validation (in progress)
+│   └── hpc.pbs                 # PBS script with batch indexing (in progress)
 |
-├── setup.py                    # Package installation script
+├── setup.py                    # Package installation script (may be in conflict with some external repo dependencies)
 ├── environment.yml             # Conda environment specification
-└── README.md                   # Project documentation
+└── README.md                   # This file :)
 ```
 
 ## Installation
@@ -109,7 +112,8 @@ MB-VAE-DTI/
 
 **Download the complete data folder** including all datasets and pre-trained models:
    - Link: TBA (coming soon)
-   - This provides everything needed to immediately start experimenting with the models.
+   - This provides everything needed to immediately start experimenting with the models
+   - Alternatively, you can consult the notebooks to generate the data & run the experiments yourself
 
 **Note:** This project is currently in development, with the processing section implemented and training/validation components in progress.
 
@@ -129,12 +133,13 @@ If you use this code in your research, please cite:
 
 ```
 @article{mbvae_dti,
-  title={Multi-branch Variational Autoencoders for Drug-target Interaction Prediction and Molecular Generation},
-  author={Claeys, Robbe},
-  year={2025}
+   title={Multi-branch VAE for Drug-target Interaction Prediction and Target-conditioned de novo Drug Design},
+   author={Claeys, Robbe},
+   year={2025},
+   url={https://...}
 }
 ```
 
 ## Acknowledgments
 
-This work builds upon several open-source projects, including [DiGress](https://github.com/cvignac/DiGress), [DiffMS](https://github.com/coleygroup/DiffMS), and the various embedding models mentioned above.
+This work is part of a master thesis project at [UGent](https://www.ugent.be/en) under the supervision of [Prof. Willem Waegeman](https://www.ugent.be/dass/en/research/waegeman), [Gaetan De Waele](https://github.com/gdewael) and [Natan Tourné](https://willemwaegeman.github.io/bioml/members/natan-tourne.html) at the [BioML lab](https://willemwaegeman.github.io/bioml/).

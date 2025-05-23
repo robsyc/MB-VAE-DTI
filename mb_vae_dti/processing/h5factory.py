@@ -643,9 +643,9 @@ def _register_aligned_entity_data(
             first_batch_aligned,
             axis=axis,
             name=repr_name,
-            mode='N-D', # Use N-D for string arrays
-            dtype_save=output_dtype, # Save as variable-length UTF-8
-            dtype_load='str',      # Load as Python strings
+            mode='N-D', # Use N-D for string arrays, not vlen
+            dtype_save=h5py.string_dtype(encoding='utf-8'), # Explicitly save as variable-length UTF-8 strings
+            dtype_load='str', # Explicitly load as Python strings
             length=num_entities
         )
         logger.info(f"Registered aligned[{axis}] '{repr_name}' (Target Length: {num_entities})")
@@ -686,9 +686,10 @@ def _register_aligned_entity_data(
 def create_pretrain_h5torch(
     input_h5_paths: List[Path],
     output_h5_path: Path,
-    # add_split: bool = True,
-    # split_frac: Tuple[float, float, float] = (0.8, 0.1, 0.1),
-    # split_seed: int = 42,
+    add_split: bool = True,
+    train_frac: float = 0.9,
+    split_seed: int = 42,
+    split_name: str = 'split',
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> None:
     """
@@ -706,6 +707,10 @@ def create_pretrain_h5torch(
     Args:
         input_h5_paths: List of paths to input HDF5 files.
         output_h5_path: Path where the output h5torch file will be created.
+        add_split: Whether to add split column.
+        train_frac: Fraction of data for training.
+        split_seed: Seed for splitting.
+        split_name: Prefix for split column.
         batch_size: Number of items to process per batch during writing.
     """
     logger.info(f"Creating pretrain h5torch file '{output_h5_path}' from {len(input_h5_paths)} input file(s)...")
@@ -753,7 +758,7 @@ def create_pretrain_h5torch(
             if not merged_info['feature_sources']:
                 logger.warning("No features (FP-*, EMB-*) found in input files.")
             
-            drug_registered_reprs = _register_aligned_entity_data(
+            registered_reprs = _register_aligned_entity_data(
                 h5_out=h5_out,
                 axis=0,
                 entity_ids=entity_ids,
@@ -763,7 +768,30 @@ def create_pretrain_h5torch(
                 batch_size=batch_size
             )
 
-            # 3. Register Unstructured Data (Representations)
+            # 3. Add Split Data (Optional)
+            if add_split and num_items > 0:
+                logger.info(f"Generating train/validation split ({train_frac=}, {split_seed=})...")
+                np.random.seed(split_seed)
+                indices = np.random.permutation(num_items)
+                num_train = int(num_items * train_frac)
+
+                split_data = np.full(num_items, 'val', dtype=object)
+                split_data[indices[:num_train]] = 'train'
+
+                h5_out.register(
+                    split_data,
+                    axis='unstructured',
+                    name=split_name,
+                    mode='N-D',
+                    dtype_save=h5py.string_dtype(encoding='utf-8'),
+                    dtype_load="str",
+                    length=num_items
+                )
+                logger.info(f"Registered unstructured '{split_name}' (Train: {num_train}, Val: {num_items - num_train})")
+            elif add_split:
+                logger.warning("add_split is True, but num_items is 0. Skipping split generation.")
+
+            # 4. Register Unstructured Data (Representations)
             logger.info("Registering unstructured data (Representations)...")
             if not merged_info['repr_sources']:
                  logger.warning("No representations (SMILES, AA, etc.) found in input files.")
@@ -782,7 +810,8 @@ def create_pretrain_h5torch(
                     axis='unstructured',
                     name=repr_name,
                     mode='N-D', # Use N-D for string arrays, not vlen
-                    dtype_save=h5py.string_dtype(encoding='utf-8'), # Explicitly save as variable-length UTF-8 strings
+                    dtype_save=h5py.string_dtype(encoding='utf-8'), # Correct: Use h5py string dtype
+                    dtype_load="str",
                     length=num_items # Specify total length
                 )
                 logger.info(f"Registered unstructured '{repr_name}' (Length: {num_items})")
@@ -969,8 +998,8 @@ def create_dti_h5torch(
                 axis=0,
                 name=drug_id_col, # Use the original column name
                 mode='N-D',
-                dtype_save=h5py.string_dtype(encoding='utf-8'),
-                dtype_load='str'
+                dtype_save="bytes", 
+                dtype_load="str"
             )
 
             # 6.2: Register external drug features and representations using the helper
@@ -1004,7 +1033,7 @@ def create_dti_h5torch(
                     name=feat_name,
                     mode='N-D',
                     dtype_save=h5py.string_dtype(encoding='utf-8'),
-                    dtype_load='str',
+                    dtype_load="str",
                     length=num_drugs
                 )
 
@@ -1051,7 +1080,7 @@ def create_dti_h5torch(
                      axis=1,
                      name=feat_name,
                      mode='N-D',
-                     dtype_save=h5py.string_dtype(encoding='utf-8'),
+                     dtype_save=h5py.string_dtype(encoding='utf-8'), # Use h5py's string dtype
                      dtype_load='str',
                      length=num_targets
                  )
@@ -1099,7 +1128,7 @@ def create_dti_h5torch(
                             dtype_save = 'float32'
                             dtype_load = 'float32'
                     elif pd.api.types.is_string_dtype(values) or pd.api.types.is_object_dtype(values):
-                        dtype_save = h5py.string_dtype(encoding='utf-8')
+                        dtype_save = h5py.string_dtype(encoding='utf-8') # Use h5py's string dtype
                         dtype_load = 'str'
                     elif pd.api.types.is_bool_dtype(values):
                          dtype_save = 'bool'
@@ -1137,7 +1166,6 @@ def create_dti_h5torch(
                  try: handle.close()
                  except Exception as e: logger.error(f"Error closing target input file {handle.filename}: {e}")
         logger.debug("Finished closing input files (if any were opened).")
-
 
 # --- Inspection Functions ---
 
@@ -1255,54 +1283,3 @@ def inspect_h5torch_file(h5_path: Path) -> None:
                  logger.error(f"Error closing HDF5 file {h5_path.name} after inspection: {close_err}")
         logger.info(f"--- Finished Inspecting: {h5_path.name} ---")
 
-# print short summary of result, making sure to truncate the output
-# data_dir = Path("/home/robsyc/Desktop/thesis/MB-VAE-DTI/data/processed")
-# dti_df = pd.read_csv(data_dir / "dti.csv")
-# result = _load_dti_df(dti_df)
-# dti_drug_ids, dti_target_ids, drug_id_to_idx, target_id_to_idx, drug_features_df, target_features_df, coo_data, unstructured_data = result.values()
-# print(f"dti_drug_ids: {dti_drug_ids[:2]} ... (first 2 of {len(dti_drug_ids)})")
-# print(f"dti_target_ids: {dti_target_ids[:2]} ... (first 2 of {len(dti_target_ids)})")
-# # Corrected print statements for dictionaries:
-# print(f"drug_id_to_idx: {list(drug_id_to_idx.items())[:2]} ... (first 2 of {len(drug_id_to_idx)})")
-# print(f"target_id_to_idx: {list(target_id_to_idx.items())[:2]} ... (first 2 of {len(target_id_to_idx)})")
-# print(f"drug_features_df keys: {list(drug_features_df.keys())}") # Just show keys
-# print(f"target_features_df keys: {list(target_features_df.keys())}") # Just show keys
-# # Optionally print shape/type of first feature array if needed:
-# if drug_features_df:
-#     first_drug_key = list(drug_features_df.keys())[0]
-#     print(f"  First drug feature ('{first_drug_key}') shape: {drug_features_df[first_drug_key].shape}, dtype: {drug_features_df[first_drug_key].dtype}")
-# if target_features_df:
-#     first_target_key = list(target_features_df.keys())[0]
-#     print(f"  First target feature ('{first_target_key}') shape: {target_features_df[first_target_key].shape}, dtype: {target_features_df[first_target_key].dtype}")
-
-# # Print COO info (already handles arrays correctly)
-# coo_idx, coo_val, coo_shape = coo_data
-# print(f"COO Shape: {coo_shape}")
-# print(f"COO NNZ: {len(coo_val)}")
-# print(f"COO Indices shape: {coo_idx.shape}")
-# print(f"COO Values type: {coo_val.dtype}")
-
-# # Print unstructured info
-# print(f"Unstructured Data keys: {list(unstructured_data.keys())}")
-# if 'split_rand' in unstructured_data:
-#     print(f"Split 'split_rand' counts: {pd.value_counts(unstructured_data['split_rand'])}")
-# if 'split_cold' in unstructured_data:
-#      print(f"Split 'split_cold' counts: {pd.value_counts(unstructured_data['split_cold'])}")
-
-
-# temp_dir = Path("/home/robsyc/Desktop/thesis/MB-VAE-DTI/external/temp")
-# output_dir = Path("/home/robsyc/Desktop/thesis/MB-VAE-DTI/data/input")
-
-# dti_target_input_files = [temp_dir / "dti_aa.hdf5", temp_dir / "dti_dna.hdf5"]
-# dti_drug_input_files = [temp_dir / "dti_smiles.hdf5"]
-
-# dti_output_file = output_dir / "dti.h5torch"
-
-# create_dti_h5torch(
-#     dti_df,
-#     dti_drug_input_files,
-#     dti_target_input_files,
-#     dti_output_file
-# )
-
-# inspect_h5torch_file(dti_output_file)
