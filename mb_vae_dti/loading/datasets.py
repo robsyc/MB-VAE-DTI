@@ -19,6 +19,11 @@ FILTER_ATOMS = {'C', 'N', 'S', 'O', 'F', 'Cl', 'H', 'P'}
 MAX_MOL_WEIGHT = 1500
 MAX_AA_SEQ_LEN = 1280
 
+# Thresholds for binarization
+pKd_THRESHOLD = 7.0
+pKi_THRESHOLD = 7.6
+KIBA_THRESHOLD = 12.1
+
 # Define paths
 DATA_DIR = Path("data")
 SOURCE_DIR = DATA_DIR / "source"
@@ -120,7 +125,7 @@ def load_dataset(
         print(f"  - Dropped {rows_before - len(df):,} rows with missing values")
     
     # Add binary interaction column based on threshold
-    thresholds = {'Y_pKd': 7.0, 'Y_pKi': 7.6, 'Y_KIBA': 12.1}
+    thresholds = {'Y_pKd': pKd_THRESHOLD, 'Y_pKi': pKi_THRESHOLD, 'Y_KIBA': KIBA_THRESHOLD}
     for col, threshold in thresholds.items():
         if col in df.columns:
             df['Y'] = df[col] >= threshold

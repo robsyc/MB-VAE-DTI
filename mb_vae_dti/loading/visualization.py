@@ -39,7 +39,8 @@ def compute_heavy_atom_counts(smiles_list: List[str]) -> Dict[str, int]:
 
 def set_plotting_style():
     """Set the default plotting style for consistent visualizations."""
-    sns.set_style("whitegrid")
+    plt.style.use('tableau-colorblind10')  # Use Matplotlib style sheet
+    sns.set_style("whitegrid")  # Apply seaborn style on top
     plt.rcParams['figure.figsize'] = (12, 8)
     plt.rcParams['font.size'] = 12
     plt.rcParams['axes.labelsize'] = 14

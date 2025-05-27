@@ -1,16 +1,16 @@
 # Multi-branch VAE for Drug-target Interaction Prediction and Target-conditioned de novo Drug Design (MB-VAE-DTI)
 
-A machine learning framework for the dyadic drug-target interaction (DTI) prediction problem that combines multi-branch variational autoencoders with discrete diffusion processes. Our architecture uniquely integrates multi-modal drug & target representations - graph structures, fingerprints, images, and SMILES for drug molecules and DNA, amino acid sequences, and functional fingerprints for proteins - for large-scale pre-training as target-conditioned discrete generation of drug candidates.
+A machine-learning framework for the dyadic drug-target interaction (DTI) prediction problem that combines multi-branch variational autoencoders with discrete diffusion processes. Our architecture uniquely integrates multiple drug/target representations and modalities, pre-trained foundation models, and target-conditioned discrete diffusion-based molecule generation in a unified framework.
 
 **Key features of this project:**
-- Multiple drug representations: Morgan fingerprints, graph, image and text (smiles)
+- Multiple drug representations: Morgan fingerprints, graph, image and text (SMILES)
 - Multiple protein representations: ESPF fingerprints, amino acid and DNA sequences
 - Variational encoder and discrete-diffusion decoder
 - Inspection of latent spaces & exploration of generative capabilities
-- Comprehensive evaluation on standard DTI datasets through [tdc](https://tdcommons.ai/) (DAVIS, KIBA, BindingDB and Metz) and a new aggregated dataset of ±400k interactions & pre-computed embeddings.
+- Comprehensive evaluation on standard DTI datasets through [tdc](https://tdcommons.ai/) (DAVIS, KIBA, BindingDB and Metz) and a new aggregated dataset of ±300k interactions & pre-computed embeddings.
 
 **Prior work which this project builds upon:**
-- [`DiGress`](https://github.com/cvignac/DiGress) and [`DiffMS`](https://github.com/coleygroup/DiffMS) which inspired the diffusion-based drug-decoding.
+- [`DiGress`](https://github.com/cvignac/DiGress) by [Vignac et al.](https://arxiv.org/abs/2209.14734) and [`DiffMS`](https://github.com/coleygroup/DiffMS) by [Coley et al.](https://arxiv.org/abs/2409.10000) which inspired the diffusion-based drug-decoding.
 - [`RDKit`](https://www.rdkit.org/) with Morgan fingerprints for generating drug fingerprints.
 - [`MMELON`](https://github.com/BiomedSciAI/biomed-multi-view) model by [Suryanarayanan et al.](https://arxiv.org/abs/2410.19704) for generating drug representation embeddings (graph, image and text).
 - [`ESPF`](https://github.com/kexinhuang12345/ESPF) by [Huang et al.](https://static1.squarespace.com/static/58f7aae1e6f2e1a0f9a56616/t/5e370e2d12092f15876d5753/1580666413389/paper.pdf) for generating protein fingerprints.
