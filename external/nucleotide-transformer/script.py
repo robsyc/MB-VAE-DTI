@@ -22,7 +22,7 @@ MODEL_NAME = "500M_multi_species_v2"
 EMBEDDING_NAME = "EMB-NT"
 BATCH_SIZE = 16       # Adjust based on GPU memory
 EMBEDDING_LAYER = 29  # Using layer 29 (last layer for this model config? check docs)
-PADDING_LENGTH = 650  # Max length = 640 6-mers + margin
+PADDING_LENGTH = 650  # Max length = 640 6-mers for 1280 residue amino acid sequences + margin
 
 LIMIT_SEQ = False # limit DNA sequences for testing purposes
 if LIMIT_SEQ:
