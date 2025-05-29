@@ -8,10 +8,11 @@ import numpy as np
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Tuple, Any
+import torch
 
 
 # Setup logger
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -107,33 +108,22 @@ def _calculate_subset_mask(
             # Apply split filter
             split_col = filters.get('split_col')
             split_value = filters.get('split_value')
-            if split_col and split_value is not None:  # Allow False as a valid split_value
+            if split_col and split_value:
                 split_key = f"unstructured/{split_col}"
                 if split_key not in f:
                     logger.warning(f"Split filter column '{split_col}' not found. Skipping split filter.")
                 else:
                     logger.debug(f"Applying split filter: '{split_col}' == '{split_value}'")
-                    # Handle both boolean and string split values
+                    # Decode bytes if necessary, handle potential errors
                     try:
                         values = f[split_key][:]
-                        
-                        # Handle boolean split columns
-                        if isinstance(split_value, bool):
-                            if values.dtype == bool:
-                                split_mask = (values == split_value)
-                            else:
-                                # Convert to boolean if needed
-                                values = values.astype(bool)
-                                split_mask = (values == split_value)
-                        else:
-                            # Handle string split columns (legacy)
-                            if values.dtype.kind in ('O', 'S'): # Object or String/Bytes
-                                values = np.array([s.decode('utf-8', errors='replace') if isinstance(s, bytes) else str(s) for s in values])
-                            split_mask = (values == split_value)
+                        if values.dtype.kind in ('O', 'S'): # Object or String/Bytes
+                            values = np.array([s.decode('utf-8', errors='replace') if isinstance(s, bytes) else str(s) for s in values])
                         
                         if len(values) != mask_size:
                              raise ValueError(f"Length mismatch for '{split_col}' ({len(values)}) vs expected mask size ({mask_size})")
 
+                        split_mask = (values == split_value)
                         final_mask &= split_mask
                         applied_filter = True
                         logger.debug(f"Split filter kept {np.sum(final_mask)} / {mask_size} items.")
@@ -200,8 +190,8 @@ class PretrainDataset(h5torch.Dataset):
 
     Assumes structure:
     - Central: 'index'
-    - Aligned Axis 0: Features (e.g., 'FP-Morgan', 'EMB-ESM') and Representations (e.g., 'SMILES', 'AA')
-    - Unstructured: Split information (boolean is_train)
+    - Aligned Axis 0: Features (e.g., 'FP-Morgan', 'EMB-ESM')
+    - Unstructured: Representations (e.g., 'SMILES', 'AA') and optional splits.
 
     Returns structured dictionaries for each item:
     {
@@ -222,15 +212,14 @@ class PretrainDataset(h5torch.Dataset):
     def __init__(
         self,
         h5_path: Path,
-        subset_filters: Optional[Dict[str, bool]] = {'split_col': 'is_train', 'split_value': True},
+        subset_filters: Optional[Dict[str, Union[str, List[str]]]] = None,
         load_in_memory: bool = False
     ):
         """
         Args:
             h5_path: Path to the h5torch HDF5 file.
             subset_filters: Dictionary of filters to apply (see _calculate_subset_mask).
-                            Example: {'split_col': 'is_train', 'split_value': True}
-                            For boolean columns, split_value should be True/False
+                            Example: {'split_col': 'split', 'split_value': 'train'}
             load_in_memory: Whether to load the entire dataset into memory.
         """
         self.h5_path = Path(h5_path) # Ensure it's a Path object
@@ -254,31 +243,38 @@ class PretrainDataset(h5torch.Dataset):
         self._identify_paths()
         logger.info(f"Initialized PretrainDataset from {self.h5_path.name}. Size: {len(self)} items.")
         logger.info(f"  Feature paths (Axis 0): {list(self.feature_paths.keys())}")
-        logger.info(f"  Representation paths (Axis 0): {list(self.repr_paths.keys())}")
+        logger.info(f"  Representation paths (Unstructured): {list(self.repr_paths.keys())}")
 
     def _identify_paths(self):
         """Identify and store the HDF5 paths for features and representations."""
-        self.feature_paths = {} # Aligned axis 0 - numerical features
-        self.repr_paths = {}    # Aligned axis 0 - string representations
+        self.feature_paths = {} # Aligned axis 0
+        self.repr_paths = {}    # Unstructured
 
         # Use self.f which is the h5py.File object opened by h5torch.Dataset
         if '0' in self.f:
             for name in self.f['0'].keys():
-                dataset = self.f[f'0/{name}']
-                # Distinguish between features (numerical) and representations (strings)
-                if dataset.dtype.kind in ('O', 'S', 'U'):
-                    # String/object/vlen data -> representation
-                    self.repr_paths[name] = f'0/{name}'
-                else:
-                    # Numerical data -> feature
-                    self.feature_paths[name] = f'0/{name}'
+                # Assume all datasets in axis 0 are features
+                self.feature_paths[name] = f'0/{name}'
+        
+        if 'unstructured' in self.f:
+            for name in self.f['unstructured'].keys():
+                # Assume all datasets in unstructured are representations, *except* filter columns
+                is_filter_col = False
+                if self.subset_filters:
+                    if name == self.subset_filters.get('split_col'):
+                         is_filter_col = True
+                    if name in self.subset_filters.get('provenance_cols', []):
+                         is_filter_col = True
+                
+                if not is_filter_col:
+                     self.repr_paths[name] = f'unstructured/{name}'
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """
         Fetches an item and structures it into 'id', 'representations', and 'features'.
         """
         # Get the flat dictionary from h5torch.Dataset's __getitem__
-        # Keys will be like 'central', '0/FP-Morgan', '0/SMILES'
+        # Keys will be like 'central/index', '0/FP-Morgan', 'unstructured/SMILES'
         # Values are already converted based on dtype_load by h5torch
         item_flat = super().__getitem__(idx)
 
@@ -289,19 +285,20 @@ class PretrainDataset(h5torch.Dataset):
             'features': {}
         }
 
-        # Extract ID (assuming it's stored in central)
-        id_val = item_flat.get('central')
+        # Extract ID (assuming it's stored in central/index or central)
+        id_val = item_flat.get('central/index', item_flat.get('central'))
         if id_val is not None:
             structured_item['id'] = int(id_val) # Ensure it's an int
         else:
-            # Fallback: Use the dataset index if central isn't present
-            logger.warning(f"Could not find 'central' in item keys: {list(item_flat.keys())}. Using dataset index {idx} as ID.")
+            # Fallback: Use the dataset index if central/index isn't present
+            # This might happen if the file wasn't created exactly as expected
+            logger.warning(f"Could not find 'central/index' or 'central' in item keys: {list(item_flat.keys())}. Using dataset index {idx} as ID.")
             structured_item['id'] = idx
 
-        # Populate representations from axis 0 string paths
+        # Populate representations from unstructured paths
         for name, path in self.repr_paths.items():
             if path in item_flat:
-                 # h5torch should handle string conversion via dtype_load='str'
+                 # Decode bytes to string if needed (though h5torch might handle it via dtype_load='str')
                  value = item_flat[path]
                  if isinstance(value, bytes):
                      structured_item['representations'][name] = value.decode('utf-8', errors='replace')
@@ -311,10 +308,201 @@ class PretrainDataset(h5torch.Dataset):
                  else:
                      structured_item['representations'][name] = value # Assume h5torch handled type conversion
 
-        # Populate features from axis 0 numerical paths
+        # Populate features from axis 0 paths
         for name, path in self.feature_paths.items():
             if path in item_flat:
                 # Features are expected to be numerical arrays (or handled by h5torch load type)
                 structured_item['features'][name] = item_flat[path]
 
+        return structured_item
+
+
+class DTIDataset(h5torch.Dataset):
+    """
+    A PyTorch Dataset for loading consolidated DTI data from an h5torch file
+    created by `create_dti_h5torch`, using COO sampling.
+
+    It retrieves the interaction value (Y), the aligned features for the
+    interacting drug and target, and the corresponding unstructured
+    interaction-level metadata (splits, provenance, continuous Y values).
+
+    Returns structured dictionaries for each interaction:
+    {
+        'drug': { # Features/Representations from aligned axis 0
+            'Drug_ID': str,
+            'SMILES': str,
+            'FP-Morgan': np.ndarray(float32),
+            'EMB-BiomedGraph': np.ndarray(float32),
+            ...
+        },
+        'target': { # Features/Representations from aligned axis 1
+            'Target_ID': str,
+            'AA': str, # Or 'DNA'
+            'FP-ESPF': np.ndarray(float32),
+            'EMB-ESM': np.ndarray(float32),
+            ...
+        },
+        'interaction': { # From central (Y) and unstructured ('Y_*')
+            'Y': int or float, # Binary interaction value (loaded as specified by dtype_load)
+            'Y_pKd': float,
+            'Y_pKi': float,
+            ...
+        },
+        'metadata': { # From unstructured (excluding 'Y_*')
+            'split_rand': str,
+            'split_cold': str,
+            'in_DAVIS': bool,
+            ...
+        }
+    }
+    """
+    def __init__(
+        self,
+        h5_path: Path,
+        subset_filters: Optional[Dict[str, Union[str, List[str]]]] = None,
+        load_in_memory: bool = False
+    ):
+        """
+        Args:
+            h5_path: Path to the h5torch DTI HDF5 file.
+            subset_filters: Dictionary of filters to apply (see _calculate_subset_mask).
+                            Example: {'split_col': 'split_rand', 'split_value': 'train',
+                                      'provenance_cols': ['in_DAVIS', 'in_KIBA']}
+            load_in_memory: Whether to load the entire dataset into memory (potentially very large).
+        """
+        self.h5_path = Path(h5_path) # Ensure Path object
+        self.subset_filters = subset_filters
+
+        # Calculate subset mask for COO data (aligns with interactions/NNZ)
+        subset_mask = _calculate_subset_mask(self.h5_path, subset_filters, is_coo=True)
+
+        # Initialize the h5torch Dataset with COO sampling
+        super().__init__(
+            file=str(self.h5_path),
+            subset=subset_mask,
+            sampling='coo', # Sample interactions (drug, target, Y)
+            in_memory=load_in_memory
+        )
+
+        # Store paths for easier access in __getitem__
+        self._identify_paths()
+
+        # Log summary
+        logger.info(f"Initialized DTIDataset from {self.h5_path.name}. Size: {len(self)} interactions.")
+        logger.info(f"  Drug paths (Axis 0): {list(self.drug_paths.keys())}")
+        logger.info(f"  Target paths (Axis 1): {list(self.target_paths.keys())}")
+        logger.info(f"  Interaction paths (Central/Unstructured): {list(self.interaction_paths.keys())}")
+        logger.info(f"  Metadata paths (Unstructured): {list(self.metadata_paths.keys())}")
+
+    def _identify_paths(self):
+        """Identify and store the HDF5 paths for different data categories."""
+        self.drug_paths = {}        # Aligned axis 0
+        self.target_paths = {}      # Aligned axis 1
+        self.interaction_paths = {} # Central 'values' and Unstructured 'Y_*'
+        self.metadata_paths = {}    # Unstructured (others)
+
+        # Central Data (Interaction Y value)
+        # For COO, h5torch typically returns the value under 'central/values' or just 'central'
+        # We'll handle this dynamically in __getitem__
+
+        # Aligned Axis 0 (Drug data)
+        if '0' in self.f:
+            for name in self.f['0'].keys():
+                self.drug_paths[name] = f'0/{name}'
+
+        # Aligned Axis 1 (Target data)
+        if '1' in self.f:
+            for name in self.f['1'].keys():
+                self.target_paths[name] = f'1/{name}'
+
+        # Unstructured Data (Interaction Y values and Metadata)
+        if 'unstructured' in self.f:
+            for name in self.f['unstructured'].keys():
+                path = f'unstructured/{name}'
+                # Categorize based on name prefix
+                if name.startswith('Y_'):
+                    self.interaction_paths[name] = path
+                else:
+                    # Exclude filter columns from being returned as metadata
+                    is_filter_col = False
+                    if self.subset_filters:
+                        if name == self.subset_filters.get('split_col'):
+                             is_filter_col = True
+                        if name in self.subset_filters.get('provenance_cols', []):
+                             is_filter_col = True
+                    if not is_filter_col:
+                        self.metadata_paths[name] = path
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        """
+        Fetches an interaction and structures it into 'drug', 'target',
+        'interaction', and 'metadata'.
+        """
+        # Get the flat dictionary from h5torch.Dataset's __getitem__ for COO sampling
+        # Keys will be like:
+        # 'central/values': Y value
+        # '0/Drug_ID': drug ID
+        # '0/FP-Morgan': drug fingerprint
+        # '1/Target_ID': target ID
+        # '1/EMB-ESM': target embedding
+        # 'unstructured/Y_pKd': pKd value
+        # 'unstructured/split_rand': split value
+        item_flat = super().__getitem__(idx)
+
+        # Structure the output
+        structured_item = {
+            'drug': {},
+            'target': {},
+            'interaction': {},
+            'metadata': {}
+        }
+
+        # Populate Drug data (Axis 0)
+        for name, path in self.drug_paths.items():
+            if path in item_flat:
+                 value = item_flat[path]
+                 # Handle potential bytes returned for string types
+                 if isinstance(value, bytes):
+                      structured_item['drug'][name] = value.decode('utf-8', errors='replace')
+                 elif isinstance(value, np.ndarray) and value.dtype.kind in ('O', 'S', 'U'):
+                      # Handle case where h5torch returns array of bytes/strings
+                      structured_item['drug'][name] = value.item().decode('utf-8', errors='replace') if isinstance(value.item(), bytes) else str(value.item())
+                 else:
+                     structured_item['drug'][name] = value
+
+        # Populate Target data (Axis 1)
+        for name, path in self.target_paths.items():
+            if path in item_flat:
+                 value = item_flat[path]
+                 if isinstance(value, bytes):
+                     structured_item['target'][name] = value.decode('utf-8', errors='replace')
+                 elif isinstance(value, np.ndarray) and value.dtype.kind in ('O', 'S', 'U'):
+                      structured_item['target'][name] = value.item().decode('utf-8', errors='replace') if isinstance(value.item(), bytes) else str(value.item())
+                 else:
+                     structured_item['target'][name] = value
+
+        # Populate Interaction data (Central Y and Unstructured Y_*)
+        # Get central 'Y' value (h5torch might name it 'central/values' or 'central')
+        y_value = item_flat.get('central/values', item_flat.get('central'))
+        if y_value is not None:
+             structured_item['interaction']['Y'] = y_value
+        else:
+             logger.warning(f"Could not find central interaction value ('central/values' or 'central') in item keys: {list(item_flat.keys())}")
+
+        # Get additional Y_* values from unstructured
+        for name, path in self.interaction_paths.items():
+             if path in item_flat:
+                 structured_item['interaction'][name] = item_flat[path]
+
+        # Populate Metadata (Other Unstructured)
+        for name, path in self.metadata_paths.items():
+             if path in item_flat:
+                 value = item_flat[path]
+                 if isinstance(value, bytes):
+                      structured_item['metadata'][name] = value.decode('utf-8', errors='replace')
+                 elif isinstance(value, np.ndarray) and value.dtype.kind in ('O', 'S', 'U'):
+                      structured_item['metadata'][name] = value.item().decode('utf-8', errors='replace') if isinstance(value.item(), bytes) else str(value.item())
+                 else:
+                      structured_item['metadata'][name] = value
+                      
         return structured_item
