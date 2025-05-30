@@ -291,13 +291,13 @@ def _register_aligned_entity_data(
     """
     Helper function to register aligned features and representations for a given axis (drug or target).
 
-    Reads data from external HDF5 sources provided in entity_info and aligns it
-    to the order specified by entity_ids. Uses batch processing for efficiency.
+    Reads data from external HDF5 sources provided in entity_info and aligns it to the order specified by entity_ids. 
+    Uses batch processing on the numerical features, bulk processing on the string representations.
 
     Args:
         h5_out: The open h5torch.File object to write to.
-        axis: The axis index (0 for drugs, 1 for targets).
-        entity_ids: Ordered list of entity IDs for the current DTI dataset.
+        axis: The axis index (0 for drugs, 1 for targets in case of COO DTI dataset, otherwise just 0).
+        entity_ids: Ordered list of entity IDs for the current dataset.
         entity_info: Merged metadata dictionary from _load_entity_h5torch (contains sources).
         h5_id_to_source_idx: Mapping from source HDF5 entity ID to its index.
         num_entities: Total number of unique entities for this axis in the DTI dataset.
@@ -311,7 +311,7 @@ def _register_aligned_entity_data(
         logger.warning(f"No external entity info provided for axis {axis}. Skipping external data registration.")
         return registered_repr_names
 
-    # Process features (Embeddings, Fingerprints)
+    # 1. Process features (Embeddings, Fingerprints)
     for feat_name, (source_handle, path, shape, dtype) in entity_info['feature_sources'].items():
         logger.info(f"Registering external feature for axis {axis}: {feat_name} (Shape: {shape}, Dtype: {dtype})")
         feature_dataset = source_handle[path]
@@ -321,20 +321,20 @@ def _register_aligned_entity_data(
 
         # Determine save/load dtypes
         if is_fingerprint:
-            dtype_save = 'uint8'
+            dtype_save = 'uint8' # bool also takes up 8 bits (1 byte) so we cannot go smaller than this
             dtype_load = 'float32'
-            output_dtype = np.dtype(np.uint8) # Ensure it's a dtype object
+            output_dtype = np.dtype(np.uint8)
         else:
-            dtype_save = None # Use original dtype
-            dtype_load = None
-            output_dtype = np.dtype(dtype) # Ensure it's a dtype object
+            dtype_save = None # Use original dtype (typically float32)
+            dtype_load = 'float32'
+            output_dtype = np.dtype(dtype)
 
         # --- Process First Batch ---
         first_batch_size = min(batch_size, num_entities)
         first_batch_aligned = np.empty((first_batch_size,) + feat_dim, dtype=output_dtype)
         logger.debug(f"Preparing first batch for axis {axis} feature '{feat_name}' (size: {first_batch_size})...")
 
-        missing_ids_in_source = []
+        missing_count = 0
         for dti_idx in range(first_batch_size):
             h5_id = entity_ids[dti_idx]
             source_idx = h5_id_to_source_idx.get(h5_id)
@@ -342,29 +342,17 @@ def _register_aligned_entity_data(
             if source_idx is not None:
                 source_data = feature_dataset[source_idx]
                 if is_fingerprint:
-                    # Ensure binary and convert type for saving
-                    if not np.array_equal(source_data, source_data.astype(bool)):
-                        logger.warning(f"Fingerprint '{feat_name}' (source idx {source_idx}) is not strictly binary 0/1. Converting based on >0.")
                     first_batch_aligned[dti_idx] = (source_data > 0).astype(output_dtype)
                 else:
                     first_batch_aligned[dti_idx] = source_data
             else:
-                missing_ids_in_source.append(h5_id)
-                # Handle missing: Fill with zeros or NaN depending on type
-                fill_value = 0 if output_dtype.kind in 'iufc' else np.nan # 0 for numeric/complex, nan for float
-                # Check if output_dtype is boolean
-                if output_dtype.kind == 'b':
-                    fill_value = False
-                try:
-                    first_batch_aligned[dti_idx] = fill_value
-                except ValueError as e:
-                    logger.error(f"Error assigning fill value {fill_value} (type: {type(fill_value)}) to array with dtype {output_dtype} for feature '{feat_name}'. Error: {e}")
-                    # Fallback or re-raise, depending on desired behavior
-                    first_batch_aligned[dti_idx] = 0 # Example fallback
+                missing_count += 1
+                # Handle missing: Fill with zeros
+                fill_value = 0 if output_dtype.kind in 'iufc' else False
+                first_batch_aligned[dti_idx] = fill_value
 
-        if missing_ids_in_source:
-             logger.warning(f"Axis {axis} Feature '{feat_name}': {len(missing_ids_in_source)} DTI entity IDs not found in source HDF5 file(s). "
-                            f"Filled with default value '{fill_value}'. First few missing: {missing_ids_in_source[:5]}")
+        if missing_count > 0:
+             logger.warning(f"Axis {axis} Feature '{feat_name}': {missing_count} DTI entity IDs not found in source HDF5 file(s). Filled with default value.")
 
         # Register with the first batch
         h5_out.register(
@@ -402,27 +390,22 @@ def _register_aligned_entity_data(
                             current_batch_aligned[batch_idx] = source_data
                     else:
                         # Handle missing (already logged warning for first batch)
-                        # Determine fill value based on dtype kind
-                        fill_value = 0 if output_dtype.kind in 'iufc' else np.nan
-                        if output_dtype.kind == 'b':
-                            fill_value = False
-                        try:
-                             current_batch_aligned[batch_idx] = fill_value
-                        except ValueError:
-                             # Fallback if conversion fails (e.g., trying to put NaN in int array)
-                             current_batch_aligned[batch_idx] = 0
+                        fill_value = 0 if output_dtype.kind in 'iufc' else False
+                        current_batch_aligned[batch_idx] = fill_value
 
                 h5_out.append(current_batch_aligned, f"{axis}/{feat_name}")
 
-    # Process representations (SMILES, AA, DNA, etc.)
+    # 2. Process representations (SMILES, AA, DNA, etc.)
     for repr_name, (source_handle, path, dtype) in entity_info['repr_sources'].items():
         logger.info(f"Registering external representation for axis {axis}: {repr_name}")
         repr_dataset = source_handle[path]
 
         # For string data, collect all at once to avoid h5py dtype issues with length pre-specification
         logger.debug(f"Collecting all string data for axis {axis} representation '{repr_name}'...")
-        all_repr_data = []
-        missing_ids_in_source = []
+        missing_count = 0
+        
+        # Pre-allocate numpy array of strings
+        all_repr_array = np.empty(num_entities, dtype=object)
         
         for dti_idx in range(num_entities):
             h5_id = entity_ids[dti_idx]
@@ -432,34 +415,26 @@ def _register_aligned_entity_data(
                 repr_val = repr_dataset[source_idx]
                 # Ensure value is a string (decoding bytes if necessary)
                 if isinstance(repr_val, bytes):
-                    all_repr_data.append(repr_val.decode('utf-8', errors='replace'))
+                    all_repr_array[dti_idx] = repr_val.decode('utf-8', errors='replace')
                 else:
-                    all_repr_data.append(str(repr_val))
+                    all_repr_array[dti_idx] = str(repr_val)
             else:
-                missing_ids_in_source.append(h5_id)
-                all_repr_data.append("")  # Fill missing strings with empty string
+                missing_count += 1
+                all_repr_array[dti_idx] = ""  # Fill missing strings with empty string
 
-        if missing_ids_in_source:
-             logger.warning(f"Axis {axis} Representation '{repr_name}': {len(missing_ids_in_source)} DTI entity IDs not found in source HDF5 file(s). "
-                            f"Filled with empty string. First few missing: {missing_ids_in_source[:5]}")
-
-        # Convert to numpy array of strings (like in the old implementation)
-        all_repr_array = np.array(all_repr_data)
-        logger.debug(f"All repr array: {[s[:5] for s in all_repr_array[:5]]}...")
-        logger.debug(f"{all_repr_array.dtype}")
-        logger.debug(f"{all_repr_array.shape}")
-
-        # Register all data at once (no length parameter to avoid h5py issues)
+        if missing_count > 0:
+             logger.warning(f"Axis {axis} Representation '{repr_name}': {missing_count} DTI entity IDs not found in source HDF5 file(s). Filled with empty string.")
+        
         h5_out.register(
             all_repr_array,
             axis=axis,
             name=repr_name,
-            mode='N-D',  # Use N-D mode for string arrays
-            dtype_save='bytes',  # Save as bytes (like old implementation)
-            dtype_load='str',    # Load as strings
+            mode='N-D',
+            dtype_save='bytes',
+            dtype_load='str',
         )
         logger.info(f"Registered aligned[{axis}] '{repr_name}' (Length: {len(all_repr_array)})")
-        registered_repr_names.add(repr_name) # Track registered representation
+        registered_repr_names.add(repr_name)
 
     return registered_repr_names
 
@@ -525,23 +500,22 @@ def create_pretrain_h5torch(
             # Add entity type attribute
             if entity_type:
                 h5_out.attrs['entity_type'] = entity_type
-            h5_out.attrs['n_items'] = num_items # Add count attribute
+            h5_out.attrs['n_items'] = num_items
 
             # 1. Register Central Index
-            index_data = np.arange(num_items, dtype=np.uint32) # Use uint32 for space efficiency
+            index_data = np.arange(num_items, dtype=np.uint32) # 16 bit isn't enough for 65535+ items...
             h5_out.register(
                 data=index_data,
                 axis='central',
                 name='index',
                 mode='N-D',
-                length=num_items # Specify total length
+                length=num_items
             )
             logger.info(f"Registered central 'index' (Shape: {index_data.shape})")
 
             # 2. Register Aligned Axis 0 Data (Features AND Representations)
             logger.info("Registering aligned axis 0 data (Features and Representations)...")
             
-            # Register features and representations (both aligned to axis 0)
             if not merged_info['feature_sources'] and not merged_info['repr_sources']:
                 logger.warning("No features or representations found in input files.")
             
@@ -557,7 +531,7 @@ def create_pretrain_h5torch(
 
             # 3. Add Split Data (Optional) - Use boolean for efficiency
             if add_split and num_items > 0:
-                logger.info(f"Generating train/validation split ({train_frac=}, {split_seed=})...")
+                logger.info(f"Generating train/validation split (train_frac={train_frac}, split_seed={split_seed})...")
                 np.random.seed(split_seed)
                 indices = np.random.permutation(num_items)
                 num_train = int(num_items * train_frac)
@@ -579,15 +553,12 @@ def create_pretrain_h5torch(
             elif add_split:
                 logger.warning("add_split is True, but num_items is 0. Skipping split generation.")
 
-            # Note: No longer registering representations as unstructured data
-            # They are now only aligned to axis 0
             logger.info(f"Successfully finished writing pretrain h5torch file: {output_h5_path}")
 
     except Exception as e:
-         # Log the error before re-raising
          logger.error(f"Failed to create pretrain h5torch file: {e}")
-         logger.exception("Traceback:") # Uncomment for detailed traceback
-         raise # Re-throw the exception after cleanup attempt
+         logger.exception("Traceback:")
+         raise
 
     finally:
         # Ensure all input file handles are closed
@@ -598,7 +569,6 @@ def create_pretrain_h5torch(
                     handle.close()
                 except Exception as e:
                     logger.error(f"Error closing input file {handle.filename}: {e}")
-        logger.debug("Finished closing input files.")
 
 # --- Inspection Functions ---
 

@@ -29,8 +29,7 @@ def _calculate_subset_mask(
             - 'split_col' (str): Name of the split column in unstructured (e.g., 'split', 'split_rand').
             - 'split_value' (str): Value to keep in the split column (e.g., 'train', 'val').
             - 'provenance_cols' (List[str]): List of boolean provenance columns in unstructured
-              (e.g., ['in_DAVIS', 'in_KIBA']). Items where *any* of these are True are kept,
-              if the filter is active.
+              (e.g., ['in_DAVIS', 'in_KIBA']). Items where *any* of these are True are kept.
         is_coo: Whether the central object is COO. If True, mask length matches NNZ,
                 otherwise matches the length of the first unstructured dataset found.
 
@@ -40,14 +39,13 @@ def _calculate_subset_mask(
     """
     if not filters:
         return None
-
     logger.debug(f"Calculating subset mask for {h5_path} with filters: {filters}")
 
     try:
         with h5py.File(h5_path, 'r') as f:
-            if "unstructured" not in f and filters:
-                 logger.warning(f"Cannot apply filters: 'unstructured' group not found in {h5_path.name}, but filters were provided: {filters}")
-                 return None # Cannot apply filters if group doesn't exist
+            if "unstructured" not in f:
+                logger.warning(f"Cannot apply filters: 'unstructured' group not found in {h5_path.name}")
+                return None
 
             # Determine the size of the mask
             mask_size = None
@@ -60,10 +58,9 @@ def _calculate_subset_mask(
                      mask_size = len(f["central/values"])
                      logger.debug(f"COO mask size based on central/values: {mask_size}")
                 else:
-                     # If central indices/values are missing, try inferring from unstructured
                      logger.warning("COO central data missing. Attempting to infer mask size from unstructured.")
             
-            # If not COO or COO inference failed, infer from unstructured/aligned data
+            # If not COO or COO inference failed, infer from unstructured data
             if mask_size is None:
                 # Infer size from the first available filter column or any unstructured dataset
                 unstructured_keys = list(f.get("unstructured", {}).keys())
@@ -107,89 +104,54 @@ def _calculate_subset_mask(
             # Apply split filter
             split_col = filters.get('split_col')
             split_value = filters.get('split_value')
-            if split_col and split_value is not None:  # Allow False as a valid split_value
+            if split_col and split_value is not None:
                 split_key = f"unstructured/{split_col}"
-                if split_key not in f:
-                    logger.warning(f"Split filter column '{split_col}' not found. Skipping split filter.")
-                else:
+                if split_key in f:
                     logger.debug(f"Applying split filter: '{split_col}' == '{split_value}'")
-                    # Handle both boolean and string split values
-                    try:
-                        values = f[split_key][:]
-                        
-                        # Handle boolean split columns
-                        if isinstance(split_value, bool):
-                            if values.dtype == bool:
-                                split_mask = (values == split_value)
-                            else:
-                                # Convert to boolean if needed
-                                values = values.astype(bool)
-                                split_mask = (values == split_value)
-                        else:
-                            # Handle string split columns (legacy)
-                            if values.dtype.kind in ('O', 'S'): # Object or String/Bytes
-                                values = np.array([s.decode('utf-8', errors='replace') if isinstance(s, bytes) else str(s) for s in values])
-                            split_mask = (values == split_value)
-                        
-                        if len(values) != mask_size:
-                             raise ValueError(f"Length mismatch for '{split_col}' ({len(values)}) vs expected mask size ({mask_size})")
-
-                        final_mask &= split_mask
-                        applied_filter = True
-                        logger.debug(f"Split filter kept {np.sum(final_mask)} / {mask_size} items.")
-                    except Exception as e:
-                        logger.error(f"Error applying split filter on '{split_col}': {e}", exc_info=True)
-
+                    values = f[split_key][:]
+                    
+                    # Handle boolean split columns
+                    if isinstance(split_value, bool):
+                        if values.dtype != bool:
+                            values = values.astype(bool)
+                        split_mask = (values == split_value)
+                    else:
+                        # Handle string split columns (object/string)
+                        if values.dtype.kind in ('O', 'S'):
+                            values = np.array([s.decode('utf-8', errors='replace') if isinstance(s, bytes) else str(s) for s in values])
+                        split_mask = (values == split_value)
+                    
+                    final_mask &= split_mask
+                    applied_filter = True
+                else:
+                    logger.warning(f"Split filter column '{split_col}' not found")
 
             # Apply provenance filter (keep if ANY specified provenance is True)
             provenance_cols = filters.get('provenance_cols')
             if provenance_cols and isinstance(provenance_cols, list) and len(provenance_cols) > 0:
                 provenance_combined_mask = np.zeros(mask_size, dtype=bool)
                 found_prov_col = False
-                logger.debug(f"Applying provenance filter (OR logic): keep if in {provenance_cols}")
+                
                 for prov_col in provenance_cols:
                     prov_key = f"unstructured/{prov_col}"
-                    if prov_key not in f:
-                        logger.warning(f"Provenance filter column '{prov_col}' not found. Skipping.")
-                        continue
-                    
-                    try:
-                        values = f[prov_key][:].astype(bool) # Ensure boolean
-                        if len(values) != mask_size:
-                             raise ValueError(f"Length mismatch for '{prov_col}' ({len(values)}) vs expected mask size ({mask_size})")
+                    if prov_key in f:
+                        values = f[prov_key][:].astype(bool)
                         provenance_combined_mask |= values
                         found_prov_col = True
-                    except Exception as e:
-                        logger.error(f"Error applying provenance filter on '{prov_col}': {e}", exc_info=True)
 
                 if found_prov_col:
                     final_mask &= provenance_combined_mask
                     applied_filter = True
-                    logger.debug(f"Provenance filter kept {np.sum(provenance_combined_mask)} items (before combining with other filters).")
-                    logger.debug(f"Combined filters kept {np.sum(final_mask)} / {mask_size} items.")
-                else:
-                    logger.warning("No valid provenance columns found for filtering.")
 
-            if not applied_filter and filters: # Check filters were provided
-                 # If filters were given but none were applicable, warn or maybe return None?
-                 # Let's return None if no filter could be applied but filters were requested.
-                 logger.warning("Filters specified, but none were applicable or found in the file. Returning None mask.")
-                 return None
-
-            # Only return the mask if filters were applied or no filters were specified initially
-            if applied_filter or not filters:
-                logger.info(f"Calculated subset mask for {h5_path.name}. Kept {np.sum(final_mask)} / {mask_size} items.")
+            if applied_filter:
+                logger.info(f"Subset mask for {h5_path.name}: kept {np.sum(final_mask)} / {mask_size} items")
                 return final_mask
             else:
-                 # This case should be caught above, but as a safeguard
-                 return None
+                logger.warning("Filters specified but none were applicable")
+                return None
 
-
-    except FileNotFoundError:
-        logger.error(f"File not found: {h5_path}")
-        raise
     except Exception as e:
-        logger.error(f"Failed to calculate subset mask for {h5_path}: {e}", exc_info=True)
+        logger.error(f"Failed to calculate subset mask for {h5_path}: {e}")
         raise
 
 
@@ -216,7 +178,6 @@ class PretrainDataset(h5torch.Dataset):
             'EMB-ESM': np.ndarray (float32),
              ...
         }
-        # Note: Split column is used for filtering but not returned by default.
     }
     """
     def __init__(
@@ -233,88 +194,77 @@ class PretrainDataset(h5torch.Dataset):
                             For boolean columns, split_value should be True/False
             load_in_memory: Whether to load the entire dataset into memory.
         """
-        self.h5_path = Path(h5_path) # Ensure it's a Path object
+        self.h5_path = Path(h5_path)
         self.subset_filters = subset_filters
 
         # Calculate subset mask before initializing parent
-        # For PretrainDataset, the central object is N-D (index), not COO.
-        # The mask should align with the length of axis 0 / unstructured data.
         subset_mask = _calculate_subset_mask(self.h5_path, subset_filters, is_coo=False)
 
-        # Initialize the h5torch Dataset. Sampling along axis 0 is driven by the central index.
-        # h5torch handles loading based on dtype_load attributes.
+        # Initialize the h5torch Dataset
         super().__init__(
             file=str(self.h5_path),
             subset=subset_mask,
-            sampling=0, # Sample along axis 0 (features aligned to central index)
+            sampling=0, # Sample along axis 0
             in_memory=load_in_memory
         )
 
-        # Store paths for easier access in __getitem__
+        # Store paths for efficient access in __getitem__
         self._identify_paths()
         logger.info(f"Initialized PretrainDataset from {self.h5_path.name}. Size: {len(self)} items.")
-        logger.info(f"  Feature paths (Axis 0): {list(self.feature_paths.keys())}")
-        logger.info(f"  Representation paths (Axis 0): {list(self.repr_paths.keys())}")
+        logger.info(f"  Features (Axis 0): {list(self.feature_names)}")
+        logger.info(f"  Representations (Axis 0): {list(self.repr_names)}")
 
     def _identify_paths(self):
         """Identify and store the HDF5 paths for features and representations."""
-        self.feature_paths = {} # Aligned axis 0 - numerical features
-        self.repr_paths = {}    # Aligned axis 0 - string representations
+        self.feature_names = []  # Numerical features
+        self.repr_names = []     # String representations
 
         # Use self.f which is the h5py.File object opened by h5torch.Dataset
-        if '0' in self.f:
-            for name in self.f['0'].keys():
-                dataset = self.f[f'0/{name}']
-                # Distinguish between features (numerical) and representations (strings)
-                if dataset.dtype.kind in ('O', 'S', 'U'):
-                    # String/object/vlen data -> representation
-                    self.repr_paths[name] = f'0/{name}'
-                else:
-                    # Numerical data -> feature
-                    self.feature_paths[name] = f'0/{name}'
+        for name in self.f['0'].keys():
+            dataset = self.f[f'0/{name}']
+            # Distinguish between features (numerical) and representations (strings)
+            if dataset.dtype.kind in ('O', 'S', 'U'):
+                # String/object data -> representation
+                self.repr_names.append(name)
+            else:
+                # Numerical data -> feature
+                self.feature_names.append(name)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """
         Fetches an item and structures it into 'id', 'representations', and 'features'.
         """
         # Get the flat dictionary from h5torch.Dataset's __getitem__
-        # Keys will be like 'central', '0/FP-Morgan', '0/SMILES'
+        # Keys will be like 'central', '0/FP-Morgan', '0/SMILES', etc.
         # Values are already converted based on dtype_load by h5torch
         item_flat = super().__getitem__(idx)
 
         # Structure the output
         structured_item = {
-            'id': -1, # Default value
+            'id': int(item_flat.get('central', idx)),  # Use central or fallback to idx
             'representations': {},
             'features': {}
         }
 
-        # Extract ID (assuming it's stored in central)
-        id_val = item_flat.get('central')
-        if id_val is not None:
-            structured_item['id'] = int(id_val) # Ensure it's an int
-        else:
-            # Fallback: Use the dataset index if central isn't present
-            logger.warning(f"Could not find 'central' in item keys: {list(item_flat.keys())}. Using dataset index {idx} as ID.")
-            structured_item['id'] = idx
+        # Populate representations (h5torch handles string conversion via dtype_load='str')
+        for name in self.repr_names:
+            key = f'0/{name}'
+            if key in item_flat:
+                value = item_flat[key]
+                # h5torch should return strings directly, but handle edge cases
+                # if isinstance(value, bytes):
+                #     structured_item['representations'][name] = value.decode('utf-8', errors='replace')
+                # elif isinstance(value, np.ndarray) and value.ndim == 0:
+                #     # Scalar array case
+                #     val = value.item()
+                #     structured_item['representations'][name] = val.decode('utf-8', errors='replace') if isinstance(val, bytes) else str(val)
+                # else:
+                structured_item['representations'][name] = value
 
-        # Populate representations from axis 0 string paths
-        for name, path in self.repr_paths.items():
-            if path in item_flat:
-                 # h5torch should handle string conversion via dtype_load='str'
-                 value = item_flat[path]
-                 if isinstance(value, bytes):
-                     structured_item['representations'][name] = value.decode('utf-8', errors='replace')
-                 elif isinstance(value, np.ndarray) and value.dtype.kind in ('O', 'S', 'U'):
-                      # Handle case where h5torch returns array of bytes/strings
-                      structured_item['representations'][name] = value.item().decode('utf-8', errors='replace') if isinstance(value.item(), bytes) else str(value.item())
-                 else:
-                     structured_item['representations'][name] = value # Assume h5torch handled type conversion
-
-        # Populate features from axis 0 numerical paths
-        for name, path in self.feature_paths.items():
-            if path in item_flat:
-                # Features are expected to be numerical arrays (or handled by h5torch load type)
-                structured_item['features'][name] = item_flat[path]
+        # Populate features (should be numpy arrays already)
+        for name in self.feature_names:
+            key = f'0/{name}'
+            if key in item_flat:
+                structured_item['features'][name] = item_flat[key]
 
         return structured_item
