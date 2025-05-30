@@ -570,7 +570,7 @@ def create_pretrain_h5torch(
                 except Exception as e:
                     logger.error(f"Error closing input file {handle.filename}: {e}")
 
-# --- Inspection Functions ---
+# --- Inspection Function ---
 
 def inspect_h5torch_file(h5_path: Path) -> None:
     """
