@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Literal, List, Dict, Tuple, Optional, Union, Any
 from tqdm import tqdm
 import math
+import pandas as pd
 
 # Setup logger
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -439,6 +440,477 @@ def _register_aligned_entity_data(
     return registered_repr_names
 
 # --- Factory Functions ---
+
+def _load_dti_df(
+    dti_df: pd.DataFrame,
+    drug_id_col: str = "Drug_ID",
+    target_id_col: str = "Target_ID",
+    interaction_col: str = "Y",
+    drug_feature_cols: List[str] = ["Drug_InChIKey", "Drug_SMILES"],
+    target_feature_cols: List[str] = [
+        "Target_UniProt_ID", "Target_Gene_name",
+        "Target_RefSeq_ID", "Target_AA", "Target_DNA"],
+    additional_y_cols: Optional[List[str]] = ["Y_pKd", "Y_pKi", "Y_KIBA"],
+    provenance_cols: Optional[List[str]] = ["in_DAVIS", "in_BindingDB_Kd", "in_BindingDB_Ki", "in_Metz", "in_KIBA"],
+) -> Dict[str, Any]:
+    """
+    Processes a DTI DataFrame: extracts unique entities and their DataFrame features,
+    creates ID-to-index mappings, prepares COO interaction data, and extracts 
+    interaction-level unstructured data.
+
+    Args:
+        dti_df: DataFrame with DTI interactions.
+        drug_id_col, target_id_col, interaction_col: Key column names in dti_df.
+        drug_feature_cols, target_feature_cols: DataFrame columns to save as aligned features/representations.
+        additional_y_cols, provenance_cols: DataFrame columns for unstructured data.
+
+    Returns:
+        Dict containing:
+        - 'dti_drug_ids', 'dti_target_ids': Ordered lists of unique IDs found in the DataFrame.
+        - 'drug_id_to_idx', 'target_id_to_idx': Mappings from ID string to DTI-specific integer index.
+        - 'drug_features_df': Dict {feature_name: np.array} for drug features from df, ordered by dti_drug_ids.
+        - 'target_features_df': Dict {feature_name: np.array} for target features from df, ordered by dti_target_ids.
+        - 'coo_data': Tuple (indices, values, shape) for the central COO object.
+        - 'unstructured_data': Dict {col_name: np.array} for interaction-level data (splits, Y_cont, provenance).
+    """
+    logger.info(f"Processing DTI DataFrame with {len(dti_df)} interactions...")
+    df = dti_df.copy()
+
+    # --- Input Validation ---
+    required_cols = [drug_id_col, target_id_col, interaction_col]
+    missing_req = [col for col in required_cols if col not in df.columns]
+    if missing_req:
+        raise ValueError(f"Missing required columns in DataFrame: {missing_req}")
+
+    all_feature_cols = drug_feature_cols + target_feature_cols
+    all_unstructured_cols = (additional_y_cols or []) + (provenance_cols or [])
+
+    optional_cols = all_feature_cols + all_unstructured_cols
+    missing_optional = [col for col in optional_cols if col not in df.columns]
+    if missing_optional:
+        logger.warning(f"Optional columns not found in DataFrame and will be skipped: {missing_optional}")
+        # Filter out missing columns from lists to avoid errors later
+        drug_feature_cols = [c for c in drug_feature_cols if c in df.columns]
+        target_feature_cols = [c for c in target_feature_cols if c in df.columns]
+        additional_y_cols = [c for c in (additional_y_cols or []) if c in df.columns]
+        provenance_cols = [c for c in (provenance_cols or []) if c in df.columns]
+
+    # --- Identify Unique Entities and Create Mappings ---
+    unique_drugs = pd.unique(df[drug_id_col])
+    unique_targets = pd.unique(df[target_id_col])
+    num_drugs = len(unique_drugs)
+    num_targets = len(unique_targets)
+    logger.info(f"Found {num_drugs} unique drugs and {num_targets} unique targets in the DataFrame.")
+
+    # Create mappings and ordered lists
+    drug_id_to_idx = {drug: i for i, drug in enumerate(unique_drugs)}
+    target_id_to_idx = {target: i for i, target in enumerate(unique_targets)}
+    dti_drug_ids = list(unique_drugs) # Already unique, preserve order for mapping
+    dti_target_ids = list(unique_targets)
+
+    # --- Extract Unique DataFrame Features per Entity ---
+    drug_features_df = {}
+    logger.info("Extracting unique drug features from DataFrame...")
+    if drug_feature_cols:
+        # Use drop_duplicates and sort to get features aligned with unique_drugs order
+        drug_df_unique = df[[drug_id_col] + drug_feature_cols].drop_duplicates(subset=[drug_id_col])
+        # Reindex based on the unique_drugs order to ensure alignment
+        drug_df_unique = drug_df_unique.set_index(drug_id_col).reindex(unique_drugs).reset_index()
+        for col in drug_feature_cols:
+            feature_values = drug_df_unique[col].values
+            # Fill NaN with empty string specifically for columns saved as strings
+            feature_values_filled = pd.Series(feature_values).fillna("").values
+            drug_features_df[col] = feature_values_filled
+            logger.debug(f"  Extracted drug feature '{col}' (Length: {len(drug_features_df[col])})")
+            if pd.isna(feature_values).any(): # Check original values for logging
+                 logger.warning(f"  NaNs found in original drug feature '{col}', replaced with empty strings.")
+
+    target_features_df = {}
+    logger.info("Extracting unique target features from DataFrame...")
+    if target_feature_cols:
+        target_df_unique = df[[target_id_col] + target_feature_cols].drop_duplicates(subset=[target_id_col])
+        target_df_unique = target_df_unique.set_index(target_id_col).reindex(unique_targets).reset_index()
+        for col in target_feature_cols:
+            feature_values = target_df_unique[col].values
+            # Fill NaN with empty string specifically for columns saved as strings
+            feature_values_filled = pd.Series(feature_values).fillna("").values
+            target_features_df[col] = feature_values_filled
+            logger.debug(f"  Extracted target feature '{col}' (Length: {len(target_features_df[col])})")
+            if pd.isna(feature_values).any(): # Check original values for logging
+                logger.warning(f"  NaNs found in original target feature '{col}', replaced with empty strings.")
+
+    # --- Map DataFrame Rows and Sort for COO Consistency ---
+    logger.info("Mapping interaction indices and sorting DataFrame...")
+    df["Drug_dti_idx"] = df[drug_id_col].map(drug_id_to_idx)
+    df["Target_dti_idx"] = df[target_id_col].map(target_id_to_idx)
+
+    # Check for mapping errors (shouldn't happen if unique_drugs/targets derived from df)
+    if df["Drug_dti_idx"].isnull().any() or df["Target_dti_idx"].isnull().any():
+        logger.error("Internal error: Failed to map all drug/target IDs to indices.")
+        # Handle appropriately, maybe raise error or filter NaNs
+        df.dropna(subset=["Drug_dti_idx", "Target_dti_idx"], inplace=True)
+        logger.warning("Removed rows with unmappable drug/target indices.")
+
+    df["Drug_dti_idx"] = df["Drug_dti_idx"].astype(int)
+    df["Target_dti_idx"] = df["Target_dti_idx"].astype(int)
+
+    # Sort by drug index, then target index (CRITICAL for COO <-> unstructured alignment)
+    df.sort_values(["Drug_dti_idx", "Target_dti_idx"], inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    num_interactions = len(df)
+    logger.info(f"DataFrame sorted, {num_interactions} interactions remain.")
+
+    # --- Prepare COO Data ---
+    logger.info("Preparing COO interaction data...")
+    coo_indices = df[["Drug_dti_idx", "Target_dti_idx"]].values.T # Shape (2, n_interactions)
+    coo_values = df[interaction_col].values # Let h5torch handle dtype later
+    coo_shape = (num_drugs, num_targets)
+    logger.info(f"COO Matrix: Shape={coo_shape}, NNZ={len(coo_values)}")
+
+    coo_data = (coo_indices, coo_values, coo_shape)
+
+    # --- Extract Unstructured Data ---
+    logger.info("Extracting unstructured interaction-level data...")
+    unstructured_data = {}
+    
+    # Check for existing split columns
+    split_cols_existing = [col for col in df.columns if col.startswith('split_')]
+    all_unstructured_cols_to_extract = split_cols_existing + (additional_y_cols or []) + (provenance_cols or [])
+
+    for col in all_unstructured_cols_to_extract:
+        if col in df.columns:
+            col_data = df[col].values
+            if len(col_data) != num_interactions:
+                 # This check should ideally not fail if logic is correct
+                 logger.error(f"Length mismatch for unstructured column '{col}'. Expected {num_interactions}, got {len(col_data)}. Skipping.")
+                 continue
+            unstructured_data[col] = col_data
+            logger.debug(f"  Extracted unstructured data '{col}' (Length: {len(col_data)})")
+        else:
+            # Should only happen if column wasn't present initially
+            logger.warning(f"Unstructured column '{col}' not found in final DataFrame. Skipping.")
+
+    # --- Assemble Result ---
+    result = {
+        'dti_drug_ids': dti_drug_ids,
+        'dti_target_ids': dti_target_ids,
+        'drug_id_to_idx': drug_id_to_idx,
+        'target_id_to_idx': target_id_to_idx,
+        'drug_features_df': drug_features_df,
+        'target_features_df': target_features_df,
+        'coo_data': coo_data,
+        'unstructured_data': unstructured_data
+    }
+
+    logger.info("Finished processing DTI DataFrame.")
+    return result
+
+def create_dti_h5torch(
+    drug_input_h5_paths: List[Path],
+    target_input_h5_paths: List[Path],
+    output_h5_path: Path,
+    df: pd.DataFrame,
+    drug_id_col: str = "Drug_ID",
+    target_id_col: str = "Target_ID",
+    interaction_col: str = "Y",
+    drug_feature_cols: List[str] = ["Drug_InChIKey", "Drug_SMILES"],
+    target_feature_cols: List[str] = [
+        "Target_UniProt_ID", "Target_Gene_name",
+        "Target_RefSeq_ID", "Target_AA", "Target_DNA"],
+    additional_y_cols: Optional[List[str]] = ["Y_pKd", "Y_pKi", "Y_KIBA"],
+    provenance_cols: Optional[List[str]] = ["in_DAVIS", "in_BindingDB_Kd", "in_BindingDB_Ki", "in_Metz", "in_KIBA"],
+    batch_size: int = DEFAULT_BATCH_SIZE
+) -> None:
+    """
+    Creates a consolidated h5torch file for Drug-Target Interaction (DTI) data.
+
+    Reads DTI interactions and DataFrame-specific features from `df`. Reads
+    additional entity features (embeddings, fingerprints) and representations
+    (SMILES, AA, DNA) from external HDF5 files specified in `drug_input_h5_paths`
+    and `target_input_h5_paths`. It merges and structures the data for efficient
+    COO sampling in h5torch.
+
+    Structure:
+    - Central Object: Sparse COO matrix of interactions (Y).
+    - Aligned Axis 0 (Drugs): Features/Representations for unique drugs in DTI.
+    - Aligned Axis 1 (Targets): Features/Representations for unique targets in DTI.
+    - Unstructured Data: Interaction-level data (splits, provenance, continuous Y).
+
+    Args:
+        drug_input_h5_paths: List of paths to HDF5 files with drug features/representations.
+        target_input_h5_paths: List of paths to HDF5 files with target features/representations.
+        output_h5_path: Path for the output dti.h5torch file.
+        df: DataFrame with DTI interactions.
+        drug_id_col, target_id_col, interaction_col: Key column names in df.
+        drug_feature_cols, target_feature_cols: DataFrame columns to save as aligned features/representations.
+        additional_y_cols, provenance_cols: DataFrame columns for unstructured data.
+        batch_size: Batch size for reading/writing HDF5 features.
+    """
+    logger.info(f"Starting creation of DTI h5torch file: {output_h5_path}")
+    drug_info = None
+    target_info = None
+    
+    try:
+        # Step 1: Process the DTI DataFrame to prepare data structures
+        logger.info("Processing DTI DataFrame...")
+        dti_data = _load_dti_df(
+            dti_df=df,
+            drug_id_col=drug_id_col,
+            target_id_col=target_id_col,
+            interaction_col=interaction_col,
+            drug_feature_cols=drug_feature_cols,
+            target_feature_cols=target_feature_cols,
+            additional_y_cols=additional_y_cols,
+            provenance_cols=provenance_cols,
+        )
+
+        # Extract components from dti_data
+        dti_drug_ids = dti_data['dti_drug_ids']
+        dti_target_ids = dti_data['dti_target_ids']
+        drug_id_to_idx = dti_data['drug_id_to_idx']
+        target_id_to_idx = dti_data['target_id_to_idx']
+        drug_features_df = dti_data['drug_features_df']
+        target_features_df = dti_data['target_features_df']
+        coo_indices, coo_values, coo_shape = dti_data['coo_data']
+        unstructured_data = dti_data['unstructured_data']
+
+        num_drugs = len(dti_drug_ids)
+        num_targets = len(dti_target_ids)
+        num_interactions = len(coo_values)
+
+        logger.info(f"DTI dataset composition: {num_drugs} drugs × {num_targets} targets = {num_interactions} / {num_drugs * num_targets} interactions (sparsity: {num_interactions / (num_drugs * num_targets):.2%})")
+
+        # Step 2: Load drug features from external HDF5 files
+        if drug_input_h5_paths:
+            logger.info(f"Loading drug features from {len(drug_input_h5_paths)} HDF5 file(s)...")
+            drug_info = _load_entity_h5torch(drug_input_h5_paths)
+
+            # Validate that the drug IDs match what we have in the DTI DataFrame
+            # Note: We proceed even with mismatch, but _register_aligned_entity_data will log warnings
+            if set(dti_drug_ids) != set(drug_info['ids']):
+                logger.warning(
+                    f"Drug ID set mismatch between DTI DataFrame and source HDF5 files. "
+                    f"DTI contains {len(dti_drug_ids)} unique drugs, sources contain {len(drug_info['ids'])}."
+                )
+            logger.info(f"Loaded drug features: {list(drug_info.get('feature_sources', {}).keys())}")
+            logger.info(f"Loaded drug representations: {list(drug_info.get('repr_sources', {}).keys())}")
+
+        # Step 3: Load target features from external HDF5 files
+        if target_input_h5_paths:
+            logger.info(f"Loading target features from {len(target_input_h5_paths)} HDF5 file(s)...")
+            target_info = _load_entity_h5torch(target_input_h5_paths)
+
+            # Validate that the target IDs match what we have in the DTI DataFrame
+            if set(dti_target_ids) != set(target_info['ids']):
+                logger.warning(
+                    f"Target ID set mismatch between DTI DataFrame and source HDF5 files. "
+                    f"DTI contains {len(dti_target_ids)} unique targets, sources contain {len(target_info['ids'])}."
+                )
+            logger.info(f"Loaded target features: {list(target_info.get('feature_sources', {}).keys())}")
+            logger.info(f"Loaded target representations: {list(target_info.get('repr_sources', {}).keys())}")
+
+        # Precompute source ID to source index mappings for faster lookups
+        drug_h5_id_to_source_idx = {h5_id: idx for idx, h5_id in enumerate(drug_info['ids'])} if drug_info else {}
+        target_h5_id_to_source_idx = {h5_id: idx for idx, h5_id in enumerate(target_info['ids'])} if target_info else {}
+
+        # Step 4: Create the output h5torch file
+        logger.info(f"Creating output h5torch file: {output_h5_path}")
+        with h5torch.File(str(output_h5_path), 'w') as h5_out:
+            # Add file attributes
+            h5_out.attrs['n_drugs'] = num_drugs
+            h5_out.attrs['n_targets'] = num_targets
+            h5_out.attrs['n_interactions'] = num_interactions
+            h5_out.attrs['sparsity'] = num_interactions / (num_drugs * num_targets) if (num_drugs * num_targets) > 0 else 0
+            h5_out.attrs['created_at'] = pd.Timestamp.now().isoformat()
+
+            # Step 5: Register the central COO interaction matrix
+            logger.info(f"Registering central COO interaction matrix (Shape: {coo_shape}, NNZ: {num_interactions})...")
+            central_object = (coo_indices, coo_values, coo_shape)
+            h5_out.register(
+                central_object,
+                "central",
+                mode="coo",
+                dtype_save="bool",  # Save interaction values as boolean
+                dtype_load="float32" # Load interaction values as float32
+            )
+
+            # Step 6: Register drug features (Axis 0)
+            logger.info("Registering drug features (Axis 0)...")
+
+            # 6.1: Register drug IDs (essential reference)
+            h5_out.register(
+                np.array(dti_drug_ids),
+                axis=0,
+                name=drug_id_col, # Use the original column name
+                mode='N-D',
+                dtype_save="bytes", 
+                dtype_load="str"
+            )
+
+            # 6.2: Register external drug features and representations using the helper
+            drug_registered_reprs = _register_aligned_entity_data(
+                h5_out=h5_out,
+                axis=0,
+                entity_ids=dti_drug_ids,
+                entity_info=drug_info,
+                h5_id_to_source_idx=drug_h5_id_to_source_idx,
+                num_entities=num_drugs,
+                batch_size=batch_size
+            )
+
+            # 6.3: Register DataFrame-derived drug features/representations
+            # Only register if the name wasn't already registered from external source
+            for feat_name, feat_values in drug_features_df.items():
+                # Determine if this column name corresponds to a representation name from HDF5
+                # e.g., df column 'Drug_SMILES' might correspond to hdf5 repr 'SMILES'
+                potential_repr_name = feat_name.split('_', 1)[-1] # Simple heuristic: "Drug_SMILES" -> "SMILES"
+                is_potentially_redundant = potential_repr_name in drug_registered_reprs
+
+                if is_potentially_redundant:
+                    logger.info(f"Skipping registration of DataFrame column '{feat_name}' for axis 0 as representation '{potential_repr_name}' was already registered from HDF5 source.")
+                    continue
+
+                logger.info(f"Registering DataFrame-derived data for axis 0: {feat_name}")
+                # Assume these are string-like identifiers or metadata
+                # Don't use length parameter for strings to avoid h5py size issues
+                h5_out.register(
+                    feat_values,
+                    axis=0,
+                    name=feat_name,
+                    mode='N-D',
+                    dtype_save="bytes",
+                    dtype_load="str"
+                )
+
+            # Step 7: Register target features (Axis 1)
+            logger.info("Registering target features (Axis 1)...")
+
+            # 7.1: Register target IDs
+            h5_out.register(
+                np.array(dti_target_ids),
+                axis=1,
+                name=target_id_col, # Use the original column name
+                mode='N-D',
+                dtype_save="bytes",
+                dtype_load='str'
+            )
+
+            # 7.2: Register external target features and representations using the helper
+            target_registered_reprs = _register_aligned_entity_data(
+                h5_out=h5_out,
+                axis=1,
+                entity_ids=dti_target_ids,
+                entity_info=target_info,
+                h5_id_to_source_idx=target_h5_id_to_source_idx,
+                num_entities=num_targets,
+                batch_size=batch_size
+            )
+
+            # 7.3: Register DataFrame-derived target features/representations
+            # Only register if the name wasn't already registered from external source
+            for feat_name, feat_values in target_features_df.items():
+                 # Determine if this column name corresponds to a representation name from HDF5
+                 potential_repr_name = feat_name.split('_', 1)[-1] # Simple heuristic: "Target_AA" -> "AA"
+                 is_potentially_redundant = potential_repr_name in target_registered_reprs
+
+                 if is_potentially_redundant:
+                     logger.info(f"Skipping registration of DataFrame column '{feat_name}' for axis 1 as representation '{potential_repr_name}' was already registered from HDF5 source.")
+                     continue
+
+                 logger.info(f"Registering DataFrame-derived data for axis 1: {feat_name}")
+                 # Assume these are string-like identifiers or metadata
+                 h5_out.register(
+                     feat_values,
+                     axis=1,
+                     name=feat_name,
+                     mode='N-D',
+                     dtype_save="bytes",
+                     dtype_load='str'
+                 )
+
+            # Step 8: Register unstructured data (interaction-level data)
+            logger.info("Registering unstructured interaction data...")
+            if not unstructured_data:
+                 logger.warning("No unstructured data found in DTI DataFrame processing result.")
+            for col_name, values in unstructured_data.items():
+                # Ensure length matches number of interactions in COO object
+                if len(values) != num_interactions:
+                    logger.error(f"Length mismatch for unstructured column '{col_name}'. Expected {num_interactions}, got {len(values)}. Skipping.")
+                    continue
+
+                # Determine appropriate data type handling based on column type/name
+                dtype_save = None
+                dtype_load = None
+                mode = 'N-D'
+
+                if col_name.startswith('Y_'):
+                    # Continuous Y values (e.g., Y_pKd, Y_pKi, Y_KIBA)
+                    logger.info(f"Registering continuous Y column: {col_name}")
+                    dtype_save = 'float32'
+                    dtype_load = 'float32'
+                elif col_name.startswith('in_'):
+                    # Provenance boolean columns
+                    logger.info(f"Registering provenance column: {col_name}")
+                    dtype_save = 'bool'
+                    dtype_load = 'bool'
+                elif col_name.startswith('split_'):
+                    # Split string columns
+                    logger.info(f"Registering split column: {col_name}")
+                    dtype_save = "bytes"
+                    dtype_load = 'str'
+                else:
+                    # Default for any other unstructured data - try to infer
+                    logger.info(f"Registering other unstructured column: {col_name}")
+                    if pd.api.types.is_numeric_dtype(values):
+                        # Check if integer or float
+                        if pd.api.types.is_integer_dtype(values):
+                            dtype_save = 'int64'
+                            dtype_load = 'int64'
+                        else: # Float
+                            dtype_save = 'float32'
+                            dtype_load = 'float32'
+                    elif pd.api.types.is_string_dtype(values) or pd.api.types.is_object_dtype(values):
+                        dtype_save = "bytes"
+                        dtype_load = 'str'
+                    elif pd.api.types.is_bool_dtype(values):
+                         dtype_save = 'bool'
+                         dtype_load = 'bool'
+
+                # Register the dataset
+                h5_out.register(
+                    values,
+                    axis='unstructured',
+                    name=col_name,
+                    mode=mode,
+                    dtype_save=dtype_save,
+                    dtype_load=dtype_load,
+                    length=num_interactions if dtype_save != "bytes" else None
+                )
+
+        logger.info(f"Successfully created DTI h5torch file: {output_h5_path}")
+
+    except Exception as e:
+        # Log the error before re-raising
+        logger.error(f"Failed to create DTI h5torch file: {e}", exc_info=True)
+        raise
+
+    finally:
+        # Ensure all input file handles are closed
+        if drug_info and drug_info.get('file_handles'):
+            logger.debug(f"Closing {len(drug_info['file_handles'])} drug input HDF5 file handle(s)...")
+            for handle in drug_info['file_handles']:
+                try: 
+                    handle.close()
+                except Exception as e: 
+                    logger.error(f"Error closing drug input file {handle.filename}: {e}")
+        if target_info and target_info.get('file_handles'):
+             logger.debug(f"Closing {len(target_info['file_handles'])} target input HDF5 file handle(s)...")
+             for handle in target_info['file_handles']:
+                 try: 
+                     handle.close()
+                 except Exception as e: 
+                     logger.error(f"Error closing target input file {handle.filename}: {e}")
+        logger.debug("Finished closing input files (if any were opened).")
 
 def create_pretrain_h5torch(
     input_h5_paths: List[Path],

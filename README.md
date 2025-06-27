@@ -68,6 +68,7 @@ MB-VAE-DTI/
 │   │   ├── train.json
 │   │   └── valid.json
 │   ├── embedding.sh            # Shell script for embedding generation (assumes data & external folders are correctly set up)
+│   ├── h5torch_creation.py     # Python script for h5torch file creation
 │   ├── pretrain.sh             # Shell script for pretraining (in progress)
 │   ├── train.sh                # Shell script for training (in progress)
 │   ├── validate.sh             # Shell script for validation (in progress)
