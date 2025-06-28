@@ -5,7 +5,7 @@ A machine-learning framework for the dyadic drug-target interaction (DTI) predic
 **Key features of this project:**
 - Multiple drug representations: Morgan fingerprints, graph, image and text (SMILES)
 - Multiple protein representations: ESPF fingerprints, amino acid and DNA sequences
-- Variational encoder and discrete-diffusion decoder
+- Variational encoders and discrete-diffusion decoder for de novo drug design
 - Inspection of latent spaces & exploration of generative capabilities
 - Comprehensive evaluation on standard DTI datasets through [tdc](https://tdcommons.ai/) (DAVIS, KIBA, BindingDB and Metz) and a new aggregated dataset of ±300k interactions & pre-computed embeddings.
 
@@ -30,7 +30,7 @@ MB-VAE-DTI/
 │   ├── processing/             # Embedding & h5torch file creation
 │   │   ├── embedding.py        # Embedding generation
 │   │   ├── h5factory.py        # h5torch file creation
-│   │   └── split.py            # Dataset splitting utilities
+│   │   └── split.py            # DTI dataset splitting
 |   |
 │   ├── training/               # Model training (in progress)
 │   │   ├── ...
@@ -40,12 +40,13 @@ MB-VAE-DTI/
 │       ├── ...
 │       └── ...
 |
-├── external/                   # External dependencies (each folder has it's own venv and script.py)
+├── external/                   # External dependencies (each has it's own requirements.txt and script.py)
 │   ├── rdMorganFP/             # Drug fingerprinting utilities
 │   ├── biomed-multi-view/      # Biomed-multi-view embedding models
 │   ├── ESPF/                   # Protein fingerprinting utilities
 │   ├── ESM/                    # Protein language model (ESM-C 6B)
 │   ├── nucleotide-transformer/ # DNA sequence transformer (500M_multi_species_v2)
+|   ├── temp/                   # Directory for storing HDF5 files
 │   └── run_embeddings.sh       # Shell script to run embedding generation
 |
 ├── data/                       # Data directory (gitignored)
@@ -62,13 +63,13 @@ MB-VAE-DTI/
 │   ├── training.ipynb          # Model inspection and training processes (in progress)
 │   └── validating.ipynb        # Result analysis and validation (in progress)
 |
-├── scripts/                    # Scripts for running experiments on HPC (in progress)
+├── scripts/                    # Shell scripts for running experiments (in progress)
 │   ├── configs/                # Configuration files
 │   │   ├── pretrain.json
 │   │   ├── train.json
 │   │   └── valid.json
-│   ├── embedding.sh            # Shell script for embedding generation (assumes data & external folders are correctly set up)
-│   ├── h5torch_creation.py     # Python script for h5torch file creation
+│   ├── embedding.sh            # Embedding generation (assumes data/ & external/ are set up)
+│   ├── h5torch_creation.py     # h5torch file creation (assumes external/temp/ is populated)
 │   ├── pretrain.sh             # Shell script for pretraining (in progress)
 │   ├── train.sh                # Shell script for training (in progress)
 │   ├── validate.sh             # Shell script for validation (in progress)
@@ -114,7 +115,7 @@ MB-VAE-DTI/
 **Download the complete data folder** including all datasets and pre-trained models:
    - Link: TBA (coming soon)
    - This provides everything needed to immediately start experimenting with the models
-   - Alternatively, you can consult the notebooks to generate the data & run the experiments yourself
+   - Alternatively, you can consult the notebooks to generate the data & run all experiments from scratch
 
 **Note:** This project is currently in development, with the processing section implemented and training/validation components in progress.
 
@@ -122,8 +123,13 @@ MB-VAE-DTI/
 
 - ✅ Data loading and preprocessing
 - ✅ Embedding generation and processing
-- 🔄 h5torch file creation and dataset splitting (in progress)
-- 🔄 Model training (later)
+- ✅ h5torch file creation and dataset splitting
+- 🔄 Setting up model architectures (in progress)
+- 🔄 Model pre-training w/ contrastive, complexity, (reconstruction) loss (later)
+  - Contrastive loss: SimCLR with InfoNCE (1 positive pair and many negatives weighted w/ Tanimoto similarity)
+  - Complexity loss: KL divergence between the encoder's output and a standard normal distribution
+  - Reconstruction loss: MSE between the diffusion decoder's output and the input (only for the drug branch)
+- 🔄 Training baseline model (MLP on FPs & dot-product) and full model (incl. DTI accuracy loss) (later)
 - 🔄 Model validation and analysis (later)
 
 The training section has not yet been refactored to the new codebase. We are actively working on implementing and testing the quickstart. There currently are still some `archive` folders spread throughout the repository, which contain old code to be refactored.
