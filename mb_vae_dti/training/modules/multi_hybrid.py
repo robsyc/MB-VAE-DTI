@@ -49,6 +49,7 @@ class MultiHybridDTIModel(pl.LightningModule):
         embedding_dim: int,
         drug_features: Dict[str, int],
         target_features: Dict[str, int],
+
         encoder_type: Literal["resnet", "transformer"],
         encoder_kwargs: Optional[Dict],
 
@@ -57,11 +58,9 @@ class MultiHybridDTIModel(pl.LightningModule):
 
         fusion_kwargs: Optional[Dict],
         
-        # Head parameters
         dti_head_kwargs: Optional[Dict],
         infonce_head_kwargs: Optional[Dict],
         
-        # Training parameters
         learning_rate: float,
         weight_decay: float,
         scheduler: Optional[Literal["const", "step", "one_cycle", "cosine"]],
@@ -76,10 +75,6 @@ class MultiHybridDTIModel(pl.LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        
-        # Validate phase-specific parameters
-        if phase == "finetune" and finetune_score is None:
-            raise ValueError("finetune_score must be specified for finetune phase")
         
         # Create encoders based on type
         encoder_type = ResidualEncoder if encoder_type == "resnet" else TransformerEncoder
@@ -136,7 +131,7 @@ class MultiHybridDTIModel(pl.LightningModule):
             
             # DTI prediction head
             self.dti_head = DTIHead(
-                input_dim=embedding_dim,
+                input_dim=fusion_kwargs["output_dim"],
                 **dti_head_kwargs
             )
         
@@ -147,12 +142,12 @@ class MultiHybridDTIModel(pl.LightningModule):
             
             if phase == "pretrain_drug":
                 self.drug_infonce_head = InfoNCEHead(
-                    input_dim=aggregator_kwargs["output_dim"],
+                    input_dim=embedding_dim,
                     **contrastive_kwargs
                 )
             elif phase == "pretrain_target":
                 self.target_infonce_head = InfoNCEHead(
-                    input_dim=aggregator_kwargs["output_dim"],
+                    input_dim=embedding_dim,
                     **contrastive_kwargs
                 )
         
@@ -194,6 +189,9 @@ class MultiHybridDTIModel(pl.LightningModule):
             )
         else:  # finetune
             # Single-score metrics for fine-tuning
+            if finetune_score is None:
+                raise ValueError("finetune_score must be specified for finetune phase")
+
             self.train_metrics = RealDTIMetrics(prefix="train/")
             self.val_metrics = RealDTIMetrics(prefix="val/")
             self.test_metrics = RealDTIMetrics(prefix="test/")
@@ -431,7 +429,7 @@ class MultiHybridDTIModel(pl.LightningModule):
         # Encode drug features
         if drug_features is not None and len(drug_features) > 0:
             drug_result = self._encode_drug_features(drug_features)
-            if self.aggregator_type == "attentive" and self.drug_aggregator is not None:
+            if self.aggregator_type == AttentiveAggregator and self.drug_aggregator is not None:
                 drug_embedding, drug_attention = drug_result
             else:
                 drug_embedding = drug_result
@@ -442,7 +440,7 @@ class MultiHybridDTIModel(pl.LightningModule):
         # Encode target features
         if target_features is not None and len(target_features) > 0:
             target_result = self._encode_target_features(target_features)
-            if self.aggregator_type == "attentive" and self.target_aggregator is not None:
+            if self.aggregator_type == AttentiveAggregator and self.target_aggregator is not None:
                 target_embedding, target_attention = target_result
             else:
                 target_embedding = target_result

@@ -7,13 +7,17 @@ model:
   encoder_kwargs:
     dropout: 0.1
     activation: "gelu"
+
   aggregator_kwargs:
     dropout: 0.1
     activation: "gelu"
-  inter_branch_aggregator_kwargs:
+
+  fusion_kwargs:
     dropout: 0.1
-    activation: "gelu"
+    output_dim: 256
+
   dti_head_kwargs:
+    hidden_dim: 128
     dropout: 0.1
   
   # Contrastive learning parameters
@@ -27,6 +31,6 @@ training:
   scheduler: "one_cycle"  # "const", "step", "one_cycle", or "cosine"
     
 data:
-  h5_path: "dti.h5torch"
+  h5_path: "data/input/dti.h5torch"
   drug_features: ["EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"]
   target_features: ["EMB-ESM", "EMB-NT"] 

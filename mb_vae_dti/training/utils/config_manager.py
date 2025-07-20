@@ -20,9 +20,16 @@ import random
 import yaml
 from omegaconf import OmegaConf, DictConfig
 
+TRAINING_DIR = Path(__file__).parent.parent
+
+print(TRAINING_DIR)
+# list all files in the training directory
+for file in TRAINING_DIR.iterdir():
+    print(file)
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CONFIG_ROOT = (Path(__file__).parent.parent / "configs").resolve()
 
 class ConfigManager:
     """
@@ -34,16 +41,29 @@ class ConfigManager:
     3. configs/{model_type}/{task_config}.yaml (task-specific settings)
     """
     
-    def __init__(self, config_root: Union[str, Path] = "configs"):
+    def __init__(self, config_root: Union[str, Path] = DEFAULT_CONFIG_ROOT):
         """
         Initialize the ConfigManager.
         
         Args:
-            config_root: Root directory containing all configuration files
+            config_root: Root directory containing all configuration files.
+                         Can be absolute, or relative to the current working directory.
         """
-        self.config_root = Path(config_root)
-        if not self.config_root.exists():
-            raise FileNotFoundError(f"Config root directory not found: {self.config_root}")
+        config_root = Path(config_root)
+        # If config_root is not absolute, try relative to current working directory
+        if not config_root.is_absolute():
+            # Try relative to current working directory
+            candidate = (Path.cwd() / config_root).resolve()
+            if candidate.exists():
+                config_root = candidate
+            else:
+                # Try relative to this file's parent (project-root/mb_vae_dti/training/configs)
+                candidate = (Path(__file__).parent.parent / config_root).resolve()
+                if candidate.exists():
+                    config_root = candidate
+        if not config_root.exists():
+            raise FileNotFoundError(f"Config root directory not found: {config_root}")
+        self.config_root = config_root
     
     def load_config(
         self, 

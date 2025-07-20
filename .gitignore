@@ -13,6 +13,8 @@ archive/
 external/ESM/cache/
 external/temp/
 
+outputs/
+
 
 # ignore model checkpoints
 *.pth

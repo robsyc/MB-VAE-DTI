@@ -13,7 +13,7 @@ data:
   
 logging:
   experiment_name: "baseline_KIBA_rand"
-  save_dir: "outputs/baseline/KIBA/rand"
+  save_dir: "data/results/baseline/KIBA/rand"
 
 gridsearch:
   model.embedding_dim: [512, 768, 1024]

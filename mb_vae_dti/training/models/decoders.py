@@ -43,8 +43,12 @@ if True:
 
     from mb_vae_dti.training.diffusion.augmentation import ExtraFeatures, ExtraMolecularFeatures
 
-    with open('smiles-data.txt', 'r') as file:
-        smiles_strings = file.readlines()
+    # with open('smiles-data.txt', 'r') as file:
+    #     smiles_strings = file.readlines()
+    smiles_strings = [
+        'COc1ccc2cccc(N3CCN(CCCCn4ncc(=O)n(C)c4=O)CC3)c2c1',
+        'COc1ccc(CNCC(N)P(=O)(O)O)cc1'
+    ]
 
     # convert SMILES strings to rdkit molecules
     molecules = [Chem.MolFromSmiles(smiles) for smiles in smiles_strings]
@@ -155,32 +159,32 @@ if True:
     valency_distribution = compute_valency_distribution_from_molecules(molecules, max_n_nodes)
     
     # Debug output
-    print("=== DATASET STATISTICS ===")
-    print(f"Number of molecules: {len(molecules)}")
-    print(f"Max number of nodes: {max_n_nodes}")
-    print(f"Max molecular weight: {max_weight}")
+    # print("=== DATASET STATISTICS ===")
+    # print(f"Number of molecules: {len(molecules)}")
+    # print(f"Max number of nodes: {max_n_nodes}")
+    # print(f"Max molecular weight: {max_weight}")
     
-    print("\n=== NODE TYPE MARGINALS ===")
-    for i, atom in enumerate(atom_decoder):
-        print(f"  {atom}: {x_marginals[i]:.4f}")
+    # print("\n=== NODE TYPE MARGINALS ===")
+    # for i, atom in enumerate(atom_decoder):
+    #     print(f"  {atom}: {x_marginals[i]:.4f}")
     
-    print("\n=== EDGE TYPE MARGINALS ===")
-    bond_names = ['No bond', 'Single', 'Double', 'Triple', 'Aromatic']
-    for i, bond_name in enumerate(bond_names):
-        print(f"  {bond_name}: {e_marginals[i]:.4f}")
+    # print("\n=== EDGE TYPE MARGINALS ===")
+    # bond_names = ['No bond', 'Single', 'Double', 'Triple', 'Aromatic']
+    # for i, bond_name in enumerate(bond_names):
+    #     print(f"  {bond_name}: {e_marginals[i]:.4f}")
     
-    print("\n=== VALENCY DISTRIBUTION ===")
-    print(f"Shape: {valency_distribution.shape}")
-    print(f"Non-zero valencies:")
-    for i, prob in enumerate(valency_distribution):
-        if prob > 0:
-            print(f"  Valency {i}: {prob:.4f}")
+    # print("\n=== VALENCY DISTRIBUTION ===")
+    # print(f"Shape: {valency_distribution.shape}")
+    # print(f"Non-zero valencies:")
+    # for i, prob in enumerate(valency_distribution):
+    #     if prob > 0:
+    #         print(f"  Valency {i}: {prob:.4f}")
     
-    print("\n=== THEORETICAL VALENCIES ===")
-    for i, atom in enumerate(atom_decoder):
-        print(f"  {atom}: {valencies[i]}")
+    # print("\n=== THEORETICAL VALENCIES ===")
+    # for i, atom in enumerate(atom_decoder):
+    #     print(f"  {atom}: {valencies[i]}")
     
-    print("="*50)
+    # print("="*50)
 ############################################################################
 ############################################################################
 

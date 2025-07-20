@@ -1,44 +1,27 @@
 model:
-  name: "multi_hybrid_DAVIS_cold"
-  
-  # encoder & aggregator are inherited from pretrain_<drug/target>
-  encoder_type: "resnet"
+  embedding_dim: 768
+  encoder_type: "transformer"
   encoder_kwargs:
-    hidden_dim: 256
-    output_dim: 512
+    hidden_dim: 512
     n_layers: 2
   
   aggregator_type: "attentive"
-  aggregator_kwargs:
+  
+  fusion_kwargs:
     hidden_dim: 512
-    output_dim: 768
     n_layers: 2
   
-  # Inter-branch aggregator for DTI prediction in inherited from pretrain_<rand/cold>
-  inter_branch_aggregator_kwargs:
-    hidden_dim: 256
-    output_dim: 512
-    n_layers: 2
-  
-  # DTI prediction head parameters
-  dti_head_kwargs:
-    hidden_dim: 128
-  
-  # Phase-specific parameters
-  phase: "finetune"  # Fine-tuning on DAVIS
-  checkpoint_path: null  # Path to pretrained weights (set manually)
+  # checkpoint_path: null  # Path to pretrained weights (set manually)
 
 training:
-  learning_rate: 0.001
+  learning_rate: 0.0001
 
 data:
-  batch_size: 16
-  split_type: "split_cold"
-  provenance_cols: ["in_DAVIS"]
+  batch_size: 32
   
 logging:
   experiment_name: "multi_hybrid_DAVIS_cold"
-  save_dir: "outputs/multi_hybrid/DAVIS/cold"
+  save_dir: "data/results/multi_hybrid/DAVIS/cold"
 
 gridsearch: # no changes to architecture (9 combinations only)
   training.learning_rate: [0.0001, 0.0005, 0.001]

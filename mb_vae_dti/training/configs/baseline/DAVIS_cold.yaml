@@ -13,7 +13,7 @@ data:
   
 logging:
   experiment_name: "baseline_DAVIS_cold"
-  save_dir: "outputs/baseline/DAVIS/cold"
+  save_dir: "data/results/baseline/DAVIS/cold"
 
 gridsearch: # 500s (10 mins) for a run, max 6 gb mem used on Davis -> 4 jobs, 24 hours each
   model.embedding_dim: [512, 768, 1024]

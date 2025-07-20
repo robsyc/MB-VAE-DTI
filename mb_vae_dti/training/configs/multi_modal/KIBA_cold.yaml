@@ -15,7 +15,7 @@ data:
   
 logging:
   experiment_name: "multimodal_KIBA_cold"
-  save_dir: "outputs/multi_modal/KIBA/cold"
+  save_dir: "data/results/multi_modal/KIBA/cold"
 
 gridsearch:
   model.embedding_dim: [512, 768, 1024]

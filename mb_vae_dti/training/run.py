@@ -34,7 +34,6 @@ from pathlib import Path
 from typing import Dict, Optional, Literal
 import argparse
 import gc
-import time
 
 import torch
 import pytorch_lightning as pl
@@ -43,7 +42,7 @@ from omegaconf import OmegaConf, DictConfig
 import wandb
 
 # Add parent directory to path for imports
-sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from mb_vae_dti.training.datasets import DTIDataModule, PretrainDataModule
 
@@ -180,8 +179,7 @@ def get_datamodule_class(phase: TrainingPhase):
 def setup_model_baseline(
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
-    dataset: Dataset = None,
-    phase: TrainingPhase = None
+    dataset: Dataset = None
 ) -> BaselineDTIModel:
     """Setup baseline model with single drug/target features."""
 
@@ -205,8 +203,7 @@ def setup_model_baseline(
 def setup_model_multi_modal(
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
-    dataset: Dataset = None,
-    phase: TrainingPhase = None
+    dataset: Dataset = None
 ) -> MultiModalDTIModel:
     """Setup multi-modal model with multiple drug/target features."""
     # Build feature dimension dictionaries
@@ -284,7 +281,8 @@ def setup_model_multi_hybrid(
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
     dataset: Dataset = None,
-    phase: TrainingPhase = None
+    phase: TrainingPhase = None,
+    pretrain_target: PretrainTarget = None
 ) -> MultiHybridDTIModel:
     """Setup multi-hybrid model with multi-modal inputs and multi-output predictions."""
     # Build feature dimension dictionaries
@@ -305,11 +303,19 @@ def setup_model_multi_hybrid(
             else:
                 raise ValueError(f"Target feature '{feat_name}' not found in dataset")
     
+    # Construct the correct phase value for pretrain
+    if phase == "pretrain":
+        if pretrain_target is None:
+            raise ValueError("pretrain_target must be specified for pretrain phase")
+        model_phase = f"pretrain_{pretrain_target}"
+    else:
+        model_phase = phase
+    
     # Set finetune score based on phase & dataset
     if phase == "finetune":
         finetune_score = "Y_pKd" if dataset == "DAVIS" else "Y_KIBA"
     else:
-        finetune_score = None
+        finetune_score = None            
     
     model = MultiHybridDTIModel(
         drug_features=drug_features,
@@ -319,15 +325,14 @@ def setup_model_multi_hybrid(
         encoder_kwargs=OmegaConf.to_container(config.model.encoder_kwargs),
         aggregator_type=config.model.aggregator_type,
         aggregator_kwargs=OmegaConf.to_container(config.model.aggregator_kwargs),
-        inter_branch_aggregator_kwargs=OmegaConf.to_container(config.model.inter_branch_aggregator_kwargs),
+        fusion_kwargs=OmegaConf.to_container(config.model.fusion_kwargs),
         dti_head_kwargs=OmegaConf.to_container(config.model.dti_head_kwargs),
         infonce_head_kwargs=OmegaConf.to_container(config.model.infonce_head_kwargs),
         learning_rate=config.training.learning_rate,
         weight_decay=config.training.weight_decay,
         scheduler=config.training.scheduler,
-        phase=phase,
+        phase=model_phase,
         finetune_score=finetune_score,
-        checkpoint_path=config.model.get('checkpoint_path'),
         contrastive_weight=config.model.get('contrastive_weight', 1.0),
         temperature=config.model.get('temperature', 0.07),
     )
@@ -348,7 +353,8 @@ def setup_model_full(
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
     dataset: Dataset = None,
-    phase: TrainingPhase = None
+    phase: TrainingPhase = None,
+    pretrain_target: PretrainTarget = None
 ):
     """Setup full model with VAE drug branch and diffusion decoder."""
     # Build feature dimension dictionaries
@@ -368,6 +374,14 @@ def setup_model_full(
                 target_features[feat_name] = feature_dims['target'][feat_name]
             else:
                 raise ValueError(f"Target feature '{feat_name}' not found in dataset")
+    
+    # Construct the correct phase value for pretrain
+    if phase == "pretrain":
+        if pretrain_target is None:
+            raise ValueError("pretrain_target must be specified for pretrain phase")
+        model_phase = f"pretrain_{pretrain_target}"
+    else:
+        model_phase = phase
     
     # Set finetune score based on phase & dataset
     if phase == "finetune":
@@ -394,7 +408,7 @@ def setup_model_full(
         encoder_kwargs=OmegaConf.to_container(config.model.encoder_kwargs),
         aggregator_type=config.model.aggregator_type,
         aggregator_kwargs=OmegaConf.to_container(config.model.aggregator_kwargs),
-        inter_branch_aggregator_kwargs=OmegaConf.to_container(config.model.get('inter_branch_aggregator_kwargs', {})),
+        fusion_kwargs=OmegaConf.to_container(config.model.get('fusion_kwargs', {})),
         dti_head_kwargs=OmegaConf.to_container(config.model.get('dti_head_kwargs', {})),
         infonce_head_kwargs=OmegaConf.to_container(config.model.get('infonce_head_kwargs', {})),
         variational_head_kwargs=OmegaConf.to_container(config.model.get('variational_head_kwargs', {})),
@@ -402,7 +416,7 @@ def setup_model_full(
         learning_rate=config.training.learning_rate,
         weight_decay=config.training.weight_decay,
         scheduler=config.training.scheduler,
-        phase=config.model.phase,
+        phase=model_phase,
         finetune_score=finetune_score,
         checkpoint_path=config.model.get('checkpoint_path'),
         contrastive_weight=config.model.get('contrastive_weight', 1.0),
@@ -429,19 +443,20 @@ def setup_model(
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
     dataset: Dataset = None,
-    phase: TrainingPhase = None
+    phase: TrainingPhase = None,
+    pretrain_target: PretrainTarget = None
 ):
     """Setup model based on type."""
     if model_type == "baseline":
-        return setup_model_baseline(config, feature_dims, dataset, phase)
+        return setup_model_baseline(config, feature_dims, dataset)
     elif model_type == "multi_modal":
-        return setup_model_multi_modal(config, feature_dims, dataset, phase)
+        return setup_model_multi_modal(config, feature_dims, dataset)
     elif model_type == "multi_output":
         return setup_model_multi_output(config, feature_dims, dataset, phase)
     elif model_type == "multi_hybrid":
-        return setup_model_multi_hybrid(config, feature_dims, dataset, phase)
+        return setup_model_multi_hybrid(config, feature_dims, dataset, phase, pretrain_target)
     elif model_type == "full":
-        return setup_model_full(config, feature_dims, dataset, phase)
+        return setup_model_full(config, feature_dims, dataset, phase, pretrain_target)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
@@ -455,6 +470,7 @@ def train_single_config(
     dataset: Dataset,
     split: Split,
     phase: TrainingPhase,
+    pretrain_target: PretrainTarget = None,
     config_index: Optional[int] = None,
     batch_index: Optional[int] = None,
 ) -> None:
@@ -533,22 +549,22 @@ def train_single_config(
         # Transform feature dimensions for pretraining phases
         if phase == "pretrain":
             # For pretraining, we need to map flat feature dims to drug/target structure
-            if config.model.phase == "pretrain_drug":
+            if pretrain_target == "drug":
                 feature_dims = {'drug': raw_feature_dims, 'target': {}}
-            elif config.model.phase == "pretrain_target":
+            elif pretrain_target == "target":
                 feature_dims = {'drug': {}, 'target': raw_feature_dims}
             else:
-                raise ValueError(f"Unknown pretrain phase: {config.model.phase}")
+                raise ValueError(f"Unknown pretrain phase: {pretrain_target}")
         else:
             # For DTI training/finetuning, feature_dims is already structured
             feature_dims = raw_feature_dims
         
         logger.info(f"Setting up {model_type} model...")
-        model = setup_model(model_type, config, feature_dims, dataset, phase)
+        model = setup_model(model_type, config, feature_dims, dataset, phase, pretrain_target)
         
         # Setup logging & callbacks
         save_dir = Path(config.logging.save_dir) / config.logging.experiment_name
-        loggers = setup_logging(config, save_dir)
+        loggers = setup_logging(config, save_dir, phase)
         callbacks = setup_callbacks(config, save_dir, is_gridsearch=is_gridsearch)
         
         # Setup trainer
@@ -711,6 +727,7 @@ def main(args):
                 args.dataset,
                 args.split,
                 phase, 
+                args.pretrain_target,
                 config_index, 
                 args.batch_index
             )

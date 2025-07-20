@@ -38,7 +38,7 @@ def generate_experiment_name(
         return original_name
     
 
-def setup_logging(config: DictConfig, save_dir: Path) -> list:
+def setup_logging(config: DictConfig, save_dir: Path, phase: str) -> list:
     """
     Setup logging with WandB.
     """
@@ -50,11 +50,7 @@ def setup_logging(config: DictConfig, save_dir: Path) -> list:
     # WandB logger
     if config.logging.get('use_wandb', True):
         try:
-            # Add tags for better organization
-            tags = [
-                getattr(config.model, 'name', 'unknown_model'),
-                getattr(config.data, 'split_type', 'unknown_split')
-            ]
+            tags = [phase]
             
             # Add gridsearch tag if this is a gridsearch run
             if '_b' in config.logging.experiment_name and 'c' in config.logging.experiment_name:

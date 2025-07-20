@@ -8,6 +8,10 @@ model:
     dropout: 0.1
     activation: "gelu"
   
+  fusion_kwargs:
+    dropout: 0.1
+    output_dim: 256
+
   dti_head_kwargs:
     hidden_dim: 128
     
@@ -15,6 +19,6 @@ training:
   scheduler: "one_cycle"  # "const", "step", "one_cycle", or "cosine"
     
 data:
-  h5_path: "dti.h5torch"
+  h5_path: "data/input/dti.h5torch"
   drug_feature: "FP-Morgan"
   target_feature: "FP-ESP"

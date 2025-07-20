@@ -15,7 +15,7 @@ data:
   
 logging:
   experiment_name: "multimodal_KIBA_rand"
-  save_dir: "outputs/multi_modal/KIBA/rand"
+  save_dir: "data/results/multi_modal/KIBA/rand"
 
 gridsearch:
   model.embedding_dim: [512, 768, 1024]

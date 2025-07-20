@@ -91,7 +91,7 @@ class MultiOutputDTIModel(pl.LightningModule):
         
         # DTI prediction head
         self.dti_head = DTIHead(
-            input_dim=embedding_dim,
+            input_dim=fusion_kwargs["output_dim"],
             **dti_head_kwargs
         )
         

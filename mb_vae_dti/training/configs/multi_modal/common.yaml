@@ -15,6 +15,6 @@ training:
   scheduler: "one_cycle"  # "const", "step", "one_cycle", or "cosine"
     
 data:
-  h5_path: "dti.h5torch"
+  h5_path: "data/input/dti.h5torch"
   drug_features: ["EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"]
   target_features: ["EMB-ESM", "EMB-NT"] 

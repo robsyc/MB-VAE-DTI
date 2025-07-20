@@ -13,7 +13,7 @@ data:
   
 logging:
   experiment_name: "baseline_DAVIS_rand"
-  save_dir: "outputs/baseline/DAVIS/rand"
+  save_dir: "data/results/baseline/DAVIS/rand"
 
 gridsearch:
   model.embedding_dim: [512, 768, 1024]

@@ -13,7 +13,7 @@ data:
   
 logging:
   experiment_name: "baseline_KIBA_cold"
-  save_dir: "outputs/baseline/KIBA/cold"
+  save_dir: "data/results/baseline/KIBA/cold"
 
 gridsearch: # 2000s (40 mins) for a run, max 6 gb mem used on Davis -> 8 jobs, 48 hours each
   model.embedding_dim: [512, 768, 1024]

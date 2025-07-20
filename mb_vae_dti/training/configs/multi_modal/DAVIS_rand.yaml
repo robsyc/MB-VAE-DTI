@@ -15,7 +15,7 @@ data:
   
 logging:
   experiment_name: "multimodal_DAVIS_rand"
-  save_dir: "outputs/multi_modal/DAVIS/rand"
+  save_dir: "data/results/multi_modal/DAVIS/rand"
 
 gridsearch:
   model.embedding_dim: [512, 768, 1024]

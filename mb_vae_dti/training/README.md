@@ -327,13 +327,4 @@ python3 ./scripts/run_model.py --batch_index 0 --total_batches 12
 Testing
 
 1. Baseline uni-modal & single-score model
-  CUDA_VISIBLE_DEVICES="" python run.py --model baseline --phase finetune --dataset DAVIS --split cold --override training.max_epochs=1 data.batch_size=16 hardware.gpus=0 hardware.deterministic=false data.pin_memory=false data.num_workers=0
-   
-2. Multi-modal & single-score model
-   CUDA_VISIBLE_DEVICES="" python run.py --model multi_modal --phase finetune --dataset DAVIS --split cold --override training.max_epochs=1 data.batch_size=16 hardware.gpus=0 hardware.deterministic=false data.pin_memory=false data.num_workers=0
-   
-3. Uni-modal & multi-score
-  CUDA_VISIBLE_DEVICES="" python run.py --model multi_output --phase train --split cold --override training.max_epochs=1 data.batch_size=16 hardware.gpus=0 hardware.deterministic=false data.pin_memory=false data.num_workers=0
-
-4. Hybrid model: multi-modal and multi-score
-  CUDA_VISIBLE_DEVICES="" python run.py --model multi_hybrid --phase pretrain --pretrain_target drug --override training.max_epochs=1 data.batch_size=16 hardware.gpus=0 hardware.deterministic=false data.pin_memory=false data.num_workers=0
+  CUDA_VISIBLE_DEVICES="" python scripts/training/run.py --model baseline --phase finetune --dataset DAVIS --split cold --override training.max_epochs=1 data.batch_size=16 hardware.gpus=0 hardware.deterministic=false data.pin_memory=false data.num_workers=0

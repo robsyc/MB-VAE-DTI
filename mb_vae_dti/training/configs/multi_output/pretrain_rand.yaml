@@ -21,7 +21,7 @@ data:
 
 logging:
   experiment_name: "multi_output_pretrain_rand"
-  save_dir: "outputs/multi_output/pretrain/rand"
+  save_dir: "data/results/multi_output/pretrain/rand"
 
 gridsearch:
   model.embedding_dim: [512, 768, 1024]
@@ -29,7 +29,7 @@ gridsearch:
   model.encoder_kwargs.hidden_dim: [256, 512]
   model.encoder_kwargs.n_layers: [2, 3]
   
-  model.fusion_kwargs.hidden_dim: [128, 256]
+  model.fusion_kwargs.hidden_dim: [256, 512]
   model.fusion_kwargs.n_layers: [1, 2]
   
   training.learning_rate: [0.0001, 0.001]
