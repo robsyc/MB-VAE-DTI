@@ -1,5 +1,0 @@
-Copy project directory without large files
-```
-rsync -av --exclude={'venv/','.venv/', '.git/', 'archive/'} ./MB-VAE-DTI/ ./MB-VAE-DTI-copy/
-```
-

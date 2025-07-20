@@ -18,15 +18,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from training.models.graph_transformer import GraphTransformer
+from mb_vae_dti.training.models.graph_transformer import GraphTransformer
 
-from training.models.temp import TrainLossDiscrete
-from training.diffusion import MarginalUniformTransition
+from mb_vae_dti.training.models.temp import TrainLossDiscrete
+from mb_vae_dti.training.diffusion import MarginalUniformTransition
 
-from training.diffusion.discrete_noise import PredefinedNoiseScheduleDiscrete
-from training.diffusion.augmentation import Augmentation
+from mb_vae_dti.training.diffusion.discrete_noise import PredefinedNoiseScheduleDiscrete
+from mb_vae_dti.training.diffusion.augmentation import Augmentation
 
-from training.diffusion.utils import PlaceHolder, sample_discrete_features
+from mb_vae_dti.training.diffusion.utils import PlaceHolder, sample_discrete_features
 
 ############################################################################
 ############################################################################
@@ -37,11 +37,11 @@ if True:
 
     from collections import Counter
 
-    from training.diffusion.utils import ATOM_TO_VALENCY, ATOM_TO_WEIGHT
+    from mb_vae_dti.training.diffusion.utils import ATOM_TO_VALENCY, ATOM_TO_WEIGHT
 
-    from training.diffusion.utils import DistributionNodes
+    from mb_vae_dti.training.diffusion.utils import DistributionNodes
 
-    from training.diffusion.augmentation import ExtraFeatures, ExtraMolecularFeatures
+    from mb_vae_dti.training.diffusion.augmentation import ExtraFeatures, ExtraMolecularFeatures
 
     with open('smiles-data.txt', 'r') as file:
         smiles_strings = file.readlines()

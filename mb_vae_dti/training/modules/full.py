@@ -20,15 +20,15 @@ from rdkit import Chem
 from rdkit.Chem.rdchem import BondType as BT
 from collections import Counter
 
-from training.models import (
+from mb_vae_dti.training.models import (
     ResidualEncoder, TransformerEncoder,
     ConcatAggregator, AttentiveAggregator, CrossAttentionFusion,
 )
 from .optimizer_utils import configure_optimizer_and_scheduler
-from training.models.heads import DTIHead, InfoNCEHead, KLVariationalHead
-from training.models.decoders import DiscreteDiffusionDecoder
-from training.metrics import DTIMetricsCollection, RealDTIMetrics
-from training.diffusion.utils import PlaceHolder, to_dense, sample_discrete_feature_noise
+from mb_vae_dti.training.models.heads import DTIHead, InfoNCEHead, KLVariationalHead
+from mb_vae_dti.training.models.decoders import DiscreteDiffusionDecoder
+from mb_vae_dti.training.metrics import DTIMetricsCollection, RealDTIMetrics
+from mb_vae_dti.training.diffusion.utils import PlaceHolder, to_dense, sample_discrete_feature_noise
 from .optimizer_utils import configure_optimizer_and_scheduler
 
 

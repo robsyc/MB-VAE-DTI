@@ -12,7 +12,7 @@ import logging
 import torch
 import numpy as np
 
-from training.datasets.h5datasets import DTIDataset, PretrainDataset
+from mb_vae_dti.training.datasets.h5datasets import DTIDataset, PretrainDataset
 
 
 logger = logging.getLogger(__name__)

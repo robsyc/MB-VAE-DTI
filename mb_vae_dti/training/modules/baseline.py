@@ -10,8 +10,8 @@ import pytorch_lightning as pl
 from typing import Dict, Optional, Any, Tuple, Literal
 import logging
 
-from training.models import ResidualEncoder, TransformerEncoder
-from training.metrics import RealDTIMetrics
+from mb_vae_dti.training.models import ResidualEncoder, TransformerEncoder
+from mb_vae_dti.training.metrics import RealDTIMetrics
 from .optimizer_utils import configure_optimizer_and_scheduler
 
 

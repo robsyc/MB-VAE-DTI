@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Tuple, Literal
 import logging
 
-from training.models import (
+from mb_vae_dti.training.models import (
     ResidualEncoder, TransformerEncoder,
     ConcatAggregator, AttentiveAggregator,
     CrossAttentionFusion
 )
-from training.models.heads import DTIHead, InfoNCEHead
-from training.metrics import DTIMetricsCollection, RealDTIMetrics
+from mb_vae_dti.training.models.heads import DTIHead, InfoNCEHead
+from mb_vae_dti.training.metrics import DTIMetricsCollection, RealDTIMetrics
 from .optimizer_utils import configure_optimizer_and_scheduler
 
 

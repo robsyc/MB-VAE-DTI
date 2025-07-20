@@ -43,7 +43,7 @@ def load_gridsearch_results(
     if not result_files:
         raise ValueError(f"No result files found in {results_dir} matching pattern '{pattern}'")
     
-    logger.info(f"Loading {len(result_files)} result files from {results_dir}")
+    logger.debug(f"Loading {len(result_files)} result files from {results_dir}")
     
     # Load all results
     all_results = []
@@ -162,8 +162,8 @@ def get_top_performers(
     # Sort by metric and get top N
     top_performers = df.sort_values(metric, ascending=ascending).head(n_top)
     
-    logger.info(f"Top {len(top_performers)} performers by {metric}:")
+    logger.debug(f"Top {len(top_performers)} performers by {metric}:")
     for i, (_, row) in enumerate(top_performers.iterrows(), 1):
-        logger.info(f"  {i}. {row['experiment_name']}: {metric}={row[metric]:.6f}")
+        logger.debug(f"  {i}. {row['experiment_name']}: {metric}={row[metric]:.6f}")
     
     return top_performers

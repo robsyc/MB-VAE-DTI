@@ -45,9 +45,9 @@ import wandb
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
-from training.datasets import DTIDataModule, PretrainDataModule
+from mb_vae_dti.training.datasets import DTIDataModule, PretrainDataModule
 
-from training.modules import (
+from mb_vae_dti.training.modules import (
     BaselineDTIModel,
     MultiModalDTIModel,
     MultiOutputDTIModel,
@@ -55,7 +55,7 @@ from training.modules import (
     FullDTIModel
 )
 
-from training.utils import (
+from mb_vae_dti.training.utils import (
     ConfigManager, save_config, get_config_summary,
     setup_callbacks,
     setup_logging, generate_experiment_name,

@@ -3,11 +3,11 @@ import time
 from pathlib import Path
 from typing import Dict, Any
 
-from training.utils.config_manager import get_config_summary
+from mb_vae_dti.training.utils.config_manager import get_config_summary
 from omegaconf import DictConfig
 import logging
 from pytorch_lightning import Trainer
-from training.utils.callbacks import BestValidationMetricsCallback, TimingCallback
+from mb_vae_dti.training.utils.callbacks import BestValidationMetricsCallback, TimingCallback
 
 logger = logging.getLogger(__name__)
 

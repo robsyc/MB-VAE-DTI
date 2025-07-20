@@ -11,11 +11,11 @@ import pytorch_lightning as pl
 from typing import Dict, List, Optional, Any, Tuple, Literal
 import logging
 
-from training.models import (
+from mb_vae_dti.training.models import (
     ResidualEncoder, TransformerEncoder,
     ConcatAggregator, AttentiveAggregator
 )
-from training.metrics import RealDTIMetrics
+from mb_vae_dti.training.metrics import RealDTIMetrics
 from .optimizer_utils import configure_optimizer_and_scheduler
 
 

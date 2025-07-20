@@ -6,7 +6,7 @@ model:
     n_layers: 2
 
 training:
-  learning_rate: 0.001
+  learning_rate: 0.0005
 
 data:
   batch_size: 32
@@ -19,7 +19,7 @@ gridsearch: # 500s (10 mins) for a run, max 6 gb mem used on Davis -> 4 jobs, 24
   model.embedding_dim: [512, 768, 1024]
   model.encoder_type: ["resnet", "transformer"]
   model.encoder_kwargs.hidden_dim: [128, 256, 512]
-  model.encoder_kwargs.n_layers: [1, 2, 3]
+  model.encoder_kwargs.n_layers: [2, 3, 4]
 
   training.learning_rate: [0.0005, 0.001, 0.002]
   data.batch_size: [16, 32, 64]

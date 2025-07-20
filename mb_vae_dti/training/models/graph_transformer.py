@@ -16,7 +16,7 @@ from torch.nn.modules.normalization import LayerNorm
 from torch.nn import functional as F
 from torch import Tensor
 
-from training.diffusion.utils import PlaceHolder
+from mb_vae_dti.training.diffusion.utils import PlaceHolder
 
 
 def masked_softmax(x, mask, **kwargs):
