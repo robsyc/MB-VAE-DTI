@@ -1,0 +1,532 @@
+"""
+Utility functions/classes used in the discrete diffusion decoder of the DTITree model.
+"""
+
+import torch
+import numpy as np
+from collections import Counter
+
+from torch_geometric.utils import to_dense_adj, to_dense_batch, remove_self_loops
+
+class PlaceHolder:
+    """
+    This is basically a wrapper around objects X (nodes), E (edges), and y (global features).
+    Used to
+    - Store limit distribution graph (G^T) with marginal distributions of nodes & edges
+    - 
+    """
+    def __init__(self, X, E, y):
+        self.X = X
+        self.E = E
+        self.y = y
+
+    def type_as(self, x: torch.Tensor):
+        """ Changes the device and dtype of X, E, y. """
+        self.X = self.X.type_as(x)
+        self.E = self.E.type_as(x)
+        self.y = self.y.type_as(x)
+        return self
+
+    def mask(self, node_mask, collapse=False):
+        x_mask = node_mask.unsqueeze(-1)          # bs, n, 1
+        e_mask1 = x_mask.unsqueeze(2)             # bs, n, 1, 1
+        e_mask2 = x_mask.unsqueeze(1)             # bs, 1, n, 1
+
+        if collapse:
+            self.X = torch.argmax(self.X, dim=-1)
+            self.E = torch.argmax(self.E, dim=-1)
+
+            self.X[node_mask == 0] = - 1
+            self.E[(e_mask1 * e_mask2).squeeze(-1) == 0] = - 1
+        else:
+            self.X = self.X * x_mask
+            self.E = self.E * e_mask1 * e_mask2
+            assert torch.allclose(self.E, torch.transpose(self.E, 1, 2))
+        return self
+
+##################################################################################
+
+def assert_correctly_masked(variable, node_mask):
+    """
+    Used in
+    - GraphTransformer
+    """
+    assert (variable * (1 - node_mask.long())).abs().max().item() < 1e-4, \
+        'Variables not masked properly.'
+
+
+def cosine_beta_schedule_discrete(timesteps, s=0.008):
+    """Cosine schedule as proposed in https://openreview.net/forum?id=-NEXDKk8gZ.
+    Used in
+    - PredefinedNoiseScheduleDiscrete
+    """
+    steps = timesteps + 2
+    x = np.linspace(0, steps, steps)
+
+    alphas_cumprod = np.cos(0.5 * np.pi * ((x / steps) + s) / (1 + s)) ** 2
+    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+    alphas = (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    betas = 1 - alphas
+    return betas.squeeze()
+
+##################################################################################
+
+def to_dense(x, edge_index, edge_attr, batch):
+    """
+    Used to produce dense_data & node_mask from batch data (x, edge_index, edge_attr, batch)
+    - in validation_step()
+    """
+    X, node_mask = to_dense_batch(x=x, batch=batch)
+    # node_mask = node_mask.float()
+    edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
+    # TODO: carefully check if setting node_mask as a bool breaks the continuous case
+    max_num_nodes = X.size(1)
+    E = to_dense_adj(edge_index=edge_index, batch=batch, edge_attr=edge_attr, max_num_nodes=max_num_nodes)
+    E = encode_no_edge(E)
+
+    return PlaceHolder(X=X, E=E, y=None), node_mask
+
+def encode_no_edge(E):
+    assert len(E.shape) == 4
+    if E.shape[-1] == 0:
+        return E
+    no_edge = torch.sum(E, dim=3) == 0
+    first_elt = E[:, :, :, 0]
+    first_elt[no_edge] = 1
+    E[:, :, :, 0] = first_elt
+    diag = torch.eye(E.shape[1], dtype=torch.bool).unsqueeze(0).expand(E.shape[0], -1, -1)
+    E[diag] = 0
+    return E
+
+##################################################################################
+
+def sample_discrete_features(probX, probE, node_mask):
+    ''' Sample features from multinomial distribution with given probabilities (probX, probE, proby)
+        :param probX: bs, n, dx_out        node features
+        :param probE: bs, n, n, de_out     edge features
+        :param proby: bs, dy_out           global features.
+    
+    Bascially, once a forward noise is applied, we get probabilities for nodes & edges
+    (probX, probE) and we sample from these distributions to get back a *discrete* graph.
+
+    Same goes for predictions made by the reverse diffusion model, we also need to sample to get a discrete graph.
+    '''
+    bs, n, _ = probX.shape
+    # Noise X
+    # The masked rows should define probability distributions as well
+    probX[~node_mask] = 1 / probX.shape[-1]
+
+    # Flatten the probability tensor to sample with multinomial
+    probX = probX.reshape(bs * n, -1)       # (bs * n, dx_out)
+
+    # Sample X
+    X_t = probX.multinomial(1)                                  # (bs * n, 1)
+    X_t = X_t.reshape(bs, n)     # (bs, n)
+
+    # Noise E
+    # The masked rows should define probability distributions as well
+    inverse_edge_mask = ~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2))
+    diag_mask = torch.eye(n).unsqueeze(0).expand(bs, -1, -1)
+
+    probE[inverse_edge_mask] = 1 / probE.shape[-1]
+    probE[diag_mask.bool()] = 1 / probE.shape[-1]
+
+    probE = probE.reshape(bs * n * n, -1)    # (bs * n * n, de_out)
+
+    # Sample E
+    E_t = probE.multinomial(1).reshape(bs, n, n)   # (bs, n, n)
+    E_t = torch.triu(E_t, diagonal=1)
+    E_t = (E_t + torch.transpose(E_t, 1, 2))
+
+    return PlaceHolder(X=X_t, E=E_t, y=torch.zeros(bs, 0).type_as(X_t))
+
+##################################################################################
+
+class DistributionNodes:
+    def __init__(self, histogram: Counter):
+        """
+        Compute the distribution of the number of nodes in the dataset (heavy atoms), 
+        and sample from this distribution.
+        
+        historgram: The keys are num_nodes, the values are counts
+        """
+        max_n_nodes = max(histogram.keys())
+        prob = torch.zeros(max_n_nodes + 1)
+        for num_nodes, count in histogram.items():
+            prob[num_nodes] = count
+
+        self.prob = prob / prob.sum()
+        self.m = torch.distributions.Categorical(prob)
+
+    def sample_n(self, n_samples, device):
+        idx = self.m.sample((n_samples,))
+        return idx.to(device)
+
+    def log_prob(self, batch_n_nodes):
+        # NOTE: this is used in the validation step to compute the log probability of the number of nodes in the graph
+        assert len(batch_n_nodes.size()) == 1
+        p = self.prob.to(batch_n_nodes.device)
+
+        probas = p[batch_n_nodes]
+        log_p = torch.log(probas + 1e-6)
+        return log_p
+
+##################################################################################
+
+def mask_distributions(true_X, true_E, pred_X, pred_E, node_mask):
+    """
+    Set masked rows to arbitrary distributions, so it doesn't contribute to loss
+    :param true_X: bs, n, dx_out
+    :param true_E: bs, n, n, de_out
+    :param pred_X: bs, n, dx_out
+    :param pred_E: bs, n, n, de_out
+    :param node_mask: bs, n
+    :return: same sizes as input
+
+    Used in val loss kl_prior() & compute_Lt()
+
+    Originally defined in DiffMS/src/diffusion/diffusion_utils.py
+    """
+
+    row_X = torch.zeros(true_X.size(-1), dtype=torch.float, device=true_X.device)
+    row_X[0] = 1.
+    row_E = torch.zeros(true_E.size(-1), dtype=torch.float, device=true_E.device)
+    row_E[0] = 1.
+
+    diag_mask = ~torch.eye(node_mask.size(1), device=node_mask.device, dtype=torch.bool).unsqueeze(0)
+    true_X[~node_mask] = row_X
+    pred_X[~node_mask] = row_X
+    true_E[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :] = row_E
+    pred_E[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :] = row_E
+
+    true_X = true_X + 1e-7
+    pred_X = pred_X + 1e-7
+    true_E = true_E + 1e-7
+    pred_E = pred_E + 1e-7
+
+    true_X = true_X / torch.sum(true_X, dim=-1, keepdim=True)
+    pred_X = pred_X / torch.sum(pred_X, dim=-1, keepdim=True)
+    true_E = true_E / torch.sum(true_E, dim=-1, keepdim=True)
+    pred_E = pred_E / torch.sum(pred_E, dim=-1, keepdim=True)
+
+    return true_X, true_E, pred_X, pred_E
+
+def posterior_distributions(X, E, y, X_t, E_t, y_t, Qt, Qsb, Qtb):
+    # NOTE: this is used in the validation step in compute_Lt()
+    prob_X = compute_posterior_distribution(M=X, M_t=X_t, Qt_M=Qt.X, Qsb_M=Qsb.X, Qtb_M=Qtb.X)   # (bs, n, dx)
+    prob_E = compute_posterior_distribution(M=E, M_t=E_t, Qt_M=Qt.E, Qsb_M=Qsb.E, Qtb_M=Qtb.E)   # (bs, n * n, de)
+
+    return PlaceHolder(X=prob_X, E=prob_E, y=y_t)
+
+def compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M):
+    ''' M: X or E
+        Compute xt @ Qt.T * x0 @ Qsb / x0 @ Qtb @ xt.T
+    '''
+    # Flatten feature tensors
+    M = M.flatten(start_dim=1, end_dim=-2).to(torch.float32)        # (bs, N, d) with N = n or n * n
+    M_t = M_t.flatten(start_dim=1, end_dim=-2).to(torch.float32)    # same
+
+    Qt_M_T = torch.transpose(Qt_M, -2, -1)      # (bs, d, d)
+
+    left_term = M_t @ Qt_M_T   # (bs, N, d)
+    right_term = M @ Qsb_M     # (bs, N, d)
+    product = left_term * right_term    # (bs, N, d)
+
+    denom = M @ Qtb_M     # (bs, N, d) @ (bs, d, d) = (bs, N, d)
+    denom = (denom * M_t).sum(dim=-1)   # (bs, N, d) * (bs, N, d) + sum = (bs, N)
+    # denom = product.sum(dim=-1)
+    # denom[denom == 0.] = 1
+
+    prob = product / denom.unsqueeze(-1)    # (bs, N, d)
+
+    return prob
+
+##################################################################################
+
+def sample_discrete_feature_noise(limit_dist, node_mask):
+    """
+    Sample from the limit distribution of the diffusion process
+
+    Used in sample_batch() for initial noisy graph G^T (with limit distribution)
+    which is iteratively updated to get the clean graph G
+    """
+    bs, n_max = node_mask.shape
+    x_limit = limit_dist.X[None, None, :].expand(bs, n_max, -1)
+    e_limit = limit_dist.E[None, None, None, :].expand(bs, n_max, n_max, -1)
+    y_limit = limit_dist.y[None, :].expand(bs, -1)
+    U_X = x_limit.flatten(end_dim=-2).multinomial(1).reshape(bs, n_max)
+    U_E = e_limit.flatten(end_dim=-2).multinomial(1).reshape(bs, n_max, n_max)
+    U_y = torch.empty((bs, 0))
+
+    long_mask = node_mask.long()
+    U_X = U_X.type_as(long_mask)
+    U_E = U_E.type_as(long_mask)
+    U_y = U_y.type_as(long_mask)
+
+    U_X = F.one_hot(U_X, num_classes=x_limit.shape[-1]).float()
+    U_E = F.one_hot(U_E, num_classes=e_limit.shape[-1]).float()
+
+    # Get upper triangular part of edge noise, without main diagonal
+    upper_triangular_mask = torch.zeros_like(U_E)
+    indices = torch.triu_indices(row=U_E.size(1), col=U_E.size(2), offset=1)
+    upper_triangular_mask[:, indices[0], indices[1], :] = 1
+
+    U_E = U_E * upper_triangular_mask
+    U_E = (U_E + torch.transpose(U_E, 1, 2))
+
+    assert (U_E == torch.transpose(U_E, 1, 2)).all()
+
+    return PlaceHolder(X=U_X, E=U_E, y=U_y).mask(node_mask)
+
+def compute_batched_over0_posterior_distribution(X_t, Qt, Qsb, Qtb):
+    """ M: X or E
+        Compute xt @ Qt.T * x0 @ Qsb / x0 @ Qtb @ xt.T for each possible value of x0
+        X_t: bs, n, dt          or bs, n, n, dt
+        Qt: bs, d_t-1, dt
+        Qsb: bs, d0, d_t-1
+        Qtb: bs, d0, dt.
+    
+        Used in sample_p_zs_given_zt(), originally defined in DiffMS/src/diffusion/diffusion_utils.py
+    """
+    # Flatten feature tensors
+    # Careful with this line. It does nothing if X is a node feature. If X is an edge features it maps to
+    # bs x (n ** 2) x d
+    X_t = X_t.flatten(start_dim=1, end_dim=-2).to(torch.float32)            # bs x N x dt
+
+    Qt_T = Qt.transpose(-1, -2)                 # bs, dt, d_t-1
+    left_term = X_t @ Qt_T                      # bs, N, d_t-1
+    left_term = left_term.unsqueeze(dim=2)      # bs, N, 1, d_t-1
+
+    right_term = Qsb.unsqueeze(1)               # bs, 1, d0, d_t-1
+    numerator = left_term * right_term          # bs, N, d0, d_t-1
+
+    X_t_transposed = X_t.transpose(-1, -2)      # bs, dt, N
+
+    prod = Qtb @ X_t_transposed                 # bs, d0, N
+    prod = prod.transpose(-1, -2)               # bs, N, d0
+    denominator = prod.unsqueeze(-1)            # bs, N, d0, 1
+    denominator[denominator == 0] = 1e-6
+
+    out = numerator / denominator
+    return out
+
+##################################################################################
+
+# atom_decoder = ['C', 'O', 'P', 'N', 'S', 'Cl', 'F', 'H']
+# valency = [ATOM_TO_VALENCY.get(atom, 0) for atom in atom_decoder]
+
+ATOM_TO_VALENCY = {
+    'H': 1,
+    'He': 0,
+    'Li': 1,
+    'Be': 2,
+    'B': 3,
+    'C': 4,
+    'N': 3,
+    'O': 2,
+    'F': 1,
+    'Ne': 0,
+    'Na': 1,
+    'Mg': 2,
+    'Al': 3,
+    'Si': 4,
+    'P': 3,
+    'S': 2,
+    'Cl': 1,
+    'Ar': 0,
+    'K': 1,
+    'Ca': 2,
+    'Sc': 3,
+    'Ti': 4,
+    'V': 5,
+    'Cr': 2,
+    'Mn': 7,
+    'Fe': 2,
+    'Co': 3,
+    'Ni': 2,
+    'Cu': 2,
+    'Zn': 2,
+    'Ga': 3,
+    'Ge': 4,
+    'As': 3,
+    'Se': 2,
+    'Br': 1,
+    'Kr': 0,
+    'Rb': 1,
+    'Sr': 2,
+    'Y': 3,
+    'Zr': 2,
+    'Nb': 2,
+    'Mo': 2,
+    'Tc': 6,
+    'Ru': 2,
+    'Rh': 3,
+    'Pd': 2,
+    'Ag': 1,
+    'Cd': 1,
+    'In': 1,
+    'Sn': 2,
+    'Sb': 3,
+    'Te': 2,
+    'I': 1,
+    'Xe': 0,
+    'Cs': 1,
+    'Ba': 2,
+    'La': 3,
+    'Ce': 3,
+    'Pr': 3,
+    'Nd': 3,
+    'Pm': 3,
+    'Sm': 2,
+    'Eu': 2,
+    'Gd': 3,
+    'Tb': 3,
+    'Dy': 3,
+    'Ho': 3,
+    'Er': 3,
+    'Tm': 2,
+    'Yb': 2,
+    'Lu': 3,
+    'Hf': 4,
+    'Ta': 3,
+    'W': 2,
+    'Re': 1,
+    'Os': 2,
+    'Ir': 1,
+    'Pt': 1,
+    'Au': 1,
+    'Hg': 1,
+    'Tl': 1,
+    'Pb': 2,
+    'Bi': 3,
+    'Po': 2,
+    'At': 1,
+    'Rn': 0,
+    'Fr': 1,
+    'Ra': 2,
+    'Ac': 3,
+    'Th': 4,
+    'Pa': 5,
+    'U': 2,
+}
+
+ATOM_TO_WEIGHT = {
+    'H': 1,
+    'He': 4,
+    'Li': 7,
+    'Be': 9,
+    'B': 11,
+    'C': 12,
+    'N': 14,
+    'O': 16,
+    'F': 19,
+    'Ne': 20,
+    'Na': 23,
+    'Mg': 24,
+    'Al': 27,
+    'Si': 28,
+    'P': 31,
+    'S': 32,
+    'Cl': 35,
+    'Ar': 40,
+    'K': 39,
+    'Ca': 40,
+    'Sc': 45,
+    'Ti': 48,
+    'V': 51,
+    'Cr': 52,
+    'Mn': 55,
+    'Fe': 56,
+    'Co': 59,
+    'Ni': 59,
+    'Cu': 64,
+    'Zn': 65,
+    'Ga': 70,
+    'Ge': 73,
+    'As': 75,
+    'Se': 79,
+    'Br': 80,
+    'Kr': 84,
+    'Rb': 85,
+    'Sr': 88,
+    'Y': 89,
+    'Zr': 91,
+    'Nb': 93,
+    'Mo': 96,
+    'Tc': 98,
+    'Ru': 101,
+    'Rh': 103,
+    'Pd': 106,
+    'Ag': 108,
+    'Cd': 112,
+    'In': 115,
+    'Sn': 119,
+    'Sb': 122,
+    'Te': 128,
+    'I': 127,
+    'Xe': 131,
+    'Cs': 133,
+    'Ba': 137,
+    'La': 139,
+    'Ce': 140,
+    'Pr': 141,
+    'Nd': 144,
+    'Pm': 145,
+    'Sm': 150,
+    'Eu': 152,
+    'Gd': 157,
+    'Tb': 159,
+    'Dy': 163,
+    'Ho': 165,
+    'Er': 167,
+    'Tm': 169,
+    'Yb': 173,
+    'Lu': 175,
+    'Hf': 178,
+    'Ta': 181,
+    'W': 184,
+    'Re': 186,
+    'Os': 190,
+    'Ir': 192,
+    'Pt': 195,
+    'Au': 197,
+    'Hg': 201,
+    'Tl': 204,
+    'Pb': 207,
+    'Bi': 209,
+    'Po': 209,
+    'At': 210,
+    'Rn': 222,
+    'Fr': 223,
+    'Ra': 226,
+    'Ac': 227,
+    'Th': 232,
+    'Pa': 231,
+    'U': 238,
+    'Np': 237,
+    'Pu': 244,
+    'Am': 243,
+    'Cm': 247,
+    'Bk': 247,
+    'Cf': 251,
+    'Es': 252,
+    'Fm': 257,
+    'Md': 258,
+    'No': 259,
+    'Lr': 262,
+    'Rf': 267,
+    'Db': 270,
+    'Sg': 269,
+    'Bh': 264,
+    'Hs': 269,
+    'Mt': 278,
+    'Ds': 281,
+    'Rg': 282,
+    'Cn': 285,
+    'Nh': 286,
+    'Fl': 289,
+    'Mc': 290,
+    'Lv': 293,
+    'Ts': 294,
+    'Og': 294,
+}

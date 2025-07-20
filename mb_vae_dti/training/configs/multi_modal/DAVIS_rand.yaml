@@ -1,0 +1,29 @@
+model:
+  embedding_dim: 768
+  encoder_type: "resnet"
+  encoder_kwargs:
+    hidden_dim: 256
+    n_layers: 2
+  
+  aggregator_type: "concat"
+
+training:
+  learning_rate: 0.001
+  
+data:
+  batch_size: 16
+  
+logging:
+  experiment_name: "multimodal_DAVIS_rand"
+  save_dir: "outputs/multi_modal/DAVIS/rand"
+
+gridsearch:
+  model.embedding_dim: [512, 768, 1024]
+  model.encoder_type: ["resnet", "transformer"]
+  model.encoder_kwargs.hidden_dim: [128, 256, 512]
+  model.encoder_kwargs.n_layers: [1, 2, 3]
+
+  model.aggregator_type: ["concat", "attentive"]
+
+  training.learning_rate: [0.0005, 0.001, 0.002]
+  data.batch_size: [16, 32, 64]

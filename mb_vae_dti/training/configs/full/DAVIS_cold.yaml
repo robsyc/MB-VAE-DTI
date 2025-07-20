@@ -1,0 +1,37 @@
+# DAVIS finetuning configuration for Full DTI model (cold-drug split)
+# Single-score prediction (pKd) on DAVIS benchmark dataset
+
+model:
+  phase: finetune
+  
+  # Pretrained checkpoint from general training (path to be updated)
+  checkpoint_path: null  # logs/full_train_cold/checkpoints/best_model.ckpt
+
+# Data configuration
+data:
+  h5_path: /home/robsyc/Desktop/thesis/MB-VAE-DTI/data/input/dti.h5torch
+  split_type: split_cold
+  provenance_cols: ['in_DAVIS']  # Only DAVIS data
+  drug_features: ['EMB-BiomedGraph', 'EMB-BiomedImg', 'EMB-BiomedText']
+  target_features: ['EMB-ESM', 'EMB-NT']
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+  shuffle_train: true
+  drop_last: false
+  load_in_memory: false
+
+# Training configuration
+training:
+  max_epochs: 30
+  learning_rate: 5e-5
+  weight_decay: 1e-5
+  early_stopping_patience: 10
+  scheduler: const
+  
+# Logging configuration
+logging:
+  experiment_name: full_DAVIS_cold
+
+# No gridsearch for finetuning
+# (use best model from general training) 

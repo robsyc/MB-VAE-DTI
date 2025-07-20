@@ -25,7 +25,8 @@ from mb_vae_dti.processing.split import (
 
 from mb_vae_dti.processing.h5factory import (
     create_pretrain_h5torch,
-    create_dti_h5torch
+    create_dti_h5torch,
+    inspect_h5torch_file
 )
 
 from mb_vae_dti.processing.h5datasets import (

@@ -1,0 +1,26 @@
+model:
+  embedding_dim: 768
+  encoder_type: "transformer"
+  encoder_kwargs:
+    hidden_dim: 512
+    n_layers: 2
+    
+  fusion_kwargs:
+    hidden_dim: 512
+    n_layers: 2
+
+  # checkpoint_path: "outputs/multi_output/pretrain/cold/checkpoints/best_model.ckpt"
+
+training:
+  learning_rate: 0.0001  # Lower learning rate for fine-tuning
+  
+data:
+  batch_size: 32
+  
+logging:
+  experiment_name: "multi_output_KIBA_rand"
+  save_dir: "outputs/multi_output/KIBA/rand"
+
+gridsearch: # no changes to architecture (9 combinations only)
+  training.learning_rate: [0.0001, 0.0005, 0.001]
+  data.batch_size: [16, 32, 64]

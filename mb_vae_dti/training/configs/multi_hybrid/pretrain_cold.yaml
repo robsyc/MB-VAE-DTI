@@ -1,0 +1,53 @@
+model:
+  name: "multi_hybrid_pretrain_cold"
+  
+  # encoder & aggregator are inherited from pretrain_<drug/target>
+  encoder_type: "resnet"
+  encoder_kwargs:
+    hidden_dim: 256
+    output_dim: 512
+    n_layers: 2
+  
+  aggregator_type: "attentive"
+  aggregator_kwargs:
+    hidden_dim: 512
+    output_dim: 768
+    n_layers: 2
+  
+  # Inter-branch aggregator for DTI prediction (new compared to pretrain_<drug/target>)
+  inter_branch_aggregator_kwargs:
+    hidden_dim: 256
+    output_dim: 512
+    n_layers: 2
+  
+  # DTI prediction head parameters
+  dti_head_kwargs:
+    hidden_dim: 128
+  
+  # Phase-specific parameters
+  phase: "train"  # General DTI training
+  checkpoint_path: null  # Path to pretrained weights (set manually)
+  
+  # Alternative: Load drug and target branches separately
+  # drug_checkpoint_path: "outputs/multi_hybrid/pretrain/drug/best_model.pt"
+  # target_checkpoint_path: "outputs/multi_hybrid/pretrain/target/best_model.pt"
+
+training:
+  learning_rate: 0.001
+  
+data:
+  batch_size: 32
+  split_type: "split_cold"
+  provenance_cols: null  # Use all datasets for general training
+  
+logging:
+  experiment_name: "multi_hybrid_pretrain_cold"
+  save_dir: "outputs/multi_hybrid/pretrain/cold"
+
+gridsearch: # 162 combinations
+  model.inter_branch_aggregator_kwargs.hidden_dim: [128, 256, 512]
+  model.inter_branch_aggregator_kwargs.output_dim: [256, 512, 768]
+  model.inter_branch_aggregator_kwargs.n_layers: [1, 2, 3]
+  
+  training.learning_rate: [0.001, 0.0005, 0.0001]
+  data.batch_size: [16, 32] 

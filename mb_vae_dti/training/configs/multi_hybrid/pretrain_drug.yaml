@@ -1,0 +1,32 @@
+model:
+  name: "multi_hybrid_pretrain_drug"
+  
+  encoder_type: "resnet"
+  encoder_kwargs:
+    hidden_dim: 256
+    output_dim: 512
+    n_layers: 2
+  
+  aggregator_type: "attentive"
+  aggregator_kwargs:
+    hidden_dim: 512
+    output_dim: 768
+    n_layers: 2
+  
+  # Phase-specific parameters
+  phase: "pretrain_drug"  # Drug branch pretraining
+  checkpoint_path: null
+
+training:
+  learning_rate: 0.001
+  
+data:
+  batch_size: 128           # large bs for contrastive learning
+  h5_path: "drugs.h5torch"  # Use drug pretraining dataset
+  load_in_memory: false
+  drug_features: null
+  target_features: ["EMB-ESM", "EMB-NT"] 
+
+logging:
+  experiment_name: "multi_hybrid_pretrain_drug"
+  save_dir: "outputs/multi_hybrid/pretrain/drug"

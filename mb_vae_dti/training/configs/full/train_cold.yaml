@@ -1,0 +1,37 @@
+# General DTI training configuration for Full DTI model (cold-drug split)
+# Multi-score prediction on combined dataset
+
+model:
+  phase: train
+  
+  # Pretrained checkpoints (paths to be updated after pretraining)
+  drug_checkpoint_path: null  # logs/full_pretrain_drug/checkpoints/best_model.ckpt
+  target_checkpoint_path: null  # logs/full_pretrain_target/checkpoints/best_model.ckpt
+
+# Data configuration
+data:
+  h5_path: /home/robsyc/Desktop/thesis/MB-VAE-DTI/data/input/dti.h5torch
+  split_type: split_cold
+  drug_features: ['EMB-BiomedGraph', 'EMB-BiomedImg', 'EMB-BiomedText']
+  target_features: ['EMB-ESM', 'EMB-NT']
+  batch_size: 128
+  num_workers: 4
+  pin_memory: true
+  shuffle_train: true
+  drop_last: false
+  load_in_memory: false
+
+# Training configuration
+training:
+  max_epochs: 50
+  learning_rate: 1e-4
+  weight_decay: 1e-5
+  early_stopping_patience: 15
+  scheduler: step
+  
+# Logging configuration
+logging:
+  experiment_name: full_train_cold
+
+# No gridsearch for general training
+# (pretrained weights are fixed from best pretraining runs) 

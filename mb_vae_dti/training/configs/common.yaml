@@ -1,0 +1,29 @@
+# Common configurations
+    
+# Training parameters
+training:
+  max_epochs: 100
+  early_stopping_patience: 10
+  gradient_clip_val: null      # Disabled - try without first (https://medium.com/@kaveh.kamali/a-beginners-guide-to-gradient-clipping-with-pytorch-lightning-c394d28e2b69)
+  weight_decay: 1e-5           # Increase if overfitting, decrease if underfitting
+  
+# Data configuration
+data:
+  num_workers: 4               # increase for multi-GPU training ~ depends if bottleneck in data loading or processing
+  pin_memory: true             # Set to false for CPU training (true for GPU)
+  shuffle_train: true
+  drop_last: false             # no dropping of last batch when it is incomplete
+  load_in_memory: true
+  
+# Logging configuration
+logging:
+  project_name: "Thesis"
+  log_every_n_steps: 50
+  use_wandb: true
+  
+# Hardware configuration  
+hardware:
+  gpus: 1                      # run on cpu or set to 1 for gpu
+  precision: 32-true           # https://lightning.ai/docs/pytorch/stable/common/precision_basic.html
+  deterministic: true          # Set to False when on CPU
+  seed: 42 
