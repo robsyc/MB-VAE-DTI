@@ -24,13 +24,13 @@ logging:
   save_dir: "data/results/multi_output/pretrain/cold"
 
 gridsearch:
-  model.embedding_dim: [512, 768, 1024]
+  model.embedding_dim: [768, 1024]
   model.encoder_type: ["resnet", "transformer"]
   model.encoder_kwargs.hidden_dim: [256, 512]
-  model.encoder_kwargs.n_layers: [2, 3]
+  model.encoder_kwargs.n_layers: [3, 4]
   
   model.fusion_kwargs.hidden_dim: [256, 512]
-  model.fusion_kwargs.n_layers: [1, 2]
+  model.fusion_kwargs.n_layers: [2, 3]
   
   training.learning_rate: [0.0001, 0.001]
   data.batch_size: [16, 32] 

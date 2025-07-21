@@ -20,7 +20,8 @@ ml load wandb/0.16.1-GCC-12.3.0
 ml load PyTorch-Geometric/2.5.0-foss-2023a-PyTorch-2.1.2-CUDA-12.1.1
 ml load lifelines/0.28.0-gfbf-2023a
 ml load RDKit/2024.03.3-foss-2023a
-pip install torcheval h5torch pytdc
+ml load Biopython/1.83-foss-2023a
+# pip install torcheval h5torch pytdc upsetplot
 
 # Change working directory to the location where the job was submmitted
 cd /data/gent/454/vsc45450/thesis/MB-VAE-DTI

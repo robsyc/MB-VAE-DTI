@@ -5,13 +5,13 @@ model:
     hidden_dim: 256
     n_layers: 2
   
-  aggregator_type: "concat"
+  aggregator_type: "attentive"
 
 training:
   learning_rate: 0.001
-  
+
 data:
-  batch_size: 16
+  batch_size: 32
   
 logging:
   experiment_name: "multimodal_DAVIS_rand"
