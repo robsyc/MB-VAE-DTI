@@ -5,7 +5,15 @@ Utility functions/classes used in the discrete diffusion decoder of the DTITree 
 import torch
 import numpy as np
 from collections import Counter
+import rdkit.Chem as Chem
+from rdkit.Chem import Draw
+from rdkit.Chem.rdchem import BondType as BT
+import wandb
+import os
+import rdkit
+from typing import Dict, List
 
+from torch_geometric.data import Data, Batch
 from torch_geometric.utils import to_dense_adj, to_dense_batch, remove_self_loops
 
 class PlaceHolder:
@@ -45,6 +53,10 @@ class PlaceHolder:
         return self
 
 ##################################################################################
+
+def sum_except_batch(x):
+    return x.reshape(x.size(0), -1).sum(dim=-1)
+
 
 def assert_correctly_masked(variable, node_mask):
     """
@@ -310,3 +322,124 @@ def compute_batched_over0_posterior_distribution(X_t, Qt, Qsb, Qtb):
     out = numerator / denominator
     return out
 
+##################################################################################
+
+class MolecularVisualization:
+    def __init__(self, atom_types: list[str]):
+        self.atom_types = atom_types
+
+    def mol_from_graphs(self, node_list, adjacency_matrix):
+        """
+        Convert graphs to rdkit molecules
+        node_list: the nodes of a batch of nodes (bs x n)
+        adjacency_matrix: the adjacency_matrix of the molecule (bs x n x n)
+        """
+        # dictionary to map integer value to the char of atom
+        atom_decoder = self.atom_types
+
+        # create empty editable mol object
+        mol = Chem.RWMol()
+
+        # add atoms to mol and keep track of index
+        node_to_idx = {}
+        for i in range(len(node_list)):
+            if node_list[i] == -1:
+                continue
+            a = Chem.Atom(atom_decoder[int(node_list[i])])
+            molIdx = mol.AddAtom(a)
+            node_to_idx[i] = molIdx
+
+        # add bonds to mol (w/ logic to add single/double/triple/aromatic bonds)
+        for ix, row in enumerate(adjacency_matrix):
+            for iy, bond in enumerate(row):
+                # only traverse half the symmetric matrix
+                if iy <= ix:
+                    continue
+                if bond == 1:
+                    bond_type = Chem.rdchem.BondType.SINGLE
+                elif bond == 2:
+                    bond_type = Chem.rdchem.BondType.DOUBLE
+                elif bond == 3:
+                    bond_type = Chem.rdchem.BondType.TRIPLE
+                elif bond == 4:
+                    bond_type = Chem.rdchem.BondType.AROMATIC
+                else:
+                    continue
+                mol.AddBond(node_to_idx[ix], node_to_idx[iy], bond_type)
+
+        try:
+            # NOTE: supposedly, this is where the hydrogen atoms are inferred by RDKit
+            mol = mol.GetMol()
+        except rdkit.Chem.KekulizeException:
+            print("Can't kekulize molecule")
+            mol = None
+        return mol
+
+    def visualize(self, path: str, molecules: list, num_molecules_to_visualize: int, log='graph'):
+        # define path to save figures
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+        # visualize the final molecules
+        print(f"Visualizing {num_molecules_to_visualize} of {len(molecules)}")
+        if num_molecules_to_visualize > len(molecules):
+            print(f"Shortening to {len(molecules)}")
+            num_molecules_to_visualize = len(molecules)
+        
+        for i in range(num_molecules_to_visualize):
+            file_path = os.path.join(path, 'molecule_{}.png'.format(i))
+            mol = self.mol_from_graphs(molecules[i][0].numpy(), molecules[i][1].numpy())
+            try:
+                Draw.MolToFile(mol, file_path)
+                if wandb.run and log is not None:
+                    print(f"Saving {file_path} to wandb")
+                    wandb.log({log: wandb.Image(file_path)}, commit=True)
+            except rdkit.Chem.KekulizeException:
+                print("Can't kekulize molecule")
+
+
+class SmilesToPyG:
+    """
+    Efficient helper for converting a SMILES string to a PyTorch Geometric Data object,
+    using only minimal node and edge features:
+      - Node feature: atom type as integer index (from atom_types list)
+      - Edge feature: bond type as integer index (from bond_types list)
+    """
+    def __init__(
+            self, 
+            atom_encoder = {"C": 0, "O": 1, "P": 2, "N": 3, "S": 4, "Cl": 5, "F": 6, "H": 7}, 
+            bond_encoder = {BT.SINGLE: 0, BT.DOUBLE: 1, BT.TRIPLE: 2, BT.AROMATIC: 3}
+            ):
+        self.atom_encoder = atom_encoder
+        self.bond_encoder = bond_encoder
+
+    def smiles_to_pyg(self, smiles: str) -> Data:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            mol = Chem.MolFromSmiles('')
+
+        # Node features: atom type index
+        x = [self.atom_encoder[atom.GetSymbol()] for atom in mol.GetAtoms()]
+        x = torch.tensor(x, dtype=torch.long) if x else torch.zeros((0, 1), dtype=torch.long)
+
+        # Edge features: bond type index, undirected edges
+        edge_indices, edge_attrs = [], []
+        for bond in mol.GetBonds():
+            i = bond.GetBeginAtomIdx()
+            j = bond.GetEndAtomIdx()
+            edge_indices += [[i, j], [j, i]]
+            edge_attrs += [[self.bond_encoder[bond.GetBondType()]], [self.bond_encoder[bond.GetBondType()]]]
+
+        edge_index = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
+        edge_attr = torch.tensor(edge_attrs, dtype=torch.long)
+
+        # possibly need to .view() here (https://pytorch-geometric.readthedocs.io/en/latest/_modules/torch_geometric/utils/smiles.html)
+        
+        if edge_index.numel() > 0: # sort indices
+            perm = (edge_index[0] * x.size(0) + edge_index[1]).argsort()
+            edge_index, edge_attr = edge_index[:, perm], edge_attr[perm]
+
+        return Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+
+    def smiles_to_pyg_batch(self, smiles: List[str]) -> Batch:
+        return Batch.from_data_list([self.smiles_to_pyg(smiles) for smiles in smiles])

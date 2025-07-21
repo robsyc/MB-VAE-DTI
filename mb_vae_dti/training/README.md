@@ -13,10 +13,10 @@ In the DTITree model, the drug and target branches' output embeddings are passed
 ### Model variants
 
 Several aspects of the model can be varied:
-- type of encoding module in the individual branches (MLP or transformer)
-- intra-branch-level aggregation module (concat-mlp, attentive-mlp or cross-attention)
-- inter-branch-level aggregation module (same)
-- size & depth of the encoding & aggregation modules
+- type of encoding module in the individual branches (resnet or transformer)
+- intra-branch-level aggregation module (concat or attentive)
+- inter-branch-level aggregation / fusion module (cross-attention; only 1 type)
+- size & depth of the encoding & fusion modules
 - variational or non-variational encoding
 - inclusion or exclusion of the diffusion decoder module in the drug branch
 
@@ -36,15 +36,12 @@ We can train the DTITree model on a combined dataset of drug-target pairs. Multi
 
 ### 3. Fine-tuning on benchmark DTI datasets -> single-score prediction
 
-We can fine-tune the DTITree model on small benchmark DTI datasets (Davis, KIBA, etc.) which are subsets of the prior combined dataset used in training prod 2. The goal is to evaluate the performance of the DTITree model on these benchmark datasets by predicting a single real-values DTI score (pKd, pKi, and KIBA-score).
+We can fine-tune the DTITree model on small benchmark DTI datasets (DAVIS & KIBA) which are subsets of the prior combined dataset used in training phase 2. The goal is to evaluate the performance of the DTITree model on these benchmark datasets by predicting a single real-values DTI score (pKd, pKi, and KIBA-score).
 
 ## Losses
 
 There are several losses used in the training process:
-- **Complexity (KL) loss** in case of variational encoding (using $\beta$-approach)
-  - drug Branch: KL(q(z|d) || p(z))
-  - target Branch: KL(q(z|t) || p(z))
-  - DTITree: KL(q(z|d,t) || p(z))
+- **Complexity (KL) loss** in case of variational encoding in the drug Branch: KL(q(z|d) || p(z)) (together with reconstruction loss)
 - **Contrastive loss** during Branch pre-training
   - drug Branch: contrastive loss based on Tanimoto similarity on Morgan fingerprints
   - target Branch: contrastive loss based on Tanimoto similarity on ESP fingerprints
@@ -122,9 +119,9 @@ sample = drugs_pretrain_validation[42]
 
 Notes:
 - The pre-train datasets only contain a training & validation split, no test split.
-- The discrete diffusion model requires conversion of the 'smiles' representation to a molecular graph. This currencly is not implemented in the `PretrainDataset` class, but we can use the `Chem.MolFromSmiles` function from the `rdkit` package to do this.
-- For computing the contrastive loss, we need to compute the Tanimoto similarity between the fingerprint features, this also is not implemented in the `PretrainDataset` class.
-- The DiGress/DiffMS diffusion decoder requires dataset statistics (e.g. max_n_heavy_atoms, max_mol_weight, node/edge_type_marginals, etc.) to be initialized. Particulary, the instantiation of the forward diffusion transition models require this information for cleverly adding noise to molecular graphs. We will need to implement functions to compute these statistics from the dataset (and save them somewhere to avoid recomputing them every time).
+- The discrete diffusion model requires conversion of the 'smiles' representation to a molecular graph. This currently is not implemented in our datamodules, but we could convert the smiles to a molecular graph and then to pytorch geometric data objects. It is important we consider the performance implications of this conversion.
+- For computing the contrastive loss, we need to compute the Tanimoto similarity between the fingerprint features, see InfoNCEHead module
+- The DiGress/DiffMS diffusion decoder requires dataset statistics (e.g. max_n_heavy_atoms, max_mol_weight, node/edge_type_marginals, etc.) to be initialized. We have this data available in `data/processed/molecular_statistics.json` split by dataset & DTI setting (random vs cold-drug).
 
 ### Training datasets
 
@@ -219,9 +216,9 @@ Core aspects:
 
 Variations to tune:
 - Core hyperparameters: learning rate, batch size
-- Size, depth and type of the encoding modules in both branches
+- Size, depth and type of the encoding modules
 - Which input features to use (e.g. Morgan & ESP fingerprints, or BioMedGraph & ESM embeddings, etc.)
-- Which DTI benchmark dataset to use (& which score to predict (e.g. pKd, pKi, KIBA-score, etc.))
+- Which DTI benchmark dataset to use (& which score to predict (i.e. pKd for DAVIS, and KIBA-score for KIBA))
 
 ### Multi-modal & single-score model
 
@@ -236,9 +233,9 @@ Core aspects:
 Variations to tune:
 - Core hyperparameters: learning rate, batch size
 - Size, depth and type of the encoding modules
-- Size, depth and type of the intra-branch-level aggregation module
+- Type of the intra-branch-level aggregation module
 - Which combination of input modalities to use (e.g. embeddings only, fingerprints and embeddings, etc.)
-- Which DTI benchmark dataset to use (& which score to predict (e.g. pKd, pKi, KIBA-score, etc.))
+- Which DTI benchmark dataset to use (& which score to predict (i.e. pKd for DAVIS, and KIBA-score for KIBA))
 
 ### Uni-modal & multi-score model
 
@@ -246,13 +243,13 @@ This slightly more complex configuration adds the general DTI training step (2.)
 
 Core aspects:
 - No pre-training (1.) but general DTI training (2.) & fine-tuning on benchmark datasets (3.) so we'll want to utilize transfer learning
-- Still no diffusion decoder & only a single drug/target feature so no intra-branch-level aggregation
-- Multiple DTI scores are predicted so we need an inter-branch-level aggregation module & more intricate prediction head/losses (BCE & multiple MSEs)
+- Still no diffusion decoder & only a single drug/target feature so no intra-branch-level aggregation / fusion
+- Multiple DTI scores are predicted so we need an inter-branch-level aggregation / fusion module & more intricate prediction head/losses (BCE & multiple MSEs)
 
 Variations to tune:
 - Core hyperparameters: learning rate, batch size, **loss weights** for BCE & MSEs
 - Size, depth and type of the encoding modules
-- Size, depth and type of the inter-branch-level aggregation module
+- Size and depth of the cross-attention fusion module
 - Again, which input features to use & which DTI benchmark dataset to use in fine-tuning phase (3.)
 
 ### Hybdrid model: multi-modal and multi-score
@@ -264,12 +261,13 @@ Core aspects:
 - General DTI training (2.) & fine-tuning on benchmark datasets (3.)
 - No diffusion decoder so no reconstruction loss
 - Multiple input modalities so we need an intra-branch-level aggregation module
-- Multiple DTI scores are predicted so we need an inter-branch-level aggregation module & intricate prediction head/losses (BCE & multiple MSEs)
+- Multiple DTI scores are predicted so we need an inter-branch-level aggregation / fusion module & intricate prediction head/losses (BCE & multiple MSEs)
 
 Variations to tune:
 - Core hyperparameters: learning rate, batch size, **loss weights** for BCE & MSEs
 - Size, depth and type of the encoding modules
-- Size, depth and type of the inter-branch-level aggregation module
+- Type of the intra-branch-level aggregation module
+- Size and depth of the cross-attention fusion module
 - Which input features to use & which DTI benchmark dataset to use in fine-tuning phase (3.)
 
 ### Full model: multi-modal, multi-score, pre-training, variational & diffusion drug-decoder
@@ -280,51 +278,14 @@ Core aspects:
 - Pre-training (1.), general DTI training (2.) & fine-tuning on benchmark datasets (3.), so we'll need to allow for intricate transfer learning
 - Diffusion decoder in the drug branch so reconstruction loss is used
 - Multiple input modalities per branch so we need intra-branch-level aggregation modules
-- Multiple DTI scores are predicted so we need an inter-branch-level aggregation module & intricate prediction head/losses (BCE & multiple MSEs)
+- Multiple DTI scores are predicted so we need a fusion module & intricate prediction head/losses (BCE & multiple MSEs)
 - Pre-training with contrastive loss in both branches
 - Variational encoding in the drug branch so complexity loss is used
 
 Variations to tune:
 - Core hyperparameters: learning rate, batch size, **loss weights** for all components (complexity, contrastive, reconstruction, accuracy) and diffusion-decoder specific hyperparameters (diffusion steps, etc.)
 - Size, depth and type of the encoding modules in both branches
-- Size, depth and type of the intra-branch-level aggregation modules
-- Size, depth and type of the inter-branch-level aggregation module
+- Type of the intra-branch-level aggregation module
+- Size and depth of the cross-attention fusion module
 - Which combination of input modalities to use (e.g. embeddings only, fingerprints and embeddings, etc.)
-- Which DTI benchmark dataset to use (& which score to predict (e.g. pKd, pKi, KIBA-score, etc.)) in the fine-tuning phase (3.)
-
----
-
-> NOTE
-> Our implementation should lend itself nicely to tuning of hyperparameters. Our training will be done on an HPC cluster to which job scripts will be submitted. We want to spread experiments (different learning rates, batch sizes, model configurations, etc.) randomly across batches such that we can submit multiple jobs in parallel. We also want to log our results to wandb in a structured way.
-
-> An example job script:
-```bash
-#!/bin/bash
-
-# Basic parameters
-#PBS -N exp2_batch2             ## Job name
-#PBS -l nodes=1:ppn=8:gpus=1    ## nodes, processors per node (ppn=all to get a full node), GPUs (H100 with 32gb)
-#PBS -l walltime=24:00:00       ## Max time your job will run (no more than 72:00:00)
-#PBS -l mem=16gb                ## If not used, memory will be available proportional to the max amount
-#PBS -m abe                     ## Email notifications (abe=aborted, begin and end)
-
-# Load the necessary modules
-module load PyTorch/2.1.2-foss-2023a-CUDA-12.1.1  # Load the PyTorch module
-# pip install h5torch
-
-# Change working directory to the location where the job was submmitted
-cd /data/gent/454/vsc45450/thesis/MB-VAE-DTI
-
-# Run the script from 0 to 11
-python3 ./scripts/run_model.py --batch_index 0 --total_batches 12
-```
-
-> NOTE
-> The DiGress/DiffMS codebases implement additional validation metrics for tracking e.g. the Tanimoto similarity between the predicted and true molecular graphs, the validity of the generated molecules, etc. We will likely need to implement these as well & incorporate them into the denoising decoder.
-
----
-
-Testing
-
-1. Baseline uni-modal & single-score model
-  CUDA_VISIBLE_DEVICES="" python scripts/training/run.py --model baseline --phase finetune --dataset DAVIS --split cold --override training.max_epochs=1 data.batch_size=16 hardware.gpus=0 hardware.deterministic=false data.pin_memory=false data.num_workers=0
+- Which DTI benchmark dataset to use (& which score to predict (i.e. pKd for DAVIS, and KIBA-score for KIBA)) in the fine-tuning phase (3.)

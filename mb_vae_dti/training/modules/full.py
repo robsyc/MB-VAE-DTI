@@ -10,16 +10,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
+from torch_geometric.data import Data, Batch
+import rdkit.Chem as Chem
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Tuple, Literal
 import logging
+import wandb
+from tqdm import tqdm
 
 from mb_vae_dti.training.models import (
     ResidualEncoder, TransformerEncoder,
     ConcatAggregator, AttentiveAggregator,
     CrossAttentionFusion
 )
-from mb_vae_dti.training.models.heads import DTIHead, InfoNCEHead
+from mb_vae_dti.training.models.heads import DTIHead, InfoNCEHead, KLVariationalHead
 from mb_vae_dti.training.metrics import DTIMetricsCollection, RealDTIMetrics
 from .optimizer_utils import configure_optimizer_and_scheduler
 
@@ -29,6 +33,7 @@ from mb_vae_dti.training.diffusion.discrete_noise import PredefinedNoiseSchedule
 from mb_vae_dti.training.models.graph_transformer import GraphTransformer
 from mb_vae_dti.training.diffusion.loss import TrainLossDiscrete
 from mb_vae_dti.training.metrics.validation_metrics import *
+from mb_vae_dti.training.metrics.molecular_metrics import TrainMolecularMetricsDiscrete
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +152,14 @@ class FullDTIModel(pl.LightningModule):
             )
         else:
             self.drug_aggregator = None  # No aggregation needed for single feature
-            
+        
+        # TODO: NEW
+        self.drug_variational_head = KLVariationalHead(
+            input_dim=embedding_dim,
+            output_dim=embedding_dim,
+            **variational_head_kwargs
+        )
+
         # Target aggregator
         if len(target_features) > 1:
             self.target_aggregator = aggregator_type(
@@ -172,11 +184,10 @@ class FullDTIModel(pl.LightningModule):
                 **dti_head_kwargs
             )
         
-        # Contrastive learning heads (for pretraining)
+        # Contrastive (for pretraining)
         if phase in ["pretrain_drug", "pretrain_target"]:
             contrastive_kwargs = infonce_head_kwargs or {}
             contrastive_kwargs.setdefault("temperature", temperature)
-            
             if phase == "pretrain_drug":
                 self.drug_infonce_head = InfoNCEHead(
                     input_dim=embedding_dim,
@@ -193,6 +204,8 @@ class FullDTIModel(pl.LightningModule):
         #########################################################
         self.T = diffusion_steps
         self.best_val_nll = 1e8
+        self.visualization_tools = MolecularVisualization(dataset_infos["general"]["atom_types"])
+        self.graph_converter = SmilesToPyG() # default atom and bond encodings used here bcs lazy
 
         # Limit distribution for forward noise
         self.nodes_dist = DistributionNodes(dataset_infos["dataset"]["node_count_distribution"])
@@ -223,7 +236,7 @@ class FullDTIModel(pl.LightningModule):
         # self.Edim_output = graph_transformer_kwargs['output_dims']['E']
         # self.ydim_output = graph_transformer_kwargs['output_dims']['y']
 
-        self.decoder = GraphTransformer(
+        self.drug_decoder = GraphTransformer(
             n_layers=graph_transformer_kwargs['n_layers'],
             input_dims=graph_transformer_kwargs['input_dims'],
             output_dims=graph_transformer_kwargs['output_dims'],
@@ -233,12 +246,10 @@ class FullDTIModel(pl.LightningModule):
             act_fn_out=nn.ReLU()
         )
 
-        # Loss functions
-        self.bce_loss = nn.BCEWithLogitsLoss()
-        self.mse_loss = nn.MSELoss()
+        # TODO: Reconstruction loss
+        self.train_reconstruction_loss = TrainLossDiscrete(lambda_train = lambda_train)
+        self.train_molecular_metrics = TrainMolecularMetricsDiscrete(dataset_infos["general"]["atom_types"])
 
-        # TODO: NEW
-        self.reconstruction_loss = TrainLossDiscrete(lambda_train = lambda_train)
         self.val_nll = NLL()
         self.val_X_kl = SumExceptBatchKL()
         self.val_E_kl = SumExceptBatchKL()
@@ -249,10 +260,14 @@ class FullDTIModel(pl.LightningModule):
         self.test_E_kl = SumExceptBatchKL()
         self.test_X_logp = SumExceptBatchMetric()
         self.test_E_logp = SumExceptBatchMetric()
-        # chemical validity metrics? TODO
+        # chemical validity metrics? TODO (tanimoto similarity to ground truth & valid/invalid)
         
+        # DTI prediction loss
+        self.bce_loss = nn.BCEWithLogitsLoss()
+        self.mse_loss = nn.MSELoss()
         # Loss weights for DTI prediction (based on inverse frequency in combined DTI dataset)
         self.register_buffer('loss_weights', torch.tensor([1.0, 0.903964, 0.282992, 0.755172]))
+        # TODO: maybe need to add a weight for reconstruction vs. DTI prediction?
         
         # Setup metrics based on phase
         self.phase = phase
@@ -458,7 +473,9 @@ class FullDTIModel(pl.LightningModule):
             drug_features: List of drug feature tensors
             
         Returns:
-            Aggregated drug embedding
+            - Aggregated & sampled drug embedding
+            - KL divergence loss
+            - Optional: drug_attention weights (if using attentive aggregator)
         """
         # Encode individual drug features
         drug_embeddings = []
@@ -470,12 +487,12 @@ class FullDTIModel(pl.LightningModule):
         if self.drug_aggregator is not None:
             if self.aggregator_type == "attentive":
                 drug_embedding, drug_attention = self.drug_aggregator(drug_embeddings)
-                return drug_embedding, drug_attention
+                return self.drug_variational_head(drug_embedding), drug_attention
             else:
                 drug_embedding = self.drug_aggregator(drug_embeddings)
-                return drug_embedding
+                return self.drug_variational_head(drug_embedding)
         else:
-            return drug_embeddings[0]  # Single feature, no aggregation needed
+            return self.drug_variational_head(drug_embeddings[0])  # Single feature, no aggregation needed
     
     def _encode_target_features(self, target_features: List[torch.Tensor]) -> torch.Tensor:
         """
@@ -504,6 +521,323 @@ class FullDTIModel(pl.LightningModule):
         else:
             return target_embeddings[0]  # Single feature, no aggregation needed
     
+    def _apply_noise(self, X, E, y, node_mask):
+        """
+        Apply noise to the drug graph
+        # TODO: NEW
+        """
+        # Sample timestep t (uniformly from [0, T])
+        t_int = torch.randint(0, self.T + 1, size=(X.size(0), 1), device=X.device).float()
+        s_int = t_int - 1
+
+        # Normalize timesteps to [0, 1] for noise scheduler
+        t_float = t_int / self.T
+        s_float = s_int / self.T
+
+        # Get noise schedule parameters
+        beta_t = self.noise_schedule(t_normalized=t_float)
+        alpha_s_bar = self.noise_schedule.get_alpha_bar(t_normalized=s_float)
+        alpha_t_bar = self.noise_schedule.get_alpha_bar(t_normalized=t_float)
+
+        # Get transition matrices Q_t_bar for forward diffusion
+        Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, device=self.device)  # (bs, dx_in, dx_out), (bs, de_in, de_out)
+        assert (abs(Qtb.X.sum(dim=2) - 1.) < 1e-4).all(), Qtb.X.sum(dim=2) - 1
+        assert (abs(Qtb.E.sum(dim=2) - 1.) < 1e-4).all()
+
+        # Forward diffusion: Compute transition probabilities
+        probX = X @ Qtb.X               # (bs, n, dx_out)    - node transition probabilities p(X_t | X_0)
+        probE = E @ Qtb.E.unsqueeze(1)  # (bs, n, n, de_out) - edge transition probabilities p(E_t | E_0)
+
+        # Sample discrete features from the transition probabilities
+        sampled_t = sample_discrete_features(probX=probX, probE=probE, node_mask=node_mask)
+        X_t = F.one_hot(sampled_t.X, num_classes=self.Xdim_output)
+        E_t = F.one_hot(sampled_t.E, num_classes=self.Edim_output)
+        assert (X.shape == X_t.shape) and (E.shape == E_t.shape)
+        
+        z_t = PlaceHolder(X=X_t, E=E_t, y=y).type_as(X_t).mask(node_mask) # NOTE: noise is NOT applied to y!
+        
+        noisy_data = {
+            't_int': t_int, 't': t_float, 'beta_t': beta_t, 
+            'alpha_s_bar': alpha_s_bar, 'alpha_t_bar': alpha_t_bar, 
+            'X_t': z_t.X, 'E_t': z_t.E, 'y_t': z_t.y, 'node_mask': node_mask}
+        return noisy_data
+
+    def _augment_data(self, noisy_data):
+        """
+        At every training step (after adding noise & sampling discrete features)
+        extra features are computed (graph-structural features & molecular features)
+        and appended to the graph transformer input.
+        + timestep info t is added to graph-level features y to inform the model about the noise level
+        # TODO: NEW
+        """
+        extra_features = self.augmentation(noisy_data)
+        extra_X = extra_features.X
+        extra_E = extra_features.E  
+        extra_y = extra_features.y
+
+        t = noisy_data['t'] # normalized timestep
+        extra_y = torch.cat((extra_y, t), dim=1)
+
+        return PlaceHolder(X=extra_X, E=extra_E, y=extra_y)
+    
+    def kl_prior(self, X, E, node_mask):
+        """Computes the KL between q(z1 | x) and the prior p(z1) = Normal(0, 1).
+
+        This is essentially a lot of work for something that is in practice negligible in the loss. However, you
+        compute it so that you see it when you've made a mistake in your noise schedule.
+        """
+        # Compute the last alpha value, alpha_T.
+        ones = torch.ones((X.size(0), 1), device=X.device)
+        Ts = self.T * ones
+        alpha_t_bar = self.noise_schedule.get_alpha_bar(t_int=Ts)  # (bs, 1)
+
+        Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, self.device)
+
+        # Compute transition probabilities
+        probX = X @ Qtb.X  # (bs, n, dx_out)
+        probE = E @ Qtb.E.unsqueeze(1)  # (bs, n, n, de_out)
+        assert probX.shape == X.shape
+
+        bs, n, _ = probX.shape
+
+        limit_X = self.limit_dist.X[None, None, :].expand(bs, n, -1).type_as(probX)
+        limit_E = self.limit_dist.E[None, None, None, :].expand(bs, n, n, -1).type_as(probE)
+
+        # Make sure that masked rows do not contribute to the loss
+        limit_dist_X, limit_dist_E, probX, probE = mask_distributions(true_X=limit_X.clone(),
+                                                                                      true_E=limit_E.clone(),
+                                                                                      pred_X=probX,
+                                                                                      pred_E=probE,
+                                                                                      node_mask=node_mask)
+
+        kl_distance_X = F.kl_div(input=probX.log(), target=limit_dist_X, reduction='none')
+        kl_distance_E = F.kl_div(input=probE.log(), target=limit_dist_E, reduction='none')
+
+        return sum_except_batch(kl_distance_X) + \
+               sum_except_batch(kl_distance_E)
+
+    def compute_Lt(self, X, E, y, pred, noisy_data, node_mask, test):
+        pred_probs_X = F.softmax(pred.X, dim=-1)
+        pred_probs_E = F.softmax(pred.E, dim=-1)
+        pred_probs_y = F.softmax(pred.y, dim=-1)
+
+        Qtb = self.transition_model.get_Qt_bar(noisy_data['alpha_t_bar'], self.device)
+        Qsb = self.transition_model.get_Qt_bar(noisy_data['alpha_s_bar'], self.device)
+        Qt = self.transition_model.get_Qt(noisy_data['beta_t'], self.device)
+
+        # Compute distributions to compare with KL
+        bs, n, d = X.shape
+        prob_true = posterior_distributions(X=X, E=E, y=y, X_t=noisy_data['X_t'], E_t=noisy_data['E_t'],
+                                                            y_t=noisy_data['y_t'], Qt=Qt, Qsb=Qsb, Qtb=Qtb)
+        prob_true.E = prob_true.E.reshape((bs, n, n, -1))
+        prob_pred = posterior_distributions(X=pred_probs_X, E=pred_probs_E, y=pred_probs_y,
+                                                            X_t=noisy_data['X_t'], E_t=noisy_data['E_t'],
+                                                            y_t=noisy_data['y_t'], Qt=Qt, Qsb=Qsb, Qtb=Qtb)
+        prob_pred.E = prob_pred.E.reshape((bs, n, n, -1))
+
+        # Reshape and filter masked rows
+        prob_true_X, prob_true_E, prob_pred.X, prob_pred.E = mask_distributions(true_X=prob_true.X,
+                                                                                                true_E=prob_true.E,
+                                                                                                pred_X=prob_pred.X,
+                                                                                                pred_E=prob_pred.E,
+                                                                                                node_mask=node_mask)
+        kl_x = (self.test_X_kl if test else self.val_X_kl)(prob_true.X, torch.log(prob_pred.X))
+        kl_e = (self.test_E_kl if test else self.val_E_kl)(prob_true.E, torch.log(prob_pred.E))
+        return self.T * (kl_x + kl_e)
+
+    def reconstruction_logp(self, t, X, E, node_mask):
+        # Compute noise values for t = 0.
+        t_zeros = torch.zeros_like(t)
+        beta_0 = self.noise_schedule(t_zeros)
+        Q0 = self.transition_model.get_Qt(beta_t=beta_0, device=self.device)
+
+        probX0 = X @ Q0.X  # (bs, n, dx_out)
+        probE0 = E @ Q0.E.unsqueeze(1)  # (bs, n, n, de_out)
+
+        sampled0 = sample_discrete_features(probX=probX0, probE=probE0, node_mask=node_mask)
+
+        X0 = F.one_hot(sampled0.X, num_classes=self.Xdim_output).float()
+        E0 = F.one_hot(sampled0.E, num_classes=self.Edim_output).float()
+        y0 = sampled0.y
+        assert (X.shape == X0.shape) and (E.shape == E0.shape)
+
+        sampled_0 = PlaceHolder(X=X0, E=E0, y=y0).mask(node_mask)
+
+        # Predictions
+        noisy_data = {'X_t': sampled_0.X, 'E_t': sampled_0.E, 'y_t': sampled_0.y, 'node_mask': node_mask,
+                      't': torch.zeros(X0.shape[0], 1).type_as(y0)}
+        extra_data = self.compute_extra_data(noisy_data)
+        pred0 = self.forward(noisy_data, extra_data, node_mask)
+
+        # Normalize predictions
+        probX0 = F.softmax(pred0.X, dim=-1)
+        probE0 = F.softmax(pred0.E, dim=-1)
+        proby0 = F.softmax(pred0.y, dim=-1)
+
+        # Set masked rows to arbitrary values that don't contribute to loss
+        probX0[~node_mask] = torch.ones(self.Xdim_output).type_as(probX0)
+        probE0[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2))] = torch.ones(self.Edim_output).type_as(probE0)
+
+        diag_mask = torch.eye(probE0.size(1)).type_as(probE0).bool()
+        diag_mask = diag_mask.unsqueeze(0).expand(probE0.size(0), -1, -1)
+        probE0[diag_mask] = torch.ones(self.Edim_output).type_as(probE0)
+
+        return PlaceHolder(X=probX0, E=probE0, y=proby0)
+
+    def compute_val_loss(self, pred, noisy_data, X, E, y, node_mask, test=False):
+        """
+        Computes an estimator for the variational lower bound.
+        """
+        # TODO: NEW
+        t = noisy_data['t']
+
+        # 1. Prior on graph size: log p(N) where N is number of nodes
+        # This encourages the model to generate graphs of realistic sizes
+        N = node_mask.sum(1).long()
+        log_pN = self.node_dist.log_prob(N)
+
+        # 2. The KL between q(z_T | x) and p(z_T) = Uniform(1/num_classes). Should be close to zero.
+        # At T, the noisy data should be close to the prior (marginal distribution)
+        kl_prior = self.kl_prior(X, E, node_mask)
+
+        # 3. Diffusion loss
+        loss_all_t = self.compute_Lt(X, E, y, pred, noisy_data, node_mask, test)
+
+        # 4. Reconstruction loss
+        # Compute L0 term : -log p (X, E, y | z_0) = reconstruction loss
+        prob0 = self.reconstruction_logp(t, X, E, node_mask)
+
+        loss_term_0 = self.val_X_logp(X * prob0.X.log()) + self.val_E_logp(E * prob0.E.log())
+
+        # Combine terms to get the ELBO
+        # Note: We negate log_pN and loss_term_0 because we want to maximize them
+        nlls = - log_pN + kl_prior + loss_all_t - loss_term_0
+        assert len(nlls.shape) == 1, f'{nlls.shape} has more than only batch dim.'
+
+        # Update NLL metric object and return batch nll
+        nll = (self.test_nll if test else self.val_nll)(nlls)        # Average over the batch
+
+        if wandb.run:
+            wandb.log({"kl prior": kl_prior.mean(),
+                       "Estimator loss terms": loss_all_t.mean(),
+                       "log_pn": log_pN.mean(),
+                       "loss_term_0": loss_term_0,
+                       'batch_test_nll' if test else 'val_nll': nll}, commit=False)
+        return nll
+
+    @torch.no_grad()
+    def sample_batch(self, batch: Batch) -> list[Chem.Mol]:
+        """
+        Used to iteratively sample a clean graph from a noisy graph.
+        # NOTE: this VERY IMPORTANT function is defined very differently in the DiGress & DiffMS implementations
+        """
+        dense_data, node_mask = to_dense(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
+
+        # Sample initial noisy graph G^T from the limit distribution
+        z_T = sample_discrete_feature_noise(limit_dist=self.limit_dist, node_mask=node_mask)
+        X, E, y = z_T.X, z_T.E, batch.y # noisy nodes & edges along with conditional features y
+        assert (E == torch.transpose(E, 1, 2)).all()
+
+        # Iteratively sample p(z_s | z_t) for t = 1, ..., T, with s = t - 1.
+        for s_int in tqdm(reversed(range(0, self.T)), desc='Sampling', leave=False):
+            s_array = s_int * torch.ones((len(batch), 1), dtype=torch.float32, device=self.device)
+            t_array = s_array + 1
+            s_norm = s_array / self.T
+            t_norm = t_array / self.T
+
+            # Sample z_s (I think we can use discrete_sampled_s to save intermediate samples through diffusion steps)
+            sampled_s, discrete_sampled_s = self.sample_p_zs_given_zt(s_norm, t_norm, X, E, y, node_mask)
+            X, E, y = sampled_s.X, sampled_s.E, batch.y # y is kept fixed
+
+        # Final sample
+        sampled_s = sampled_s.mask(node_mask, collapse=True)
+        X, E, y = sampled_s.X, sampled_s.E, batch.y
+        # In DiffMS, X & y are kept fixed and only E is updated
+        # In DiGress all three X, E, y are updated
+
+        mols = []
+        for nodes, adj_mat in zip(X, E):
+            mols.append(self.visualization_tools.mol_from_graphs(nodes, adj_mat))
+        return mols
+
+    def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, node_mask):
+        """Samples from zs ~ p(zs | zt). Only used during sampling.
+           if last_step, return the graph prediction as well"""
+        bs, n, dxs = X_t.shape
+        beta_t = self.noise_schedule(t_normalized=t)  # (bs, 1)
+        alpha_s_bar = self.noise_schedule.get_alpha_bar(t_normalized=s)
+        alpha_t_bar = self.noise_schedule.get_alpha_bar(t_normalized=t)
+
+        # Retrieve transitions matrix
+        Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, self.device)
+        Qsb = self.transition_model.get_Qt_bar(alpha_s_bar, self.device)
+        Qt = self.transition_model.get_Qt(beta_t, self.device)
+
+        # Neural net predictions
+        noisy_data = {'X_t': X_t, 'E_t': E_t, 'y_t': y_t, 't': t, 'node_mask': node_mask}
+        extra_data = self.compute_extra_data(noisy_data)
+        pred = self.forward(noisy_data, extra_data, node_mask)
+
+        # Normalize predictions
+        pred_X = F.softmax(pred.X, dim=-1)               # bs, n, d0
+        pred_E = F.softmax(pred.E, dim=-1)               # bs, n, n, d0
+
+        p_s_and_t_given_0_X = compute_batched_over0_posterior_distribution(X_t=X_t,
+                                                                                           Qt=Qt.X,
+                                                                                           Qsb=Qsb.X,
+                                                                                           Qtb=Qtb.X)
+
+        p_s_and_t_given_0_E = compute_batched_over0_posterior_distribution(X_t=E_t,
+                                                                                           Qt=Qt.E,
+                                                                                           Qsb=Qsb.E,
+                                                                                           Qtb=Qtb.E)
+        # Dim of these two tensors: bs, N, d0, d_t-1
+        weighted_X = pred_X.unsqueeze(-1) * p_s_and_t_given_0_X         # bs, n, d0, d_t-1
+        unnormalized_prob_X = weighted_X.sum(dim=2)                     # bs, n, d_t-1
+        unnormalized_prob_X[torch.sum(unnormalized_prob_X, dim=-1) == 0] = 1e-5
+        prob_X = unnormalized_prob_X / torch.sum(unnormalized_prob_X, dim=-1, keepdim=True)  # bs, n, d_t-1
+
+        pred_E = pred_E.reshape((bs, -1, pred_E.shape[-1]))
+        weighted_E = pred_E.unsqueeze(-1) * p_s_and_t_given_0_E        # bs, N, d0, d_t-1
+        unnormalized_prob_E = weighted_E.sum(dim=-2)
+        unnormalized_prob_E[torch.sum(unnormalized_prob_E, dim=-1) == 0] = 1e-5
+        prob_E = unnormalized_prob_E / torch.sum(unnormalized_prob_E, dim=-1, keepdim=True)
+        prob_E = prob_E.reshape(bs, n, n, pred_E.shape[-1])
+
+        assert ((prob_X.sum(dim=-1) - 1).abs() < 1e-4).all()
+        assert ((prob_E.sum(dim=-1) - 1).abs() < 1e-4).all()
+
+        sampled_s = sample_discrete_features(prob_X, prob_E, node_mask=node_mask)
+
+        X_s = F.one_hot(sampled_s.X, num_classes=self.Xdim_output).float()
+        E_s = F.one_hot(sampled_s.E, num_classes=self.Edim_output).float()
+
+        assert (E_s == torch.transpose(E_s, 1, 2)).all()
+        assert (X_t.shape == X_s.shape) and (E_t.shape == E_s.shape)
+
+        out_one_hot = PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0))
+        out_discrete = PlaceHolder(X=X_s, E=E_s, y=torch.zeros(y_t.shape[0], 0))
+
+        return out_one_hot.mask(node_mask).type_as(y_t), out_discrete.mask(node_mask, collapse=True).type_as(y_t)
+
+
+    # TODO: we need to update the forward pass to include the decoding process (when NOT pretrain-target)
+    # IMPORTANT STEPS UNIQUE TO FULL MODEL:
+    # - data[representation][smiles/SMILES] to pytorch_geometric.data.Data perhaps at dataloader level?!
+    # - to dense_data, node_mask with utils.to_dense(x, edge_index, edge_attr, batch)
+    # - noisy_data = _apply_noise(X, E, y, node_mask) to transform clean dense graph to noisy dense graph (discretized!)
+    # - extra_data = _augment_data(noisy_data) to compute extra features
+    # - extract X, E, y from both and concat into X, E, y input for graph transformer
+    # - forward pass through the graph transformer drug_decoder(X, E, y, node_mask)
+    # - predictions of size output dims (X, E, y) as PlaceHolder
+    # DURING TRAINING/VAL/TEST STEP THIS IS ONE SHOT GENERATION OF CLEAN GRAPH FROM NOISY GRAPH
+    # DURING VAL/TEST EPOCH END, WE DO ITERATIVE SAMPLING W/ sample_batch() & sampling_metrics or chemical_validity_metrics (not yet implemented)
+    # - train loss w/ train_reconstruction_loss class using predicted & true X, E, y (y has no contribution to the loss due to lambda_train)
+    # - val/test use compute_val_loss method
+    # - update metrics train/val/test
+
+
+
     def forward(
         self, 
         drug_features: List[torch.Tensor] = None, 
@@ -526,12 +860,12 @@ class FullDTIModel(pl.LightningModule):
         if drug_features is not None and len(drug_features) > 0:
             drug_result = self._encode_drug_features(drug_features)
             if self.aggregator_type == AttentiveAggregator and self.drug_aggregator is not None:
-                drug_embedding, drug_attention = drug_result
+                drug_embedding, drug_kl, drug_attention = drug_result
             else:
-                drug_embedding = drug_result
+                drug_embedding, drug_kl = drug_result
                 drug_attention = None
         else:
-            drug_embedding, drug_attention = None, None
+            drug_embedding, drug_kl, drug_attention = None, None, None
         
         # Encode target features
         if target_features is not None and len(target_features) > 0:
@@ -546,6 +880,7 @@ class FullDTIModel(pl.LightningModule):
         
         outputs = {
             "drug_embedding": drug_embedding,
+            "drug_kl": drug_kl,
             "target_embedding": target_embedding,
         }
         
@@ -742,8 +1077,9 @@ class FullDTIModel(pl.LightningModule):
                 outputs["drug_embedding"], 
                 batch["features"]["FP-Morgan"]
             )
-            loss = self.hparams.contrastive_weight * contrastive_loss
+            loss = self.hparams.contrastive_weight * contrastive_loss + self.hparams.kl_weight * outputs["drug_kl"]
             self.log(f"{step_name}/contrastive_loss", contrastive_loss.item())
+            self.log(f"{step_name}/drug_kl", outputs["drug_kl"].item())
             
         elif self.phase == "pretrain_target":
             # Target branch contrastive loss
