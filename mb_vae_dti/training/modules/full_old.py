@@ -1,6 +1,8 @@
 """
-Multi-hybrid DTI PyTorch Lightning module with
-- Multi-modal input (multiple drug/target features with aggregation)
+Full DTI PyTorch Lightning module with
+- Multi-modal input (multiple drug/target features with aggregation)  
+- Variational drug branch with KL divergence
+- Discrete diffusion decoder for drug reconstruction
 - Multi-output prediction (DTI head for multiple simultaneous DTI score prediction)
 - Contrastive pretraining support (InfoNCE loss for individual branch pretraining)
 - Support for all training phases: pretrain_drug, pretrain_target, train, finetune
@@ -13,22 +15,22 @@ import pytorch_lightning as pl
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Tuple, Literal
 import logging
+import numpy as np
+from rdkit import Chem
+from rdkit.Chem.rdchem import BondType as BT
+from collections import Counter
 
 from mb_vae_dti.training.models import (
     ResidualEncoder, TransformerEncoder,
-    ConcatAggregator, AttentiveAggregator,
-    CrossAttentionFusion
+    ConcatAggregator, AttentiveAggregator, CrossAttentionFusion,
 )
-from mb_vae_dti.training.models.heads import DTIHead, InfoNCEHead
+from .optimizer_utils import configure_optimizer_and_scheduler
+from mb_vae_dti.training.models.heads import DTIHead, InfoNCEHead, KLVariationalHead
+from mb_vae_dti.training.models.decoders import DiscreteDiffusionDecoder
 from mb_vae_dti.training.metrics import DTIMetricsCollection, RealDTIMetrics
+from mb_vae_dti.training.diffusion.utils import PlaceHolder, to_dense, sample_discrete_feature_noise
 from .optimizer_utils import configure_optimizer_and_scheduler
 
-from mb_vae_dti.training.diffusion.utils import *
-from mb_vae_dti.training.diffusion.augmentation import Augmentation
-from mb_vae_dti.training.diffusion.discrete_noise import PredefinedNoiseScheduleDiscrete, MarginalUniformTransition
-from mb_vae_dti.training.models.graph_transformer import GraphTransformer
-from mb_vae_dti.training.diffusion.loss import TrainLossDiscrete
-from mb_vae_dti.training.metrics.validation_metrics import *
 
 logger = logging.getLogger(__name__)
 
@@ -49,51 +51,27 @@ class FullDTIModel(pl.LightningModule):
     - train: General DTI training (multi-score prediction on combined dataset)
     - finetune: Fine-tuning on benchmark datasets (single-score prediction)
     """
+    
     def __init__(
         self,
         # Architecture parameters
-        embedding_dim: int,
         drug_features: Dict[str, int],
         target_features: Dict[str, int],
-
         encoder_type: Literal["resnet", "transformer"],
         encoder_kwargs: Optional[Dict],
-
-        aggregator_type: Literal["concat", "attentive"],
+        aggregator_type: Literal["concat", "attentive", "cross_attention"],
         aggregator_kwargs: Optional[Dict],
-
-        fusion_kwargs: Optional[Dict],
+        inter_branch_aggregator_kwargs: Optional[Dict],
         
+        # Head parameters
         dti_head_kwargs: Optional[Dict],
         infonce_head_kwargs: Optional[Dict],
-        variational_head_kwargs: Optional[Dict],     # TODO: NEW we add a variational head for the drug branch
+        variational_head_kwargs: Optional[Dict],
         
-        # Diffusion decoder parameters # TODO: NEW
-        diffusion_steps: int,
-        num_samples_to_generate: int,
-        graph_transformer_kwargs: Optional[Dict],
-        dataset_infos: Dict,
-        # Shape of dataset_infos:
-        # {
-        #     "general": {
-        #         "atom_types": list,
-        #         "bond_types": list,
-        #         "num_atom_types": int,
-        #         "max_n_nodes": int,
-        #         "atom_valencies": list,
-        #         "atom_weights": list,
-        #         "max_weight": int
-        #     }
-        #     "dataset": {
-        #         "dataset_name": str,
-        #         "max_nodes": int,
-        #         "node_count_distribution": dict,
-        #         "node_marginals": list,
-        #         "edge_marginals": list,
-        #         "valency_distribution": list,
-        #     }
-        # nodes_dist: DistributionNodes,
-
+        # Diffusion decoder parameters
+        diffusion_decoder_kwargs: Optional[Dict],
+        
+        # Training parameters
         learning_rate: float,
         weight_decay: float,
         scheduler: Optional[Literal["const", "step", "one_cycle", "cosine"]],
@@ -101,36 +79,40 @@ class FullDTIModel(pl.LightningModule):
         # Phase-specific parameters
         phase: Literal["pretrain_drug", "pretrain_target", "train", "finetune"],
         finetune_score: Optional[Literal["Y_pKd", "Y_KIBA"]],
+        checkpoint_path: Optional[str],
         
         # Loss weights
         contrastive_weight: float,
+        kl_weight: float,
+        reconstruction_weight: float,
         temperature: float,
-        kl_weight: float, # TODO: NEW
-        reconstruction_weight: float, # TODO: NEW
-        lambda_train: Optional[List[float]], # TODO: NEW This is default [1, 5, 0] (used in DiGress)
+        
+        # Dataset statistics (computed from training data)
+        dataset_statistics: Optional[Dict],
     ):
         super().__init__()
         self.save_hyperparameters()
-        self.model_dtype = torch.float32
+        
+        # Validate phase-specific parameters
+        if phase == "finetune" and finetune_score is None:
+            raise ValueError("finetune_score must be specified for finetune phase")
         
         # Create encoders based on type
-        encoder_type = ResidualEncoder if encoder_type == "resnet" else TransformerEncoder
+        encoder_class = ResidualEncoder if encoder_type == "resnet" else TransformerEncoder
         
         # Drug encoders
         self.drug_encoders = nn.ModuleDict()
         for feat_name in drug_features:
-            self.drug_encoders[feat_name] = encoder_type(
+            self.drug_encoders[feat_name] = encoder_class(
                 input_dim=drug_features[feat_name],
-                output_dim=encoder_kwargs["hidden_dim"] if len(drug_features) > 1 else embedding_dim,
                 **encoder_kwargs
             )
         
         # Target encoders
         self.target_encoders = nn.ModuleDict()
         for feat_name in target_features:
-            self.target_encoders[feat_name] = encoder_type(
+            self.target_encoders[feat_name] = encoder_class(
                 input_dim=target_features[feat_name],
-                output_dim=encoder_kwargs["hidden_dim"] if len(target_features) > 1 else embedding_dim,
                 **encoder_kwargs
             )
         
@@ -140,35 +122,41 @@ class FullDTIModel(pl.LightningModule):
         # Drug aggregator
         if len(drug_features) > 1:
             self.drug_aggregator = aggregator_type(
-                input_dim=encoder_kwargs["hidden_dim"],
-                output_dim=embedding_dim,
+                input_dim=encoder_kwargs["output_dim"],
                 n_features=len(drug_features),
                 **aggregator_kwargs
             )
         else:
-            self.drug_aggregator = None  # No aggregation needed for single feature
+            self.drug_aggregator = None
             
         # Target aggregator
         if len(target_features) > 1:
             self.target_aggregator = aggregator_type(
-                input_dim=encoder_kwargs["hidden_dim"],
-                output_dim=embedding_dim,
+                input_dim=encoder_kwargs["output_dim"],
                 n_features=len(target_features),
                 **aggregator_kwargs
             )
         else:
-            self.target_aggregator = None  # No aggregation needed for single feature
+            self.target_aggregator = None
+        
+        # Variational head for drug branch (always present)
+        variational_kwargs = variational_head_kwargs or {}
+        self.drug_variational_head = KLVariationalHead(
+            input_dim=aggregator_kwargs["output_dim"],
+            output_dim=variational_kwargs.get("latent_dim", 256)
+        )
+        self.latent_dim = variational_kwargs.get("latent_dim", 256)
         
         # Inter-branch aggregator (for DTI prediction)
         if phase in ["train", "finetune"]:
-            self.fusion = CrossAttentionFusion(
-                input_dim=embedding_dim,
-                **fusion_kwargs
+            self.inter_branch_aggregator = CrossAttentionFusion(
+                input_dim=aggregator_kwargs["output_dim"],
+                **inter_branch_aggregator_kwargs
             )
             
             # DTI prediction head
             self.dti_head = DTIHead(
-                input_dim=fusion_kwargs["output_dim"],
+                input_dim=inter_branch_aggregator_kwargs["output_dim"],
                 **dti_head_kwargs
             )
         
@@ -178,88 +166,53 @@ class FullDTIModel(pl.LightningModule):
             contrastive_kwargs.setdefault("temperature", temperature)
             
             if phase == "pretrain_drug":
+                # Drug InfoNCE uses latent z as input
                 self.drug_infonce_head = InfoNCEHead(
-                    input_dim=embedding_dim,
+                    input_dim=self.latent_dim,
                     **contrastive_kwargs
                 )
             elif phase == "pretrain_target":
                 self.target_infonce_head = InfoNCEHead(
-                    input_dim=embedding_dim,
+                    input_dim=aggregator_kwargs["output_dim"],
                     **contrastive_kwargs
                 )
         
-        #########################################################
-        # Diffusion decoder
-        #########################################################
-        self.T = diffusion_steps
-        self.best_val_nll = 1e8
-
-        # Limit distribution for forward noise
-        self.nodes_dist = DistributionNodes(dataset_infos["dataset"]["node_count_distribution"])
-        self.limit_dist = PlaceHolder(
-            X=dataset_infos["dataset"]["node_marginals"], 
-            E=dataset_infos["dataset"]["edge_marginals"], 
-            y=torch.ones(graph_transformer_kwargs["output_dims"]["y"]) / graph_transformer_kwargs["output_dims"]["y"]
-        )
-        # Noise schedule and transition model for applying noise to clean graphs
-        self.noise_schedule = PredefinedNoiseScheduleDiscrete(timesteps=diffusion_steps)
-        self.transition_model = MarginalUniformTransition(
-            x_marginals=dataset_infos["dataset"]["node_marginals"],
-            e_marginals=dataset_infos["dataset"]["edge_marginals"],
-            y_classes=graph_transformer_kwargs["output_dims"]["y"]
-        )
-        # Augmentation for adding features to the discretized noisy graphs
-        self.augmentation = Augmentation(
-            valencies=dataset_infos["general"]["atom_valencies"],
-            max_weight=dataset_infos["general"]["max_weight"],
-            atom_weights=dataset_infos["general"]["atom_weights"],
-            max_n_nodes=dataset_infos["general"]["max_n_nodes"]
-        )
-        # Denoising graph transformer
-        # self.Xdim = graph_transformer_kwargs['input_dims']['X'] # 8 + extra features
-        # self.Edim = graph_transformer_kwargs['input_dims']['E'] # 5
-        # self.ydim = graph_transformer_kwargs['input_dims']['y'] # embedding_dim + extra features
-        # self.Xdim_output = graph_transformer_kwargs['output_dims']['X']
-        # self.Edim_output = graph_transformer_kwargs['output_dims']['E']
-        # self.ydim_output = graph_transformer_kwargs['output_dims']['y']
-
-        self.decoder = GraphTransformer(
-            n_layers=graph_transformer_kwargs['n_layers'],
-            input_dims=graph_transformer_kwargs['input_dims'],
-            output_dims=graph_transformer_kwargs['output_dims'],
-            hidden_mlp_dims=graph_transformer_kwargs['hidden_mlp_dims'],
-            hidden_dims=graph_transformer_kwargs['hidden_dims'],
-            act_fn_in=nn.ReLU(),
-            act_fn_out=nn.ReLU()
-        )
-
+        # Diffusion decoder (for drug reconstruction during pretraining)
+        if phase == "pretrain_drug":
+            if dataset_statistics is None:
+                logger.warning("Dataset statistics not provided - using defaults for diffusion decoder")
+                # Default statistics (will be overridden by actual data)
+                dataset_statistics = self._get_default_dataset_statistics()
+            
+            decoder_kwargs = diffusion_decoder_kwargs or {}
+            
+            # Update graph transformer input dims to include latent z
+            graph_transformer_params = decoder_kwargs.get("graph_transformer_params", {})
+            graph_transformer_params["input_dims"]["y"] = self.latent_dim
+            decoder_kwargs["graph_transformer_params"] = graph_transformer_params
+            
+            self.diffusion_decoder = DiscreteDiffusionDecoder(
+                dataset_infos=dataset_statistics,
+                **decoder_kwargs
+            )
+            
+            # Store atom/bond decoders for molecule conversion
+            self.atom_decoder = dataset_statistics.get("atom_decoder", ['C', 'O', 'P', 'N', 'S', 'Cl', 'F', 'H'])
+            self.bond_decoder = dataset_statistics.get("bond_decoder", {0: None, 1: BT.SINGLE, 2: BT.DOUBLE, 3: BT.TRIPLE, 4: BT.AROMATIC})
+        
         # Loss functions
         self.bce_loss = nn.BCEWithLogitsLoss()
         self.mse_loss = nn.MSELoss()
-
-        # TODO: NEW
-        self.reconstruction_loss = TrainLossDiscrete(lambda_train = lambda_train)
-        self.val_nll = NLL()
-        self.val_X_kl = SumExceptBatchKL()
-        self.val_E_kl = SumExceptBatchKL()
-        self.val_X_logp = SumExceptBatchMetric()
-        self.val_E_logp = SumExceptBatchMetric()
-        self.test_nll = NLL()
-        self.test_X_kl = SumExceptBatchKL()
-        self.test_E_kl = SumExceptBatchKL()
-        self.test_X_logp = SumExceptBatchMetric()
-        self.test_E_logp = SumExceptBatchMetric()
-        # chemical validity metrics? TODO
         
-        # Loss weights for DTI prediction (based on inverse frequency in combined DTI dataset)
-        self.register_buffer('loss_weights', torch.tensor([1.0, 0.903964, 0.282992, 0.755172]))
+        # Loss weights for DTI prediction
+        self.register_buffer('dti_loss_weights', torch.tensor([1.0, 0.903964, 0.282992, 0.755172]))
         
         # Setup metrics based on phase
         self.phase = phase
         self.finetune_score = finetune_score
         
         if phase in ["pretrain_drug", "pretrain_target"]:
-            # No specific metrics for pretraining - just log contrastive loss
+            # No specific metrics for pretraining
             self.train_metrics = None
             self.val_metrics = None
             self.test_metrics = None
@@ -285,25 +238,38 @@ class FullDTIModel(pl.LightningModule):
             )
         else:  # finetune
             # Single-score metrics for fine-tuning
-            if finetune_score is None:
-                raise ValueError("finetune_score must be specified for finetune phase")
-
             self.train_metrics = RealDTIMetrics(prefix="train/")
             self.val_metrics = RealDTIMetrics(prefix="val/")
             self.test_metrics = RealDTIMetrics(prefix="test/")
         
+        # Storage for manual analysis
+        self.test_predictions = []
+        self.test_targets = []
+        
         # Store aggregator type for handling different return formats
         self.aggregator_type = aggregator_type
         
-        # Note: Checkpoint loading is now handled in run.py setup function
-        # to support both single and dual checkpoint loading
+    def _get_default_dataset_statistics(self) -> Dict:
+        """Get default dataset statistics for diffusion decoder initialization."""
+        # These are reasonable defaults based on typical drug molecules
+        return {
+            "heavy_atom_counts": {i: 100 for i in range(10, 51)},  # Uniform distribution
+            "max_heavy_atoms": 64,
+            "max_mol_weight": 500.0,
+            "atom_weights": {0: 12.01, 1: 16.00, 2: 30.97, 3: 14.01, 4: 32.07, 5: 35.45, 6: 19.00, 7: 1.01},
+            "valencies": [4, 2, 5, 3, 2, 1, 1, 1],  # C, O, P, N, S, Cl, F, H
+            "x_marginals": torch.tensor([0.736, 0.131, 0.001, 0.107, 0.012, 0.003, 0.010, 0.000]),
+            "e_marginals": torch.tensor([0.913, 0.044, 0.006, 0.0002, 0.037]),
+            "atom_decoder": ['C', 'O', 'P', 'N', 'S', 'Cl', 'F', 'H'],
+            "bond_decoder": {0: None, 1: BT.SINGLE, 2: BT.DOUBLE, 3: BT.TRIPLE, 4: BT.AROMATIC}
+        }
     
     def load_pretrained_weights(self, checkpoint_path: str = None, drug_checkpoint_path: str = None, target_checkpoint_path: str = None) -> None:
         """
         Load pretrained weights from checkpoint(s) with smart matching.
         
         Args:
-            checkpoint_path: Path to a single checkpoint file (original functionality)
+            checkpoint_path: Path to a single checkpoint file
             drug_checkpoint_path: Path to drug branch pretrained weights
             target_checkpoint_path: Path to target branch pretrained weights
         """
@@ -373,10 +339,10 @@ class FullDTIModel(pl.LightningModule):
                 else:
                     drug_state_dict = drug_checkpoint
                 
-                # Load drug-specific weights
+                # Load drug-specific weights (encoders, aggregator, variational head, decoder)
                 drug_loaded = 0
                 for k, v in drug_state_dict.items():
-                    if k.startswith("drug_") and k in model_dict and model_dict[k].shape == v.shape:
+                    if (k.startswith("drug_") or k.startswith("diffusion_decoder")) and k in model_dict and model_dict[k].shape == v.shape:
                         model_dict[k] = v
                         drug_loaded += 1
                         logger.debug(f"Loaded drug weight: {k}")
@@ -450,15 +416,15 @@ class FullDTIModel(pl.LightningModule):
             trainer=self.trainer
         )
     
-    def _encode_drug_features(self, drug_features: List[torch.Tensor]) -> torch.Tensor:
+    def _encode_drug_features(self, drug_features: List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Encode and aggregate drug features.
+        Encode and aggregate drug features through VAE.
         
         Args:
             drug_features: List of drug feature tensors
             
         Returns:
-            Aggregated drug embedding
+            Tuple of (aggregated_embedding, z_sampled, kl_loss)
         """
         # Encode individual drug features
         drug_embeddings = []
@@ -470,14 +436,19 @@ class FullDTIModel(pl.LightningModule):
         if self.drug_aggregator is not None:
             if self.aggregator_type == "attentive":
                 drug_embedding, drug_attention = self.drug_aggregator(drug_embeddings)
-                return drug_embedding, drug_attention
             else:
                 drug_embedding = self.drug_aggregator(drug_embeddings)
-                return drug_embedding
+                drug_attention = None
         else:
-            return drug_embeddings[0]  # Single feature, no aggregation needed
+            drug_embedding = drug_embeddings[0]
+            drug_attention = None
+        
+        # Pass through variational head
+        z_sampled, kl_loss = self.drug_variational_head(drug_embedding)
+        
+        return drug_embedding, z_sampled, kl_loss, drug_attention
     
-    def _encode_target_features(self, target_features: List[torch.Tensor]) -> torch.Tensor:
+    def _encode_target_features(self, target_features: List[torch.Tensor]) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Encode and aggregate target features.
         
@@ -485,7 +456,7 @@ class FullDTIModel(pl.LightningModule):
             target_features: List of target feature tensors
             
         Returns:
-            Aggregated target embedding
+            Tuple of (aggregated_embedding, attention_weights)
         """
         # Encode individual target features
         target_embeddings = []
@@ -497,72 +468,149 @@ class FullDTIModel(pl.LightningModule):
         if self.target_aggregator is not None:
             if self.aggregator_type == "attentive":
                 target_embedding, target_attention = self.target_aggregator(target_embeddings)
-                return target_embedding, target_attention
             else:
                 target_embedding = self.target_aggregator(target_embeddings)
-                return target_embedding
+                target_attention = None
         else:
-            return target_embeddings[0]  # Single feature, no aggregation needed
+            target_embedding = target_embeddings[0]
+            target_attention = None
+        
+        return target_embedding, target_attention
+    
+    def _smiles_to_graph(self, smiles_list: List[str]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Convert SMILES strings to molecular graphs.
+        
+        Args:
+            smiles_list: List of SMILES strings
+            
+        Returns:
+            Tuple of (X, E, node_mask) where:
+                X: Node features (batch_size, max_nodes, num_atom_types)
+                E: Edge features (batch_size, max_nodes, max_nodes, num_edge_types)
+                node_mask: Valid nodes mask (batch_size, max_nodes)
+        """
+        batch_size = len(smiles_list)
+        max_nodes = self.diffusion_decoder.augmentation.extra_graph_features.max_n_nodes
+        num_atom_types = len(self.atom_decoder)
+        num_edge_types = len(self.bond_decoder)
+        
+        # Initialize tensors
+        X = torch.zeros(batch_size, max_nodes, num_atom_types)
+        E = torch.zeros(batch_size, max_nodes, max_nodes, num_edge_types)
+        node_mask = torch.zeros(batch_size, max_nodes, dtype=torch.bool)
+        
+        atom_encoder = {atom: i for i, atom in enumerate(self.atom_decoder)}
+        
+        for idx, smiles in enumerate(smiles_list):
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                logger.warning(f"Invalid SMILES: {smiles}")
+                continue
+            
+            # Remove hydrogens
+            mol = Chem.RemoveHs(mol)
+            n_atoms = mol.GetNumAtoms()
+            
+            if n_atoms > max_nodes:
+                logger.warning(f"Molecule has {n_atoms} atoms, exceeding max {max_nodes}")
+                n_atoms = max_nodes
+            
+            # Set node features
+            for i, atom in enumerate(mol.GetAtoms()):
+                if i >= max_nodes:
+                    break
+                atom_type = atom.GetSymbol()
+                if atom_type in atom_encoder:
+                    X[idx, i, atom_encoder[atom_type]] = 1
+                else:
+                    # Default to carbon if unknown atom type
+                    X[idx, i, 0] = 1
+                node_mask[idx, i] = True
+            
+            # Set edge features
+            # First set all edges to "no bond" (index 0)
+            E[idx, :n_atoms, :n_atoms, 0] = 1
+            
+            # Then update with actual bonds
+            for bond in mol.GetBonds():
+                i = bond.GetBeginAtomIdx()
+                j = bond.GetEndAtomIdx()
+                if i >= max_nodes or j >= max_nodes:
+                    continue
+                
+                bond_type = bond.GetBondType()
+                # Map bond type to edge feature index
+                if bond_type == BT.SINGLE:
+                    edge_idx = 1
+                elif bond_type == BT.DOUBLE:
+                    edge_idx = 2
+                elif bond_type == BT.TRIPLE:
+                    edge_idx = 3
+                elif bond_type == BT.AROMATIC:
+                    edge_idx = 4
+                else:
+                    edge_idx = 0  # Unknown bond type
+                
+                # Set bond in both directions
+                E[idx, i, j, 0] = 0
+                E[idx, i, j, edge_idx] = 1
+                E[idx, j, i, 0] = 0
+                E[idx, j, i, edge_idx] = 1
+        
+        return X, E, node_mask
     
     def forward(
         self, 
         drug_features: List[torch.Tensor] = None, 
-        target_features: List[torch.Tensor] = None
+        target_features: List[torch.Tensor] = None,
+        drug_smiles: List[str] = None
     ) -> Dict[str, torch.Tensor]:
         """
-        Forward pass through the multi-hybrid model.
+        Forward pass through the full model.
         
         Args:
             drug_features: List of drug feature tensors
             target_features: List of target feature tensors
+            drug_smiles: List of SMILES strings (for reconstruction loss)
             
         Returns:
-            Dictionary containing predictions and embeddings
+            Dictionary containing predictions, embeddings, and losses
         """
         if (drug_features is None or len(drug_features) == 0) and (target_features is None or len(target_features) == 0):
             raise ValueError("Either drug_features or target_features must be provided")
         
-        # Encode drug features
+        outputs = {}
+        
+        # Encode drug features through VAE
         if drug_features is not None and len(drug_features) > 0:
-            drug_result = self._encode_drug_features(drug_features)
-            if self.aggregator_type == AttentiveAggregator and self.drug_aggregator is not None:
-                drug_embedding, drug_attention = drug_result
-            else:
-                drug_embedding = drug_result
-                drug_attention = None
+            drug_embedding, z_sampled, kl_loss, drug_attention = self._encode_drug_features(drug_features)
+            outputs["drug_embedding"] = drug_embedding
+            outputs["drug_z"] = z_sampled
+            outputs["kl_loss"] = kl_loss
+            if drug_attention is not None:
+                outputs["drug_attention"] = drug_attention
         else:
-            drug_embedding, drug_attention = None, None
+            drug_embedding = None
+            z_sampled = None
+            kl_loss = None
         
         # Encode target features
         if target_features is not None and len(target_features) > 0:
-            target_result = self._encode_target_features(target_features)
-            if self.aggregator_type == AttentiveAggregator and self.target_aggregator is not None:
-                target_embedding, target_attention = target_result
-            else:
-                target_embedding = target_result
-                target_attention = None
+            target_embedding, target_attention = self._encode_target_features(target_features)
+            outputs["target_embedding"] = target_embedding
+            if target_attention is not None:
+                outputs["target_attention"] = target_attention
         else:
-            target_embedding, target_attention = None, None
-        
-        outputs = {
-            "drug_embedding": drug_embedding,
-            "target_embedding": target_embedding,
-        }
-        
-        # Add attention weights if available
-        if drug_attention is not None:
-            outputs["drug_attention"] = drug_attention
-        if target_attention is not None:
-            outputs["target_attention"] = target_attention
+            target_embedding = None
         
         # DTI prediction (for train/finetune phases)
         if self.phase in ["train", "finetune"]:
-            # Ensure both embeddings are available for DTI prediction
             if drug_embedding is None or target_embedding is None:
                 raise ValueError("Both drug and target embeddings are required for DTI prediction")
             
-            # Inter-branch aggregation with cross-attention module
-            combined_features = self.fusion(drug_embedding, target_embedding)
+            # Inter-branch aggregation
+            combined_features = self.inter_branch_aggregator([drug_embedding, target_embedding])
             
             # DTI predictions
             predictions = self.dti_head(combined_features)
@@ -575,35 +623,81 @@ class FullDTIModel(pl.LightningModule):
                 "KIBA_pred": predictions["KIBA_pred"],
             })
         
+        # Drug reconstruction (for pretrain_drug phase)
+        if self.phase == "pretrain_drug" and drug_smiles is not None:
+            # Convert SMILES to molecular graphs
+            X_true, E_true, node_mask = self._smiles_to_graph(drug_smiles)
+            X_true = X_true.to(z_sampled.device)
+            E_true = E_true.to(z_sampled.device)
+            node_mask = node_mask.to(z_sampled.device)
+            
+            # Apply noise for training
+            noisy_data = self.diffusion_decoder.apply_noise(X_true, E_true, z_sampled, node_mask)
+            
+            # Compute extra features
+            extra_data = self.diffusion_decoder.compute_extra_data(noisy_data)
+            
+            # Forward through diffusion decoder
+            pred_X, pred_E = self.diffusion_decoder(noisy_data, extra_data, node_mask)
+            
+            # Compute reconstruction loss
+            loss_dict = self.diffusion_decoder.train_loss(
+                pred_X, pred_E, 
+                X_true, E_true,
+                node_mask
+            )
+            
+            outputs.update({
+                "reconstruction_loss": loss_dict["loss"],
+                "X_loss": loss_dict["X_loss"],
+                "E_loss": loss_dict["E_loss"],
+                "pred_X": pred_X,
+                "pred_E": pred_E,
+                "true_X": X_true,
+                "true_E": E_true,
+                "node_mask": node_mask
+            })
+        
         return outputs
     
     def _get_features_from_batch(
         self, 
         batch: Dict[str, Any]
-    ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    ) -> Tuple[List[torch.Tensor], List[torch.Tensor], Optional[List[str]]]:
         """Extract and prepare features from batch."""
         drug_feats = []
         target_feats = []
+        drug_smiles = None
         
         if self.phase == "pretrain_drug":
-            # For drug pretraining, extract drug features from batch["features"]
+            # For drug pretraining, extract drug features and SMILES
             for feat_name in self.hparams.drug_features:
                 if feat_name in batch["features"]:
                     drug_feats.append(batch["features"][feat_name])
                 else:
                     raise ValueError(f"Missing drug feature '{feat_name}' in batch")
+            
+            # Extract SMILES for reconstruction
+            if "representations" in batch and "smiles" in batch["representations"]:
+                drug_smiles = batch["representations"]["smiles"]
+            elif "representations" in batch and "SMILES" in batch["representations"]:
+                drug_smiles = batch["representations"]["SMILES"]
+            else:
+                raise ValueError("SMILES representations not found in batch")
+            
             target_feats = []
     
         elif self.phase == "pretrain_target":
-            # For target pretraining, extract target features from batch["features"]
+            # For target pretraining, extract target features
             for feat_name in self.hparams.target_features:
                 if feat_name in batch["features"]:
                     target_feats.append(batch["features"][feat_name])
                 else:
                     raise ValueError(f"Missing target feature '{feat_name}' in batch")
-            drug_feats = []  
+            drug_feats = []
             
-        else: # DTI batch
+        else:  # DTI batch (train/finetune)
+            # Extract drug features
             for feat_name in self.hparams.drug_features:
                 if feat_name in batch["drug"]["features"]:
                     drug_feats.append(batch["drug"]["features"][feat_name])
@@ -616,8 +710,12 @@ class FullDTIModel(pl.LightningModule):
                     target_feats.append(batch["target"]["features"][feat_name])
                 else:
                     raise ValueError(f"Missing target feature '{feat_name}' in batch")
+            
+            # Extract SMILES if available (for potential future use)
+            if "representations" in batch.get("drug", {}) and "SMILES" in batch["drug"]["representations"]:
+                drug_smiles = batch["drug"]["representations"]["SMILES"]
         
-        return drug_feats, target_feats
+        return drug_feats, target_feats, drug_smiles
     
     def _compute_contrastive_loss(
         self, 
@@ -634,7 +732,7 @@ class FullDTIModel(pl.LightningModule):
         Returns:
             Contrastive loss (scalar)
         """
-        # Use the cleaner forward interface
+        # Use the appropriate InfoNCE head
         if self.phase == "pretrain_drug":
             loss = self.drug_infonce_head(embeddings, fingerprints)
         else:  # pretrain_target
@@ -667,50 +765,55 @@ class FullDTIModel(pl.LightningModule):
             outputs["binary_logits"].squeeze(), 
             batch["y"]["Y"].float()
         )
-        total_loss += self.loss_weights[0] * binary_loss
+        total_loss += self.dti_loss_weights[0] * binary_loss
         loss_count += 1
         
         # Real-valued losses (with masking)
         real_losses = []
         
-        # pKd loss
-        if "Y_pKd" in batch["y"] and batch["y"]["Y_pKd_mask"].any():
-            valid_mask = batch["y"]["Y_pKd_mask"]
-            pred_kd = outputs["pKd_pred"][valid_mask].squeeze()
-            target_kd = batch["y"]["Y_pKd"][valid_mask].squeeze()
-            kd_loss = self.mse_loss(pred_kd, target_kd)
-            total_loss += self.loss_weights[1] * kd_loss
-            loss_count += 1
-            real_losses.append(("pKd", kd_loss.item()))
+        # Phase-specific loss computation
+        if self.phase == "finetune":
+            # Single score prediction
+            score_name = self.finetune_score  # e.g., "Y_pKd" or "Y_KIBA"
+            pred_name = score_name.replace("Y_", "") + "_pred"  # e.g., "pKd_pred"
+            
+            if f"{score_name}_mask" in batch["y"]:
+                mask = batch["y"][f"{score_name}_mask"]
+                if mask.any():
+                    pred = outputs[pred_name][mask]
+                    target = batch["y"][score_name][mask]
+                    score_loss = self.mse_loss(pred.squeeze(), target)
+                    real_losses.append((score_name, score_loss))
+                    
+                    # Weight index: pKd=1, pKi=2, KIBA=3
+                    weight_idx = {"Y_pKd": 1, "Y_pKi": 2, "Y_KIBA": 3}[score_name]
+                    total_loss += self.dti_loss_weights[weight_idx] * score_loss
+                    loss_count += 1
+        else:
+            # Multi-score prediction
+            for i, (score_name, pred_name) in enumerate([
+                ("Y_pKd", "pKd_pred"),
+                ("Y_pKi", "pKi_pred"),
+                ("Y_KIBA", "KIBA_pred")
+            ], 1):
+                if f"{score_name}_mask" in batch["y"]:
+                    mask = batch["y"][f"{score_name}_mask"]
+                    if mask.any():
+                        pred = outputs[pred_name][mask]
+                        target = batch["y"][score_name][mask]
+                        score_loss = self.mse_loss(pred.squeeze(), target)
+                        real_losses.append((score_name, score_loss))
+                        total_loss += self.dti_loss_weights[i] * score_loss
+                        loss_count += 1
         
-        # pKi loss
-        if "Y_pKi" in batch["y"] and batch["y"]["Y_pKi_mask"].any():
-            valid_mask = batch["y"]["Y_pKi_mask"]
-            pred_ki = outputs["pKi_pred"][valid_mask].squeeze()
-            target_ki = batch["y"]["Y_pKi"][valid_mask].squeeze()
-            ki_loss = self.mse_loss(pred_ki, target_ki)
-            total_loss += self.loss_weights[2] * ki_loss
-            loss_count += 1
-            real_losses.append(("pKi", ki_loss.item()))
-        
-        # KIBA loss
-        if "Y_KIBA" in batch["y"] and batch["y"]["Y_KIBA_mask"].any():
-            valid_mask = batch["y"]["Y_KIBA_mask"]
-            pred_kiba = outputs["KIBA_pred"][valid_mask].squeeze()
-            target_kiba = batch["y"]["Y_KIBA"][valid_mask].squeeze()
-            kiba_loss = self.mse_loss(pred_kiba, target_kiba)
-            total_loss += self.loss_weights[3] * kiba_loss
-            loss_count += 1
-            real_losses.append(("KIBA", kiba_loss.item()))
+        # Log individual losses
+        self.log(f"{step_name}/binary_loss", binary_loss.item())
+        for score_name, loss_val in real_losses:
+            self.log(f"{step_name}/{score_name}_loss", loss_val.item())
         
         # Normalize by number of active losses
         if loss_count > 0:
             total_loss = total_loss / loss_count
-        
-        # Log individual loss components
-        self.log(f"{step_name}/binary_loss", binary_loss.item(), prog_bar=False)
-        for loss_name, loss_value in real_losses:
-            self.log(f"{step_name}/{loss_name}_loss", loss_value, prog_bar=False)
         
         return total_loss
     
@@ -730,20 +833,38 @@ class FullDTIModel(pl.LightningModule):
             Tuple of (outputs, loss)
         """
         # Get features
-        drug_features, target_features = self._get_features_from_batch(batch)
+        drug_features, target_features, drug_smiles = self._get_features_from_batch(batch)
         
         # Forward pass
-        outputs = self(drug_features, target_features)
+        outputs = self(drug_features, target_features, drug_smiles)
         
         # Compute loss based on phase
         if self.phase == "pretrain_drug":
-            # Drug branch contrastive loss
+            # Drug branch losses: contrastive + KL + reconstruction
+            total_loss = 0.0
+            
+            # Contrastive loss (using latent z)
             contrastive_loss = self._compute_contrastive_loss(
-                outputs["drug_embedding"], 
+                outputs["drug_z"], 
                 batch["features"]["FP-Morgan"]
             )
-            loss = self.hparams.contrastive_weight * contrastive_loss
+            total_loss += self.hparams.contrastive_weight * contrastive_loss
             self.log(f"{step_name}/contrastive_loss", contrastive_loss.item())
+            
+            # KL loss
+            kl_loss = outputs["kl_loss"]
+            total_loss += self.hparams.kl_weight * kl_loss
+            self.log(f"{step_name}/kl_loss", kl_loss.item())
+            
+            # Reconstruction loss
+            if "reconstruction_loss" in outputs:
+                recon_loss = outputs["reconstruction_loss"]
+                total_loss += self.hparams.reconstruction_weight * recon_loss
+                self.log(f"{step_name}/reconstruction_loss", recon_loss.item())
+                self.log(f"{step_name}/X_loss", outputs["X_loss"].item())
+                self.log(f"{step_name}/E_loss", outputs["E_loss"].item())
+            
+            loss = total_loss
             
         elif self.phase == "pretrain_target":
             # Target branch contrastive loss
@@ -791,7 +912,7 @@ class FullDTIModel(pl.LightningModule):
         return loss
     
     def test_step(self, batch: Dict[str, Any], batch_idx: int):
-        """Test step."""
+        """Test step - similar to validation."""
         outputs, loss = self._common_step(batch, "test")
         
         # Update metrics based on phase
@@ -799,9 +920,20 @@ class FullDTIModel(pl.LightningModule):
             self._update_multi_score_metrics(outputs, batch, self.test_metrics)
         elif self.phase == "finetune" and self.test_metrics is not None:
             self._update_single_score_metrics(outputs, batch, self.test_metrics)
+            
+            # Store predictions for correlation calculation
+            valid_mask = batch["y"][f"{self.finetune_score}_mask"]
+            if valid_mask.any():
+                pred_name = self.finetune_score.replace("Y_", "") + "_pred"
+                valid_preds = outputs[pred_name][valid_mask]
+                valid_targets = batch["y"][self.finetune_score][valid_mask]
+                self.test_predictions.append(valid_preds.cpu())
+                self.test_targets.append(valid_targets.cpu())
         
         # Logging
         self.log("test/loss", loss)
+        
+        return loss
     
     def _update_multi_score_metrics(
         self, 
@@ -809,33 +941,32 @@ class FullDTIModel(pl.LightningModule):
         batch: Dict[str, Any], 
         metrics: DTIMetricsCollection
     ):
-        """Update multi-score metrics for general training."""
-        # Binary metrics
-        binary_preds = outputs["binary_pred"].squeeze()
+        """Update metrics for multi-score prediction."""
+        # Binary predictions
+        binary_preds = outputs["binary_pred"]
         binary_targets = batch["y"]["Y"]
         
-        # Real-valued metrics
+        # Real-valued predictions with masking
         real_preds = {}
         real_targets = {}
-        real_masks = {}
         
-        # Check each score
-        for score_name, pred_key in [("pKd", "pKd_pred"), ("pKi", "pKi_pred"), ("KIBA", "KIBA_pred")]:
-            batch_key = f"Y_{score_name}"
-            mask_key = f"{batch_key}_mask"
-            
-            if batch_key in batch["y"] and mask_key in batch["y"]:
-                real_preds[score_name] = outputs[pred_key].squeeze()
-                real_targets[score_name] = batch["y"][batch_key]
-                real_masks[score_name] = batch["y"][mask_key]
+        for score_name, pred_name in [
+            ("Y_pKd", "pKd_pred"),
+            ("Y_pKi", "pKi_pred"),
+            ("Y_KIBA", "KIBA_pred")
+        ]:
+            if f"{score_name}_mask" in batch["y"]:
+                mask = batch["y"][f"{score_name}_mask"]
+                if mask.any():
+                    real_preds[pred_name] = outputs[pred_name][mask]
+                    real_targets[score_name.replace("Y_", "")] = batch["y"][score_name][mask]
         
         # Update metrics
         metrics.update(
             binary_preds=binary_preds,
             binary_targets=binary_targets,
             real_preds=real_preds,
-            real_targets=real_targets,
-            real_masks=real_masks
+            real_targets=real_targets
         )
     
     def _update_single_score_metrics(
@@ -844,20 +975,18 @@ class FullDTIModel(pl.LightningModule):
         batch: Dict[str, Any], 
         metrics
     ):
-        """Update single-score metrics for fine-tuning."""
-        if self.finetune_score is None:
-            return
+        """Update metrics for single-score prediction."""
+        # Get predictions and targets for the specific score
+        score_name = self.finetune_score
+        pred_name = score_name.replace("Y_", "") + "_pred"
         
-        # Get the specific score being fine-tuned
-        pred_key = f"{self.finetune_score.split('_')[1]}_pred"
-        
-        score_pred = outputs[pred_key].squeeze()
-        score_target = batch["y"][self.finetune_score]
-        score_mask = batch["y"][f"{self.finetune_score}_mask"]
-        
-        # Update metrics only for valid samples
-        if score_mask.any():
-            metrics.update(score_pred, score_target, score_mask)
+        valid_mask = batch["y"][f"{score_name}_mask"]
+        if valid_mask.any():
+            valid_preds = outputs[pred_name][valid_mask]
+            valid_targets = batch["y"][score_name][valid_mask]
+            
+            # Update metrics
+            metrics.update(valid_preds, valid_targets)
     
     def on_train_epoch_end(self):
         """Compute and log training metrics."""
@@ -881,4 +1010,27 @@ class FullDTIModel(pl.LightningModule):
             test_metrics = self.test_metrics.compute()
             for name, value in test_metrics.items():
                 self.log(name, value)
-            self.test_metrics.reset() 
+            
+            # Additional manual correlation calculation for fine-tuning
+            if self.phase == "finetune" and len(self.test_predictions) > 0:
+                all_preds = torch.cat(self.test_predictions)
+                all_targets = torch.cat(self.test_targets)
+                
+                # Final correlation
+                pred_mean = all_preds.mean()
+                target_mean = all_targets.mean()
+                
+                pred_centered = all_preds - pred_mean
+                target_centered = all_targets - target_mean
+                
+                final_correlation = (pred_centered * target_centered).sum() / (
+                    torch.sqrt((pred_centered ** 2).sum()) * 
+                    torch.sqrt((target_centered ** 2).sum())
+                )
+                
+                self.log("test/manual_correlation", final_correlation)
+            
+            # Clear stored predictions and reset metrics
+            self.test_predictions.clear()
+            self.test_targets.clear()
+            self.test_metrics.reset()

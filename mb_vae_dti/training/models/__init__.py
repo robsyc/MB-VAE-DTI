@@ -13,7 +13,6 @@ from .blocks import (
     ConcatAggregator, AttentiveAggregator,
     CrossAttentionFusion
 )
-# from .decoders import DiscreteDiffusionDecoder
 from .graph_transformer import GraphTransformer
 
 __all__ = [
@@ -22,6 +21,5 @@ __all__ = [
     "ConcatAggregator",
     "AttentiveAggregator",
     "CrossAttentionFusion",
-    # "DiscreteDiffusionDecoder",
     "GraphTransformer",
 ] 

@@ -1,88 +1,36 @@
-# Common configuration for Full DTI model
-# This includes shared settings across all training phases
+# Multi-Hybrid Model Common Configuration
+#   Combines multi-modal inputs with multi-output predictions
+#   Supports individual branch pretraining with contrastive learning
+#   These configurations are shared across all training phases
 
 model:
-  name: full
-  encoder_type: resnet
   encoder_kwargs:
-    output_dim: 256
-    hidden_dim: 512
-    n_layers: 3
     dropout: 0.1
-    activation: gelu
-    
-  aggregator_type: attentive
+    activation: "gelu"
+
   aggregator_kwargs:
+    dropout: 0.1
+    activation: "gelu"
+
+  fusion_kwargs:
+    dropout: 0.1
     output_dim: 256
-    hidden_dim: 512
-    dropout: 0.1
-    activation: gelu
-    
-  # Variational head for drug branch
-  variational_head_kwargs:
-    latent_dim: 256
-    
-  # Inter-branch aggregation for DTI prediction
-  inter_branch_aggregator_kwargs:
-    output_dim: 512
-    hidden_dim: 512
-    dropout: 0.1
-    activation: gelu
-    
-  # DTI prediction head
+
   dti_head_kwargs:
-    hidden_dim: 256
+    hidden_dim: 128
     dropout: 0.1
-    
-  # InfoNCE heads for contrastive learning
+  
+  # Contrastive learning parameters
   infonce_head_kwargs:
     output_dim: 128
     temperature: 0.07
-    use_negative_weighting: true
-    
-  # Diffusion decoder configuration
-  diffusion_decoder_kwargs:
-    graph_transformer_params:
-      n_layers: 5
-      input_dims:
-        X: 16
-        E: 5
-        y: 1024  # Will be set to latent_dim
-      output_dims:
-        X: 8   # Number of atom types
-        E: 5   # Number of edge types
-        y: 1024
-      hidden_mlp_dims:
-        X: 256
-        E: 128
-        y: 256
-      hidden_dims:
-        dx: 256
-        de: 64
-        dy: 512
-        n_head: 8
-        dim_ffX: 256
-        dim_ffE: 128
-        dim_ffy: 256
-    lambda_train: [1, 5, 0]  # Weights for X, E, y losses
-    diffusion_steps: 500
-    
-  # Loss weights
   contrastive_weight: 1.0
-  kl_weight: 0.1
-  reconstruction_weight: 1.0
   temperature: 0.07
-
-# Hardware configuration  
-hardware:
-  gpus: 1
-  precision: 16
-  seed: 42
-  deterministic: false
-
-# Logging configuration
-logging:
-  project_name: dti-full-model
-  save_dir: logs
-  log_every_n_steps: 50
-  use_wandb: true 
+    
+training:
+  scheduler: "one_cycle"  # "const", "step", "one_cycle", or "cosine"
+    
+data:
+  h5_path: "data/input/dti.h5torch"
+  drug_features: ["EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"]
+  target_features: ["EMB-ESM", "EMB-NT"] 

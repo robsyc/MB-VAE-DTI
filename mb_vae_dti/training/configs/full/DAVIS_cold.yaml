@@ -1,37 +1,28 @@
-# DAVIS finetuning configuration for Full DTI model (cold-drug split)
-# Single-score prediction (pKd) on DAVIS benchmark dataset
-
 model:
-  phase: finetune
+  embedding_dim: 768
+  encoder_type: "transformer"
+  encoder_kwargs:
+    hidden_dim: 512
+    n_layers: 2
   
-  # Pretrained checkpoint from general training (path to be updated)
-  checkpoint_path: null  # logs/full_train_cold/checkpoints/best_model.ckpt
+  aggregator_type: "attentive"
+  
+  fusion_kwargs:
+    hidden_dim: 512
+    n_layers: 2
+  
+  # checkpoint_path: null  # Path to pretrained weights (set manually)
 
-# Data configuration
-data:
-  h5_path: /home/robsyc/Desktop/thesis/MB-VAE-DTI/data/input/dti.h5torch
-  split_type: split_cold
-  provenance_cols: ['in_DAVIS']  # Only DAVIS data
-  drug_features: ['EMB-BiomedGraph', 'EMB-BiomedImg', 'EMB-BiomedText']
-  target_features: ['EMB-ESM', 'EMB-NT']
-  batch_size: 32
-  num_workers: 4
-  pin_memory: true
-  shuffle_train: true
-  drop_last: false
-  load_in_memory: false
-
-# Training configuration
 training:
-  max_epochs: 30
-  learning_rate: 5e-5
-  weight_decay: 1e-5
-  early_stopping_patience: 10
-  scheduler: const
-  
-# Logging configuration
-logging:
-  experiment_name: full_DAVIS_cold
+  learning_rate: 0.0001
 
-# No gridsearch for finetuning
-# (use best model from general training) 
+data:
+  batch_size: 32
+  
+logging:
+  experiment_name: "multi_hybrid_DAVIS_cold"
+  save_dir: "data/results/multi_hybrid/DAVIS/cold"
+
+gridsearch: # no changes to architecture (9 combinations only)
+  training.learning_rate: [0.0001, 0.0005, 0.001]
+  data.batch_size: [16, 32, 64]

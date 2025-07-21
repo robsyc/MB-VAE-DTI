@@ -8,8 +8,8 @@ from typing import Dict, Optional, Literal, Any, List, Union
 
 def configure_optimizer_and_scheduler(
     model_parameters,
-    learning_rate: float = 0.001,
-    weight_decay: float = 1e-12,
+    learning_rate: float,
+    weight_decay: float,
     scheduler: Optional[Literal["const", "step", "one_cycle", "cosine"]] = "const",
     trainer = None,
     max_epochs: int = 100
