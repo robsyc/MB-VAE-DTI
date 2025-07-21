@@ -17,7 +17,7 @@ logging:
   experiment_name: "multimodal_DAVIS_cold"
   save_dir: "data/results/multi_modal/DAVIS/cold"
 
-gridsearch: # 10mins per run -> total 162 hours -> spread over 7 jobs, 24h each
+gridsearch: # 10mins per run -> total 162 hours -> spread over 7 jobs, 24h each (took only 12 hr)
   model.embedding_dim: [512, 768, 1024]
   model.encoder_type: ["resnet", "transformer"]
   model.encoder_kwargs.hidden_dim: [128, 256, 512]

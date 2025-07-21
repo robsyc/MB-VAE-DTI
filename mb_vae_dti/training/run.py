@@ -26,6 +26,9 @@ Usage:
     
     # HPC batch processing
     python run.py --model baseline --phase finetune --dataset DAVIS --split rand --gridsearch --batch_index 0 --total_batches 5
+
+    # Ensemble
+    python run.py --model baseline --phase finetune --dataset DAVIS --split rand --gridsearch --ensemble
 """
 
 import sys
@@ -58,7 +61,8 @@ from mb_vae_dti.training.utils import (
     ConfigManager, save_config, get_config_summary,
     setup_callbacks,
     setup_logging, generate_experiment_name,
-    collect_validation_results, save_gridsearch_results
+    collect_validation_results, save_gridsearch_results,
+    collect_test_results, save_ensemble_member_results, aggregate_ensemble_results
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -473,6 +477,7 @@ def train_single_config(
     pretrain_target: PretrainTarget = None,
     config_index: Optional[int] = None,
     batch_index: Optional[int] = None,
+    is_ensemble: bool = False,
 ) -> None:
     """
     Train a single configuration.
@@ -483,16 +488,20 @@ def train_single_config(
         phase: Training phase
         config_index: Optional index of the config in the gridsearch experiment batch
         batch_index: Optional index of the batch in the gridsearch experiment
+        is_ensemble: Whether this is part of an ensemble run
     """
     # Determine if we're in gridsearch mode
-    is_gridsearch = config_index is not None
+    is_gridsearch = config_index is not None and not is_ensemble
     
-    # Update experiment name if this is a gridsearch run
+    # Update experiment name if this is a gridsearch or ensemble run
     if is_gridsearch:
         original_name = OmegaConf.select(config, "logging.experiment_name", default="experiment")
         config.logging.experiment_name = generate_experiment_name(
             original_name, batch_index, config_index
         )
+    elif is_ensemble:
+        original_name = OmegaConf.select(config, "logging.experiment_name", default="experiment")
+        config.logging.experiment_name = f"{original_name}_ensemble_{config_index+1}"
     
     # Initialize variables to None for proper cleanup
     model = None
@@ -595,7 +604,7 @@ def train_single_config(
         trainer.fit(model, data_module)
         
         # Test model on best checkpoint
-        if not is_gridsearch and not phase == "pretrain":
+        if not (is_gridsearch or is_ensemble) and not phase == "pretrain":
             logger.info("Testing on best checkpoint...")
             trainer.test(model, data_module, ckpt_path="best")
 
@@ -606,6 +615,12 @@ def train_single_config(
             logger.info("Collecting gridsearch results...")
             results = collect_validation_results(config, trainer)
             save_gridsearch_results(results, Path(config.logging.save_dir) / "gridsearch_results")
+        elif is_ensemble and not phase == "pretrain":
+            logger.info("Testing ensemble model on best checkpoint...")
+            trainer.test(model, data_module, ckpt_path="best")
+            logger.info("Collecting ensemble test results...")
+            test_results = collect_test_results(config, trainer, config_index)
+            save_ensemble_member_results(test_results, Path(config.logging.save_dir), config_index)
         
         logger.info("Training completed!")
         
@@ -637,6 +652,20 @@ def main(args):
         pretrain_target=args.pretrain_target
     )
     
+    # Validate gridsearch and ensemble are mutually exclusive
+    if args.gridsearch and args.ensemble:
+        logger.error("Cannot specify both --gridsearch and --ensemble")
+        return
+    
+    if args.gridsearch:
+        if args.batch_index is None or args.total_batches is None:
+            logger.error("--batch_index and --total_batches must be used together when running gridsearch")
+            return
+    else:
+        if args.batch_index is not None or args.total_batches is not None:
+            logger.error("--batch_index and --total_batches can only be used when running gridsearch")
+            return
+    
     # Get config path
     config_path = get_config_path(
         model=model_type,
@@ -655,7 +684,8 @@ def main(args):
     configs = config_manager.load_config(
         config_path=config_path,
         overrides=args.override,
-        gridsearch=args.gridsearch
+        gridsearch=args.gridsearch,
+        ensemble=args.ensemble
     )
     
     # Convert to list if single config
@@ -701,10 +731,12 @@ def main(args):
             logger.info(f"Running batch {args.batch_index + 1}/{len(batches)} with {len(configs)} configurations")
         else:
             logger.info(f"Running full gridsearch with {len(configs)} configurations")
+    elif args.ensemble:
+        logger.info(f"Running ensemble with {len(configs)} configurations")
     
     # Train each configuration
     for i, config in enumerate(configs):
-        config_index = i if args.gridsearch else None
+        config_index = i if (args.gridsearch or args.ensemble) else None
 
         # Clear memory
         gc.collect()
@@ -717,6 +749,8 @@ def main(args):
             logger.info(f"Config index: {config_index}")
             if args.batch_index is not None:
                 logger.info(f"Batch index: {args.batch_index}")
+        elif args.ensemble:
+            logger.info(f"Ensemble member: {config_index + 1}")
         logger.info(f"Configuration summary: {get_config_summary(config)}")
         logger.info(f"{'='*50}\n")
 
@@ -729,13 +763,14 @@ def main(args):
                 phase, 
                 args.pretrain_target,
                 config_index, 
-                args.batch_index
+                args.batch_index,
+                args.ensemble
             )
         except Exception as e:
             logger.error(f"Failed to train configuration {i+1}: {e}")
             logger.error(f"Configuration summary: {get_config_summary(config)}")
             
-            if args.gridsearch:
+            if args.gridsearch or args.ensemble:
                 logger.warning("Continuing with next configuration...")
                 continue
             else:
@@ -745,6 +780,37 @@ def main(args):
     logger.info("All training runs completed!")
     logger.info(f"Total configurations processed: {len(configs)}")
     logger.info(f"{'='*50}")
+    
+    # Aggregate ensemble results if this was an ensemble run
+    if args.ensemble and not phase == "pretrain":
+        logger.info("\n" + "="*50)
+        logger.info("Aggregating ensemble results...")
+        logger.info("="*50)
+        
+        try:
+            # Get the base save directory from the first config
+            base_save_dir = Path(configs[0].logging.save_dir)
+            
+            # Aggregate results
+            aggregated_results = aggregate_ensemble_results(
+                save_dir=base_save_dir,
+                expected_members=len(configs)
+            )
+            
+            logger.info("Ensemble aggregation completed successfully!")
+            logger.info(f"Results saved to: {base_save_dir}/ensemble_results/aggregated_results.json")
+            
+            # Print summary of key metrics
+            test_metrics = aggregated_results.get("test_metrics", {})
+            if test_metrics:
+                logger.info("\nEnsemble Test Results Summary:")
+                for metric_name, stats in test_metrics.items():
+                    logger.info(f"  {metric_name}: {stats['mean']:.6f} ± {stats['std']:.6f} "
+                               f"(min: {stats['min']:.6f}, max: {stats['max']:.6f})")
+            
+        except Exception as e:
+            logger.error(f"Failed to aggregate ensemble results: {e}")
+            logger.error("Individual member results should still be available in ensemble_results/ directory")
 
 
 if __name__ == "__main__":
@@ -797,6 +863,11 @@ if __name__ == "__main__":
         help="Run gridsearch over all parameter combinations in config"
     )
     parser.add_argument(
+        "--ensemble",
+        action="store_true",
+        help="Run ensemble over predefined configurations in config"
+    )
+    parser.add_argument(
         "--batch_index",
         type=int,
         default=None,
@@ -819,12 +890,5 @@ if __name__ == "__main__":
     # Validate arguments
     if args.model is None or args.phase is None:
         parser.error("--model and --phase must be provided")
-    
-    if args.gridsearch:
-        if args.batch_index is None or args.total_batches is None:
-            parser.error("--batch_index and --total_batches must be used together when running gridsearch")
-    else:
-        if args.batch_index is not None or args.total_batches is not None:
-            parser.error("--batch_index and --total_batches can only be used when running gridsearch")
     
     main(args) 

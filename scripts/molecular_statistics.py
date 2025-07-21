@@ -4,11 +4,10 @@ Generate molecular statistics report for all datasets.
 
 This script processes SMILES strings from various datasets and generates
 a comprehensive report including:
-- Distribution of node counts
+- Distribution of node counts (number of atoms per molecule)
 - Node type marginals (atom type probabilities)
 - Edge type marginals (bond type probabilities)
-
-The script uses parallelization and progress tracking for efficiency.
+- Valency distribution (distribution of atom valencies)
 """
 
 import sys
@@ -40,26 +39,246 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 ATOMS_TYPES = ['C', 'O', 'P', 'N', 'S', 'Cl', 'F', 'H']
 BONDS = {BT.SINGLE: 0, BT.DOUBLE: 1, BT.TRIPLE: 2, BT.AROMATIC: 3}
+MAX_N_NODES = 64
 
-def compute_marginals(
-    molecules: List[Mol],
+ATOM_TO_VALENCY = {
+    'H': 1,
+    'He': 0,
+    'Li': 1,
+    'Be': 2,
+    'B': 3,
+    'C': 4,
+    'N': 3,
+    'O': 2,
+    'F': 1,
+    'Ne': 0,
+    'Na': 1,
+    'Mg': 2,
+    'Al': 3,
+    'Si': 4,
+    'P': 3,
+    'S': 2,
+    'Cl': 1,
+    'Ar': 0,
+    'K': 1,
+    'Ca': 2,
+    'Sc': 3,
+    'Ti': 4,
+    'V': 5,
+    'Cr': 2,
+    'Mn': 7,
+    'Fe': 2,
+    'Co': 3,
+    'Ni': 2,
+    'Cu': 2,
+    'Zn': 2,
+    'Ga': 3,
+    'Ge': 4,
+    'As': 3,
+    'Se': 2,
+    'Br': 1,
+    'Kr': 0,
+    'Rb': 1,
+    'Sr': 2,
+    'Y': 3,
+    'Zr': 2,
+    'Nb': 2,
+    'Mo': 2,
+    'Tc': 6,
+    'Ru': 2,
+    'Rh': 3,
+    'Pd': 2,
+    'Ag': 1,
+    'Cd': 1,
+    'In': 1,
+    'Sn': 2,
+    'Sb': 3,
+    'Te': 2,
+    'I': 1,
+    'Xe': 0,
+    'Cs': 1,
+    'Ba': 2,
+    'La': 3,
+    'Ce': 3,
+    'Pr': 3,
+    'Nd': 3,
+    'Pm': 3,
+    'Sm': 2,
+    'Eu': 2,
+    'Gd': 3,
+    'Tb': 3,
+    'Dy': 3,
+    'Ho': 3,
+    'Er': 3,
+    'Tm': 2,
+    'Yb': 2,
+    'Lu': 3,
+    'Hf': 4,
+    'Ta': 3,
+    'W': 2,
+    'Re': 1,
+    'Os': 2,
+    'Ir': 1,
+    'Pt': 1,
+    'Au': 1,
+    'Hg': 1,
+    'Tl': 1,
+    'Pb': 2,
+    'Bi': 3,
+    'Po': 2,
+    'At': 1,
+    'Rn': 0,
+    'Fr': 1,
+    'Ra': 2,
+    'Ac': 3,
+    'Th': 4,
+    'Pa': 5,
+    'U': 2,
+}
+
+ATOM_TO_WEIGHT = {
+    'H': 1,
+    'He': 4,
+    'Li': 7,
+    'Be': 9,
+    'B': 11,
+    'C': 12,
+    'N': 14,
+    'O': 16,
+    'F': 19,
+    'Ne': 20,
+    'Na': 23,
+    'Mg': 24,
+    'Al': 27,
+    'Si': 28,
+    'P': 31,
+    'S': 32,
+    'Cl': 35,
+    'Ar': 40,
+    'K': 39,
+    'Ca': 40,
+    'Sc': 45,
+    'Ti': 48,
+    'V': 51,
+    'Cr': 52,
+    'Mn': 55,
+    'Fe': 56,
+    'Co': 59,
+    'Ni': 59,
+    'Cu': 64,
+    'Zn': 65,
+    'Ga': 70,
+    'Ge': 73,
+    'As': 75,
+    'Se': 79,
+    'Br': 80,
+    'Kr': 84,
+    'Rb': 85,
+    'Sr': 88,
+    'Y': 89,
+    'Zr': 91,
+    'Nb': 93,
+    'Mo': 96,
+    'Tc': 98,
+    'Ru': 101,
+    'Rh': 103,
+    'Pd': 106,
+    'Ag': 108,
+    'Cd': 112,
+    'In': 115,
+    'Sn': 119,
+    'Sb': 122,
+    'Te': 128,
+    'I': 127,
+    'Xe': 131,
+    'Cs': 133,
+    'Ba': 137,
+    'La': 139,
+    'Ce': 140,
+    'Pr': 141,
+    'Nd': 144,
+    'Pm': 145,
+    'Sm': 150,
+    'Eu': 152,
+    'Gd': 157,
+    'Tb': 159,
+    'Dy': 163,
+    'Ho': 165,
+    'Er': 167,
+    'Tm': 169,
+    'Yb': 173,
+    'Lu': 175,
+    'Hf': 178,
+    'Ta': 181,
+    'W': 184,
+    'Re': 186,
+    'Os': 190,
+    'Ir': 192,
+    'Pt': 195,
+    'Au': 197,
+    'Hg': 201,
+    'Tl': 204,
+    'Pb': 207,
+    'Bi': 209,
+    'Po': 209,
+    'At': 210,
+    'Rn': 222,
+    'Fr': 223,
+    'Ra': 226,
+    'Ac': 227,
+    'Th': 232,
+    'Pa': 231,
+    'U': 238,
+    'Np': 237,
+    'Pu': 244,
+    'Am': 243,
+    'Cm': 247,
+    'Bk': 247,
+    'Cf': 251,
+    'Es': 252,
+    'Fm': 257,
+    'Md': 258,
+    'No': 259,
+    'Lr': 262,
+    'Rf': 267,
+    'Db': 270,
+    'Sg': 269,
+    'Bh': 264,
+    'Hs': 269,
+    'Mt': 278,
+    'Ds': 281,
+    'Rg': 282,
+    'Cn': 285,
+    'Nh': 286,
+    'Fl': 289,
+    'Mc': 290,
+    'Lv': 293,
+    'Ts': 294,
+    'Og': 294,
+}
+
+PROCESSED_MOLECULES = {}
+
+
+def get_marginal_counts(
+    molecule: Mol,
     atom_types: List[str] = ATOMS_TYPES,
     bond_types: dict = BONDS,
     include_no_bond: bool = True
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Compute node and edge type marginals from SMILES strings.
+    Compute node and edge type counts from a molecule.
     
     Args:
-        molecules: List of RDKit molecule objects
+        molecule: RDKit molecule object
         atom_types: List of atom symbols to consider
         bond_types: Dictionary mapping RDKit bond types to indices (defaults to BONDS)
-        include_no_bond: Whether to include "no bond" (non-connected pairs) in edge marginals
+        include_no_bond: Whether to include "no bond" (non-connected pairs) in edge counts
     
     Returns:
-        Tuple of (node_marginals, edge_marginals) as numpy arrays
-        - node_marginals: shape (num_atom_types,) - probability of each atom type
-        - edge_marginals: shape (num_bond_types + include_no_bond,) - probability of each bond type
+        Tuple of (node_counts, edge_counts) as numpy arrays
+        - node_counts: shape (num_atom_types,) - count of each atom type
+        - edge_counts: shape (num_bond_types + include_no_bond,) - count of each bond type
     """
     # Create atom type encoder/decoder
     atom_to_idx = {atom: idx for idx, atom in enumerate(atom_types)}
@@ -78,77 +297,92 @@ def compute_marginals(
     total_possible_edges = 0
     total_actual_bonds = 0
     
-    for mol in molecules:
-        n_atoms = mol.GetNumAtoms()
+    n_atoms = molecule.GetNumAtoms()
         
-        # Count node types
-        for atom in mol.GetAtoms():
-            symbol = atom.GetSymbol()
-            if symbol in atom_to_idx:
-                node_counts[atom_to_idx[symbol]] += 1
+    # Count node types
+    for atom in molecule.GetAtoms():
+        symbol = atom.GetSymbol()
+        if symbol in atom_to_idx:
+            node_counts[atom_to_idx[symbol]] += 1
         
-        # Count bond types
-        for bond in mol.GetBonds():
-            bond_type = bond.GetBondType()
-            if bond_type in bond_types:
-                bond_idx = bond_types[bond_type] + bond_offset
-                edge_counts[bond_idx] += 1
-                total_actual_bonds += 1
-        
-        # Track total possible edges for no_bond calculation
-        if include_no_bond:
-            # For undirected graphs: n_atoms * (n_atoms - 1) / 2
-            total_possible_edges += n_atoms * (n_atoms - 1) // 2
+    # Count bond types
+    for bond in molecule.GetBonds():
+        bond_type = bond.GetBondType()
+        if bond_type in bond_types:
+            bond_idx = bond_types[bond_type] + bond_offset
+            edge_counts[bond_idx] += 1
+            total_actual_bonds += 1
     
-    # Add no_bond counts
+    # Track total possible edges for no_bond calculation
     if include_no_bond:
+        total_possible_edges = n_atoms * (n_atoms - 1) // 2
         edge_counts[no_bond_idx] = total_possible_edges - total_actual_bonds
     
-    # Normalize to get marginals (probabilities)
-    node_marginals = node_counts.astype(np.float64)
-    if node_marginals.sum() > 0:
-        node_marginals /= node_marginals.sum()
-    
-    edge_marginals = edge_counts.astype(np.float64)
-    if edge_marginals.sum() > 0:
-        edge_marginals /= edge_marginals.sum()
-    
-    return node_marginals, edge_marginals
+    return node_counts, edge_counts
 
 
-def process_single_smiles(smiles: str) -> Optional[Dict]:
+def process_single_smiles(smiles: str, atom_types: List[str], bond_types: dict, include_no_bond: bool) -> Optional[Dict]:
     """
     Process a single SMILES string and extract molecular properties.
     
     Args:
         smiles: SMILES string
+        atom_types: List of atom symbols to consider
+        bond_types: Dictionary mapping RDKit bond types to indices
+        include_no_bond: Whether to include "no bond" in edge counts
         
     Returns:
         Dictionary with molecular properties or None if invalid
     """
     try:
         mol = Chem.MolFromSmiles(smiles)
-        if mol is None:
+        if mol is None or mol.GetNumAtoms() == 0:
             return None
+            
+        node_counts, edge_counts = get_marginal_counts(mol, atom_types, bond_types, include_no_bond)
+        
+        # Calculate valency counts following DiGress methodology
+        valency_counts = np.zeros(3 * MAX_N_NODES - 2, dtype=np.int64)
+        
+        # Bond multipliers: [no bond, single, double, triple, aromatic]  
+        multiplier = np.array([0, 1, 2, 3, 1.5])
+        
+        n_atoms = mol.GetNumAtoms()
+        
+        # Validate molecule size
+        if n_atoms > MAX_N_NODES:
+            logger.warning(f"Molecule with {n_atoms} atoms exceeds MAX_N_NODES={MAX_N_NODES}, skipping")
+            return None
+        
+        # For each atom, calculate its valency
+        for atom_idx in range(n_atoms):
+            atom_bonds = np.zeros(len(bond_types) + 1, dtype=np.int32)  # +1 for "no bond"
+            
+            # Count bonds for this atom
+            for bond in mol.GetBonds():
+                if bond.GetBeginAtomIdx() == atom_idx or bond.GetEndAtomIdx() == atom_idx:
+                    bond_type = bond.GetBondType()
+                    if bond_type in bond_types:
+                        bond_idx = bond_types[bond_type] + 1  # +1 because index 0 is "no bond"
+                        atom_bonds[bond_idx] += 1
+            
+            # Calculate valency as weighted sum of bonds
+            valency = np.sum(atom_bonds * multiplier)
+            valency_int = int(valency)
+            
+            # Increment count for this valency
+            if valency_int < len(valency_counts):
+                valency_counts[valency_int] += 1
+        
         return {
-            'smiles': smiles,
-            'num_atoms': len(mol.GetAtoms()),
-            'atom_types': [atom.GetSymbol() for atom in mol.GetAtoms()],
-            'bond_types': [bond.GetBondType() for bond in mol.GetBonds()],
-            'mol': mol  # We'll need this for marginal calculations
+            'num_atoms': n_atoms,
+            'node_counts': node_counts,
+            'edge_counts': edge_counts,
+            'valency_counts': valency_counts,
         }
     except Exception as e:
         logger.warning(f"Failed to process SMILES '{smiles}': {e}")
         return None
-
-def process_smiles_batch(smiles_batch: List[str]) -> List[Dict]:
-    """Process a batch of SMILES strings."""
-    results = []
-    for smiles in smiles_batch:
-        result = process_single_smiles(smiles)
-        if result is not None:
-            results.append(result)
-    return results
 
 
 def get_dataset_smiles() -> Dict[str, Set[str]]:
@@ -185,23 +419,8 @@ def get_dataset_smiles() -> Dict[str, Set[str]]:
     }
     
     # Load pretrain dataset
-    try:
-        drugs_pretrain = PretrainDataset(
-            h5_path=BASE_DIR / "data/input/drugs.h5torch",
-            subset_filters={'split_col': 'is_train', 'split_value': True}
-        )
-        
-        # Sample SMILES from pretrain dataset
-        pretrain_smiles = []
-        logger.info("Sampling SMILES from pretrain dataset...")
-        for i, data in enumerate(tqdm(drugs_pretrain, desc="Loading pretrain")):
-            pretrain_smiles.append(data["representations"]["smiles"])
-
-        datasets['drugs_pretrain'] = set(pretrain_smiles)
-        
-    except Exception as e:
-        logger.warning(f"Failed to load pretrain dataset: {e}")
-        datasets['drugs_pretrain'] = set()
+    pretrain_drugs = pd.read_csv(BASE_DIR / "data/processed/pretrain_drugs.csv")
+    datasets['drugs_pretrain'] = set(pretrain_drugs["smiles"].tolist())
     
     # Log dataset sizes
     for name, smiles_set in datasets.items():
@@ -209,10 +428,14 @@ def get_dataset_smiles() -> Dict[str, Set[str]]:
     
     return datasets
 
+
 def calculate_dataset_statistics(
     dataset_name: str, 
     dataset_smiles: Set[str], 
-    processed_molecules: Dict[str, Dict]
+    use_cache: bool = True,
+    atom_types: List[str] = ATOMS_TYPES,
+    bond_types: dict = BONDS,
+    include_no_bond: bool = True
 ) -> Dict:
     """
     Calculate statistics for a specific dataset.
@@ -220,139 +443,96 @@ def calculate_dataset_statistics(
     Args:
         dataset_name: Name of the dataset
         dataset_smiles: Set of SMILES strings in this dataset  
-        processed_molecules: Dictionary mapping SMILES to processed molecule data
+        use_cache: Whether to check/update the PROCESSED_MOLECULES cache
+        atom_types: List of atom symbols to consider
+        bond_types: Dictionary mapping RDKit bond types to indices
+        include_no_bond: Whether to include "no bond" (non-connected pairs) in edge counts
         
     Returns:
         Dictionary with dataset statistics
     """
+    global PROCESSED_MOLECULES
+    
     logger.info(f"Calculating statistics for {dataset_name}...")
+
+    # Initialize counters
+    num_atoms_counts = Counter()
+    node_counts = np.zeros(len(atom_types), dtype=np.int64)
+    edge_counts = np.zeros(len(bond_types) + 1, dtype=np.int64) if include_no_bond else np.zeros(len(bond_types), dtype=np.int64)
+    valency_counts = np.zeros(3 * MAX_N_NODES - 2, dtype=np.int64)
     
-    # Filter molecules for this dataset
-    dataset_molecules = []
-    valid_smiles = []
+    # Add progress bar for processing SMILES
+    for smiles in tqdm(dataset_smiles, desc=f"Processing {dataset_name}", unit="molecules"):
+        if use_cache and smiles in PROCESSED_MOLECULES:
+            result = PROCESSED_MOLECULES[smiles]
+        else:
+            result = process_single_smiles(smiles, atom_types, bond_types, include_no_bond)
+            if result is not None and use_cache:
+                # Store the result in cache for future use
+                PROCESSED_MOLECULES[smiles] = result
+        
+        if result is not None:
+            num_atoms_counts[result['num_atoms']] += 1
+            node_counts += result['node_counts']
+            edge_counts += result['edge_counts']
+            valency_counts += result['valency_counts']
     
-    for smiles in dataset_smiles:
-        if smiles in processed_molecules:
-            dataset_molecules.append(processed_molecules[smiles])
-            valid_smiles.append(smiles)
+    max_nodes = max(num_atoms_counts.keys()) if num_atoms_counts else 1
+    valency_distribution = valency_counts / valency_counts.sum() if valency_counts.sum() > 0 else valency_counts
+    node_marginals = node_counts / node_counts.sum() if node_counts.sum() > 0 else node_counts
+    edge_marginals = edge_counts / edge_counts.sum() if edge_counts.sum() > 0 else edge_counts
     
-    if not dataset_molecules:
-        return {
-            'dataset_name': dataset_name,
-            'total_molecules': 0,
-            'valid_molecules': 0,
-            'max_nodes': 0,
-            'node_distribution': {},
-            'node_marginals': [],
-            'edge_marginals': [],
-            'atom_types': []
-        }
-    
-    # Calculate basic statistics
-    num_nodes = [mol['num_atoms'] for mol in dataset_molecules]
-    max_nodes = max(num_nodes)
-    node_distribution = dict(Counter(num_nodes))
-    
-    # Calculate marginals
-    molecules_for_marginals = [mol['mol'] for mol in dataset_molecules]
-    node_marginals, edge_marginals = compute_marginals(molecules_for_marginals)
+    # Log statistics for debugging
+    logger.info(f"{dataset_name} - Total molecules: {sum(num_atoms_counts.values())}")
+    logger.info(f"{dataset_name} - Node marginals sum: {node_marginals.sum():.6f}")
+    logger.info(f"{dataset_name} - Edge marginals sum: {edge_marginals.sum():.6f}")
+    logger.info(f"{dataset_name} - Valency distribution sum: {valency_distribution.sum():.6f}")
     
     return {
         'dataset_name': dataset_name,
-        'total_molecules': len(dataset_smiles),
-        'valid_molecules': len(dataset_molecules),
         'max_nodes': max_nodes,
-        'node_distribution': node_distribution,
+        'node_count_distribution': dict(num_atoms_counts),
         'node_marginals': node_marginals.tolist(),
         'edge_marginals': edge_marginals.tolist(),
-        'atom_types': ATOMS_TYPES,
-        'bond_types': [str(bt) for bt in BONDS.keys()],
-        'example_smiles': valid_smiles[:5]  # Include a few examples
+        'valency_distribution': valency_distribution.tolist(),
     }
+
 
 def main():
     """Main execution function."""
     logger.info("Starting molecular statistics generation...")
-    
-    # Get all dataset SMILES
+
     datasets = get_dataset_smiles()
-    
-    # Collect all unique SMILES
-    all_smiles = set()
-    for smiles_set in datasets.values():
-        all_smiles.update(smiles_set)
-    
-    logger.info(f"Total unique SMILES across all datasets: {len(all_smiles)}")
-    
-    # Process all unique SMILES in parallel
-    all_smiles_list = list(all_smiles)
-    batch_size = max(1, len(all_smiles_list) // (cpu_count() * 4))
-    
-    # Create batches
-    smiles_batches = []
-    for i in range(0, len(all_smiles_list), batch_size):
-        smiles_batches.append(all_smiles_list[i:i + batch_size])
-    
-    logger.info(f"Processing {len(all_smiles)} SMILES in {len(smiles_batches)} batches using {cpu_count()} cores...")
-    
-    # Process in parallel
-    processed_molecules = {}
-    
-    with Pool(processes=cpu_count()) as pool:
-        results = list(tqdm(
-            pool.imap(process_smiles_batch, smiles_batches),
-            total=len(smiles_batches),
-            desc="Processing SMILES"
-        ))
-    
-    # Flatten results
-    for batch_results in results:
-        for mol_data in batch_results:
-            processed_molecules[mol_data['smiles']] = mol_data
-    
-    logger.info(f"Successfully processed {len(processed_molecules)} molecules")
-    
-    # Calculate statistics for each dataset
-    final_report = {
-        'metadata': {
-            'total_unique_smiles': len(all_smiles),
-            'successfully_processed': len(processed_molecules),
-            'processing_success_rate': len(processed_molecules) / len(all_smiles) if all_smiles else 0,
-            'datasets_processed': list(datasets.keys())
+
+    stats = {
+        'general': {
+            'atom_types': ATOMS_TYPES,
+            'bond_types': ["NONE"] + [bond.name for bond in BONDS.keys()],
+            'num_atom_types': len(ATOMS_TYPES),
+            'max_n_nodes': MAX_N_NODES,
+            'atom_valencies': [ATOM_TO_VALENCY[atom] for atom in ATOMS_TYPES],
+            'atom_weights': [ATOM_TO_WEIGHT[atom] for atom in ATOMS_TYPES],
+            'max_weight': max([ATOM_TO_WEIGHT[atom] for atom in ATOMS_TYPES]),
         },
-        'datasets': {}
+        'datasets': {},
     }
-    
+
+    # Dataset statistics
     for dataset_name, dataset_smiles in datasets.items():
-        stats = calculate_dataset_statistics(dataset_name, dataset_smiles, processed_molecules)
-        final_report['datasets'][dataset_name] = stats
-    
+        if dataset_name != 'drugs_pretrain':
+            stats['datasets'][dataset_name] = calculate_dataset_statistics(dataset_name, dataset_smiles)
+        else: # pretrains dataset are all unique, so no point in tracking them in the PROCESSED_MOLECULES cache
+            stats['datasets'][dataset_name] = calculate_dataset_statistics(dataset_name, dataset_smiles, use_cache=False)
+        
     # Save report
     output_path = BASE_DIR / "data/processed/molecular_statistics.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     with open(output_path, 'w') as f:
-        json.dump(final_report, f, indent=2, default=str)
+        json.dump(stats, f, indent=2, default=str)
     
     logger.info(f"Report saved to {output_path}")
-    
-    # Print summary
-    print("\n" + "="*60)
-    print("MOLECULAR STATISTICS SUMMARY")
-    print("="*60)
-    
-    for dataset_name, stats in final_report['datasets'].items():
-        print(f"\n{dataset_name}:")
-        print(f"  Total molecules: {stats['total_molecules']}")
-        print(f"  Valid molecules: {stats['valid_molecules']}")
-        print(f"  Max nodes: {stats['max_nodes']}")
-        if stats['node_distribution']:
-            most_common = dict(sorted(Counter(stats['node_distribution']).most_common(5)))
-            print(f"  Most common node counts: {most_common}")
-        else:
-            print(f"  Most common node counts: {{}}")
-    
-    print(f"\nFull report saved to: {output_path}")
+    logger.info(f"Total unique molecules cached: {len(PROCESSED_MOLECULES)}")
 
 if __name__ == "__main__":
     main() 

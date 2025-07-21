@@ -69,7 +69,8 @@ class ConfigManager:
         self, 
         config_path: str, 
         overrides: Optional[List[str]] = None,
-        gridsearch: bool = False
+        gridsearch: bool = False,
+        ensemble: bool = False
     ) -> Union[DictConfig, List[DictConfig]]:
         """
         Load configuration with hierarchical merging.
@@ -78,9 +79,10 @@ class ConfigManager:
             config_path: Path to the specific config file (e.g., "baseline/finetune_DAVIS_rand.yaml")
             overrides: List of config overrides (e.g., ["model.embedding_dim=512"])
             gridsearch: Whether to generate gridsearch configurations
+            ensemble: Whether to generate ensemble configurations
             
         Returns:
-            Single config or list of configs if gridsearch=True
+            Single config or list of configs if gridsearch=True or ensemble=True
         """
         config_path = Path(config_path)
         logger.info(f"Loading config from {config_path}")
@@ -108,12 +110,33 @@ class ConfigManager:
             # Remove gridsearch section from base config
             if "gridsearch" in base_config:
                 del base_config["gridsearch"]
+            if "ensemble" in base_config:
+                del base_config["ensemble"]
             
             return self._generate_gridsearch_configs(base_config, gridsearch_params)
         
-        # Remove gridsearch section if present
+        # Generate ensemble configs if requested
+        if ensemble:
+            if "ensemble" not in config or "configs" not in config.ensemble:
+                logger.warning("No ensemble.configs section found in config, returning single config")
+                return [config]
+            
+            ensemble_configs = OmegaConf.to_container(config.ensemble.configs)
+            base_config = deepcopy(config)
+            
+            # Remove ensemble section from base config
+            if "ensemble" in base_config:
+                del base_config["ensemble"]
+            if "gridsearch" in base_config:
+                del base_config["gridsearch"]
+            
+            return self._generate_ensemble_configs(base_config, ensemble_configs)
+        
+        # Remove gridsearch and ensemble sections if present
         if "gridsearch" in config:
             del config["gridsearch"]
+        if "ensemble" in config:
+            del config["ensemble"]
         
         return config
     
@@ -282,6 +305,39 @@ class ConfigManager:
                 OmegaConf.update(config, param_name, param_value)
             
             configs.append(config)
+        
+        return configs
+    
+    def _generate_ensemble_configs(
+        self, 
+        base_config: DictConfig, 
+        ensemble_configs: List[Dict[str, Any]]
+    ) -> List[DictConfig]:
+        """
+        Generate ensemble configurations from predefined parameter sets.
+        
+        Args:
+            base_config: Base configuration to modify
+            ensemble_configs: List of parameter dictionaries to apply
+            
+        Returns:
+            List of configurations for each ensemble member
+        """
+        if not ensemble_configs:
+            return [base_config]
+        
+        logger.info(f"Generating {len(ensemble_configs)} ensemble configurations")
+        
+        configs = []
+        for i, ensemble_params in enumerate(ensemble_configs):
+            config = deepcopy(base_config)
+            
+            # Apply ensemble parameters
+            for param_name, param_value in ensemble_params.items():
+                OmegaConf.update(config, param_name, param_value)
+            
+            configs.append(config)
+            logger.debug(f"Ensemble config {i+1}: {ensemble_params}")
         
         return configs
     

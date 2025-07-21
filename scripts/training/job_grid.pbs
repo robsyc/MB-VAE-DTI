@@ -11,6 +11,8 @@
 # Baseline 
 # - Davis -> 5GB mem used & <10 mins per run
 # - KIBA -> 5GB mem used & <40 mins per run
+# Multi-modal
+# - Davis -> 6.11GB mem used & ... mins per run
 
 # Load the necessary modules
 ml load PyTorch/2.1.2-foss-2023a-CUDA-12.1.1
