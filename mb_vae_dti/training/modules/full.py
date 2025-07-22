@@ -643,7 +643,7 @@ class FullDTIModel(pl.LightningModule):
         kl_e = (self.test_E_kl if test else self.val_E_kl)(prob_true.E, torch.log(prob_pred.E))
         return self.T * (kl_x + kl_e)
 
-    def reconstruction_logp(self, t, X, E, node_mask):
+    def reconstruction_logp(self, t, X, E, y, node_mask):
         # Compute noise values for t = 0.
         t_zeros = torch.zeros_like(t)
         beta_0 = self.noise_schedule(t_zeros)
@@ -656,18 +656,17 @@ class FullDTIModel(pl.LightningModule):
 
         X0 = F.one_hot(sampled0.X, num_classes=self.Xdim_output).float()
         E0 = F.one_hot(sampled0.E, num_classes=self.Edim_output).float()
-        y0 = sampled0.y
+        y0 = y
         assert (X.shape == X0.shape) and (E.shape == E0.shape)
 
         sampled_0 = PlaceHolder(X=X0, E=E0, y=y0).mask(node_mask)
 
         # Predictions
-        noisy_data = {'X_t': sampled_0.X, 'E_t': sampled_0.E, 'y_t': sampled_0.y, 'node_mask': node_mask,
+        noisy_data = {'X_t': sampled_0.X, 'E_t': sampled_0.E, 'y_t': y, 'node_mask': node_mask,
                       't': torch.zeros(X0.shape[0], 1).type_as(y0)}
         extra_data = self._augment_data(noisy_data)
-        # TODO: we will need to subdivide our forward method
         # here only the denoising is called
-        pred0 = self.forward(noisy_data, extra_data, node_mask)
+        pred0 = self._decode_drug(y0, noisy_data, extra_data, node_mask)
 
         # Normalize predictions
         probX0 = F.softmax(pred0.X, dim=-1)
@@ -688,7 +687,6 @@ class FullDTIModel(pl.LightningModule):
         """
         Computes an estimator for the variational lower bound.
         """
-        # TODO: NEW
         t = noisy_data['t']
 
         # 1. Prior on graph size: log p(N) where N is number of nodes
@@ -705,7 +703,7 @@ class FullDTIModel(pl.LightningModule):
 
         # 4. Reconstruction loss
         # Compute L0 term : -log p (X, E, y | z_0) = reconstruction loss
-        prob0 = self.reconstruction_logp(t, X, E, node_mask)
+        prob0 = self.reconstruction_logp(t, X, E, y, node_mask)
 
         loss_term_0 = self.val_X_logp(X * prob0.X.log()) + self.val_E_logp(E * prob0.E.log())
 
@@ -836,6 +834,12 @@ class FullDTIModel(pl.LightningModule):
     # - val/test use compute_val_loss method
     # - update metrics train/val/test
 
+    def _decode_drug(self, drug_embedding, noisy_data, extra_data, node_mask):
+        X = torch.cat((noisy_data['X_t'], extra_data.X), dim=2).float()
+        E = torch.cat((noisy_data['E_t'], extra_data.E), dim=3).float()
+        y = torch.hstack((drug_embedding, extra_data.y)).float()
+        return self.drug_decoder(X, E, y, node_mask)
+
     def forward(
         self, 
         drug_features: List[torch.Tensor] = None, 
@@ -907,10 +911,9 @@ class FullDTIModel(pl.LightningModule):
         
         # Denoising step
         if self.phase != "pretrain_target":
-            X = torch.cat((noisy_data['X_t'], extra_data.X), dim=2).float()
-            E = torch.cat((noisy_data['E_t'], extra_data.E), dim=3).float()
-            y = torch.hstack((drug_embedding, extra_data.y)).float()
-            outputs.update({"drug_pred": self.drug_decoder(X, E, y, node_mask)}) # PlaceHolder obj w/ X, E, y
+            outputs.update({
+                "drug_pred": self._decode_drug(drug_embedding, noisy_data, extra_data, node_mask)
+                }) # PlaceHolder obj w/ X, E, y
         
         return outputs
     
