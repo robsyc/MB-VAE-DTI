@@ -9,7 +9,10 @@ model:
   encoder_kwargs:
     dropout: 0.1
     activation: "gelu"
+    hidden_dim: 512
+    n_layers: 3
 
+  aggregator_type: "attentive"
   aggregator_kwargs:
     dropout: 0.1
     activation: "gelu"
@@ -17,6 +20,8 @@ model:
   fusion_kwargs:
     dropout: 0.1
     output_dim: 256
+    hidden_dim: 512
+    n_layers: 3
 
   dti_head_kwargs:
     hidden_dim: 128
@@ -25,13 +30,11 @@ model:
   infonce_head_kwargs:
     output_dim: 128
     temperature: 0.07
-  contrastive_weight: 1.0
-  temperature: 0.07    
 
   graph_transformer_kwargs:
     n_layers: 5
     input_dims: {'X': 16, 'E': 5, 'y': 1037} # after augmentation
-    output_dims: {'X': 8, 'E': 5, 'y': 1024}
+    output_dims: {'X': 8, 'E': 5, 'y': 1024} # y_output_dim == embedding_dim
     hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 1024}
     hidden_dims : {'dx': 256, 'de': 64, 'dy': 1024, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 1024}
   

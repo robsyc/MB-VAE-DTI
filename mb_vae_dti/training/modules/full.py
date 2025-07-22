@@ -198,74 +198,74 @@ class FullDTIModel(pl.LightningModule):
         #########################################################
         # Diffusion decoder
         #########################################################
-        self.T = diffusion_steps
-        self.best_val_nll = 1e8
-        self.val_counter = 0
-        self.sample_every_val = 1000
-        self.visualization_tools = MolecularVisualization(dataset_infos["general"]["atom_types"])
-        self.graph_converter = SmilesToPyG() # default atom and bond encodings used here bcs lazy
+        if phase != "pretrain_target":
+            self.T = diffusion_steps
+            self.best_val_nll = 1e8
+            self.val_counter = 0
+            self.sample_every_val = 1000
+            self.visualization_tools = MolecularVisualization(dataset_infos["general"]["atom_types"])
+            self.graph_converter = SmilesToPyG() # default atom and bond encodings used here bcs lazy
 
-        # Limit distribution for forward noise
-        self.nodes_dist = DistributionNodes(dataset_infos["dataset"]["node_count_distribution"])
-        self.limit_dist = PlaceHolder(
-            X=torch.tensor(dataset_infos["dataset"]["node_marginals"]).to(self.device), 
-            E=torch.tensor(dataset_infos["dataset"]["edge_marginals"]).to(self.device), 
-            y=torch.ones(graph_transformer_kwargs["output_dims"]["y"]) / graph_transformer_kwargs["output_dims"]["y"]
-        )
-        # Noise schedule and transition model for applying noise to clean graphs
-        self.noise_schedule = PredefinedNoiseScheduleDiscrete(timesteps=diffusion_steps)
-        self.transition_model = MarginalUniformTransition(
-            x_marginals=torch.tensor(dataset_infos["dataset"]["node_marginals"]).to(self.device),
-            e_marginals=torch.tensor(dataset_infos["dataset"]["edge_marginals"]).to(self.device),
-            y_classes=graph_transformer_kwargs["output_dims"]["y"]
-        )
-        # Augmentation for adding features to the discretized noisy graphs
-        self.augmentation = Augmentation(
-            valencies=dataset_infos["general"]["atom_valencies"],
-            max_weight=dataset_infos["general"]["max_weight"],
-            atom_weights=dataset_infos["general"]["atom_weights"],
-            max_n_nodes=dataset_infos["general"]["max_n_nodes"]
-        )
-        # Denoising graph transformer
-        self.Xdim_output = graph_transformer_kwargs['output_dims']['X']
-        self.Edim_output = graph_transformer_kwargs['output_dims']['E']
-        self.ydim_output = graph_transformer_kwargs['output_dims']['y']
+            # Limit distribution for forward noise
+            self.nodes_dist = DistributionNodes(dataset_infos["dataset"]["node_count_distribution"])
+            self.limit_dist = PlaceHolder(
+                X=torch.tensor(dataset_infos["dataset"]["node_marginals"]).to(self.device), 
+                E=torch.tensor(dataset_infos["dataset"]["edge_marginals"]).to(self.device), 
+                y=torch.ones(graph_transformer_kwargs["output_dims"]["y"]) / graph_transformer_kwargs["output_dims"]["y"]
+            )
+            # Noise schedule and transition model for applying noise to clean graphs
+            self.noise_schedule = PredefinedNoiseScheduleDiscrete(timesteps=diffusion_steps)
+            self.transition_model = MarginalUniformTransition(
+                x_marginals=torch.tensor(dataset_infos["dataset"]["node_marginals"]).to(self.device),
+                e_marginals=torch.tensor(dataset_infos["dataset"]["edge_marginals"]).to(self.device),
+                y_classes=graph_transformer_kwargs["output_dims"]["y"]
+            )
+            # Augmentation for adding features to the discretized noisy graphs
+            self.augmentation = Augmentation(
+                valencies=dataset_infos["general"]["atom_valencies"],
+                max_weight=dataset_infos["general"]["max_weight"],
+                atom_weights=dataset_infos["general"]["atom_weights"],
+                max_n_nodes=dataset_infos["general"]["max_n_nodes"]
+            )
+            # Denoising graph transformer
+            self.Xdim_output = graph_transformer_kwargs['output_dims']['X']
+            self.Edim_output = graph_transformer_kwargs['output_dims']['E']
+            self.ydim_output = graph_transformer_kwargs['output_dims']['y']
 
-        assert self.ydim_output == embedding_dim
+            assert self.ydim_output == embedding_dim
 
-        self.drug_decoder = GraphTransformer(
-            n_layers=graph_transformer_kwargs['n_layers'],
-            input_dims=graph_transformer_kwargs['input_dims'],
-            output_dims=graph_transformer_kwargs['output_dims'],
-            hidden_mlp_dims=graph_transformer_kwargs['hidden_mlp_dims'],
-            hidden_dims=graph_transformer_kwargs['hidden_dims'],
-            act_fn_in=nn.ReLU(),
-            act_fn_out=nn.ReLU()
-        )
+            self.drug_decoder = GraphTransformer(
+                n_layers=graph_transformer_kwargs['n_layers'],
+                input_dims=graph_transformer_kwargs['input_dims'],
+                output_dims=graph_transformer_kwargs['output_dims'],
+                hidden_mlp_dims=graph_transformer_kwargs['hidden_mlp_dims'],
+                hidden_dims=graph_transformer_kwargs['hidden_dims'],
+                act_fn_in=nn.ReLU(),
+                act_fn_out=nn.ReLU()
+            )
 
-        # TODO: Reconstruction loss
-        self.train_reconstruction_loss = TrainLossDiscrete(lambda_train = lambda_train)
-        self.train_molecular_metrics = TrainMolecularMetricsDiscrete(dataset_infos["general"]["atom_types"])
+            # TODO: Reconstruction loss
+            self.train_reconstruction_loss = TrainLossDiscrete(lambda_train = lambda_train)
+            self.train_molecular_metrics = TrainMolecularMetricsDiscrete(dataset_infos["general"]["atom_types"])
 
-        self.val_nll = NLL()
-        self.val_X_kl = SumExceptBatchKL()
-        self.val_E_kl = SumExceptBatchKL()
-        self.val_X_logp = SumExceptBatchMetric()
-        self.val_E_logp = SumExceptBatchMetric()
-        self.test_nll = NLL()
-        self.test_X_kl = SumExceptBatchKL()
-        self.test_E_kl = SumExceptBatchKL()
-        self.test_X_logp = SumExceptBatchMetric()
-        self.test_E_logp = SumExceptBatchMetric()
-        # chemical validity metrics? TODO (tanimoto similarity to ground truth & valid/invalid)
-        # called `sampling_metrics` in DiGress
+            self.val_nll = NLL()
+            self.val_X_kl = SumExceptBatchKL()
+            self.val_E_kl = SumExceptBatchKL()
+            self.val_X_logp = SumExceptBatchMetric()
+            self.val_E_logp = SumExceptBatchMetric()
+            self.test_nll = NLL()
+            self.test_X_kl = SumExceptBatchKL()
+            self.test_E_kl = SumExceptBatchKL()
+            self.test_X_logp = SumExceptBatchMetric()
+            self.test_E_logp = SumExceptBatchMetric()
+            # chemical validity metrics? TODO (tanimoto similarity to ground truth & valid/invalid)
+            # called `sampling_metrics` in DiGress
         
         # DTI prediction loss
         self.bce_loss = nn.BCEWithLogitsLoss()
         self.mse_loss = nn.MSELoss()
         # Loss weights for DTI prediction (based on inverse frequency in combined DTI dataset)
         self.register_buffer('loss_weights', torch.tensor([1.0, 0.903964, 0.282992, 0.755172]))
-        # TODO: maybe need to add a weight for reconstruction vs. DTI prediction?
         # TODO: handle this dti loss a smarter way... how does this work when there are only one vs. multiple targets?
         
         # Setup metrics based on phase
@@ -570,7 +570,7 @@ class FullDTIModel(pl.LightningModule):
         """
         extra_features = self.augmentation(noisy_data)
         extra_X = extra_features.X
-        extra_E = extra_features.E  
+        extra_E = extra_features.E
         extra_y = extra_features.y
 
         t = noisy_data['t'] # normalized timestep
@@ -773,8 +773,8 @@ class FullDTIModel(pl.LightningModule):
 
         # Neural net predictions
         noisy_data = {'X_t': X_t, 'E_t': E_t, 'y_t': y_t, 't': t, 'node_mask': node_mask}
-        extra_data = self.compute_extra_data(noisy_data)
-        pred = self.forward(noisy_data, extra_data, node_mask)
+        extra_data = self._augment_data(noisy_data)
+        pred = self._decode_drug(y_t, noisy_data, extra_data, node_mask)
 
         # Normalize predictions
         pred_X = F.softmax(pred.X, dim=-1)               # bs, n, d0
@@ -868,7 +868,7 @@ class FullDTIModel(pl.LightningModule):
                 drug_embedding, drug_attention = drug_result, None
             drug_mu, drug_logvar, drug_embedding = self.drug_variational_head(drug_embedding)
         else:
-            drug_embedding, drug_attention, drug_mu, drug_logvar = None, None, None, None, None
+            drug_embedding, drug_attention, drug_mu, drug_logvar = None, None, None, None
         
         # Encode target features
         if target_features is not None and len(target_features) > 0:
@@ -1068,10 +1068,10 @@ class FullDTIModel(pl.LightningModule):
             noisy_data['y_t'] = outputs['drug_embedding']
 
         losses = {
-            "contrastive": None,
-            "complexity": None,
-            "reconstruction": None,  # handled differently in train/val/test
-            "accuracy": None,
+            "contrastive": 0.,
+            "complexity": 0.,
+            "reconstruction": 0.,  # handled differently in train/val/test
+            "accuracy": 0.,
         }
 
         if self.phase == "pretrain_target":
@@ -1116,9 +1116,8 @@ class FullDTIModel(pl.LightningModule):
         self.print("Starting train epoch...")
         if self.train_metrics is not None:
             self.train_metrics.reset()
-        if self.train_molecular_metrics is not None:
+        if self.phase != "pretrain_target":
             self.train_molecular_metrics.reset()
-        if self.train_reconstruction_loss is not None:
             self.train_reconstruction_loss.reset()
 
     def training_step(self, batch: Dict[str, Any], batch_idx: int):
@@ -1162,7 +1161,7 @@ class FullDTIModel(pl.LightningModule):
         self.print("Starting validation epoch...")
         if self.val_metrics is not None:
             self.val_metrics.reset()
-        if self.val_nll is not None:
+        if self.phase != "pretrain_target":
             self.val_nll.reset()
             self.val_X_kl.reset()
             self.val_E_kl.reset()
@@ -1186,13 +1185,15 @@ class FullDTIModel(pl.LightningModule):
                 if batch_idx == 0 and self.global_rank == 0:
                     self.print(f"Generating {self.val_num_samples} molecules per validation sample for evaluation...")
 
-                smiles = batch["drug"]["representations"]["SMILES"] if self.phase != "pretrain_drug" else batch["representations"]["smiles"]
+                smiles = batch["drug"]["representations"]["smiles"] if self.phase != "pretrain_drug" else batch["representations"]["smiles"]
                 mols_true = [self.graph_converter.smiles_to_mol(smiles) for smiles in smiles]
                 mols_predicted = [list() for _ in range(len(smiles))]
+                batch = self.graph_converter.smiles_to_pyg_batch(smiles)
+                batch.y = outputs["drug_embedding"]
 
                 # iterative denoising w/ sample_batch()
-                for _ in range(self.num_samples_to_generate):
-                    for idx, mol in enumerate(self.sample_batch(self.graph_converter.smiles_to_pyg_batch(smiles))):
+                for _ in range(self.hparams.num_samples_to_generate):
+                    for idx, mol in enumerate(self.sample_batch(batch)):
                         mols_predicted[idx].append(mol)
             
                 # for idx in range(len(data)):
@@ -1216,36 +1217,6 @@ class FullDTIModel(pl.LightningModule):
         self.log("val/loss", loss)
 
         return loss
-
-    def on_validation_epoch_end(self) -> None:
-        metrics = [
-            self.val_nll.compute(), 
-            self.val_X_kl.compute(), 
-            self.val_E_kl.compute(),
-            self.val_X_logp.compute(), 
-            self.val_E_logp.compute(),
-            self.val_CE.compute()
-        ]
-
-        log_dict = {
-            "val/NLL": metrics[0],
-            "val/X_KL": metrics[1],
-            "val/E_KL": metrics[2],
-            "val/X_logp": metrics[3],
-            "val/E_logp": metrics[4],
-            "val/E_CE": metrics[5]
-        }
-
-        # TODO: these are DiffMS metrics related to molecular validity!
-
-        # if self.val_counter % self.sample_every_val == 0:
-        #     for key, value in self.val_k_acc.compute().items():
-        #         log_dict[f"val/{key}"] = value
-        #     for key, value in self.val_sim_metrics.compute().items():
-        #         log_dict[f"val/{key}"] = value
-        #     log_dict["val/validity"] = self.val_validity.compute()
-
-        self.log_dict(log_dict, sync_dist=True)
     
     def test_step(self, batch: Dict[str, Any], batch_idx: int):
         """Test step."""
@@ -1255,16 +1226,18 @@ class FullDTIModel(pl.LightningModule):
             pred = outputs["drug_pred"]
             pred.Y = outputs["drug_embedding"] # overwrite pred.Y with true y
             losses["reconstruction"] = self.compute_val_loss(
-                pred, noisy_data, dense_data.X, dense_data.E, outputs["drug_embedding"], node_mask, test=False
+                pred, noisy_data, dense_data.X, dense_data.E, outputs["drug_embedding"], node_mask, test=True
             )
             # Generate molecules for evaluation
-            smiles = batch["drug"]["representations"]["SMILES"] if self.phase != "pretrain_drug" else batch["representations"]["smiles"]
+            smiles = batch["drug"]["representations"]["smiles"] if self.phase != "pretrain_drug" else batch["representations"]["smiles"]
             mols_true = [self.graph_converter.smiles_to_mol(smiles) for smiles in smiles]
             mols_predicted = [list() for _ in range(len(smiles))]
+            graph_batch = self.graph_converter.smiles_to_pyg_batch(smiles)
+            graph_batch.y = outputs["drug_embedding"]
 
             # iterative denoising w/ sample_batch()
-            for _ in range(self.num_samples_to_generate):
-                for idx, mol in enumerate(self.sample_batch(self.graph_converter.smiles_to_pyg_batch(smiles))):
+            for _ in range(self.hparams.num_samples_to_generate):
+                for idx, mol in enumerate(self.sample_batch(graph_batch)):
                     mols_predicted[idx].append(mol)
         
             # for idx in range(len(data)):
@@ -1362,6 +1335,33 @@ class FullDTIModel(pl.LightningModule):
             for name, value in val_metrics.items():
                 self.log(name, value)
             self.val_metrics.reset()
+        if self.phase != "pretrain_target":
+            metrics = [
+                self.val_nll.compute(), 
+                self.val_X_kl.compute(), 
+                self.val_E_kl.compute(),
+                self.val_X_logp.compute(), 
+                self.val_E_logp.compute()
+            ]
+
+            log_dict = {
+                "val/NLL": metrics[0],
+                "val/X_KL": metrics[1],
+                "val/E_KL": metrics[2],
+                "val/X_logp": metrics[3],
+                "val/E_logp": metrics[4]
+            }
+
+            # TODO: these are DiffMS metrics related to molecular validity!
+
+            # if self.val_counter % self.sample_every_val == 0:
+            #     for key, value in self.val_k_acc.compute().items():
+            #         log_dict[f"val/{key}"] = value
+            #     for key, value in self.val_sim_metrics.compute().items():
+            #         log_dict[f"val/{key}"] = value
+            #     log_dict["val/validity"] = self.val_validity.compute()
+
+            self.log_dict(log_dict, sync_dist=True)
     
     def on_test_epoch_end(self):
         """Compute and log test metrics."""

@@ -1,0 +1,16 @@
+model:
+  checkpoint_path: "data/results/full/pretrain/rand/full_pretrain_rand/checkpoints/best_model.pt"
+
+training:
+  learning_rate: 0.0001
+
+data:
+  batch_size: 32
+  
+logging:
+  experiment_name: "full_KIBA_rand"
+  save_dir: "data/results/full/KIBA/rand"
+
+gridsearch:
+  training.learning_rate: [0.0001, 0.0005, 0.001]
+  data.batch_size: [16, 32, 64]

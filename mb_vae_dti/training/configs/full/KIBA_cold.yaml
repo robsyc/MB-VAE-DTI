@@ -8,8 +8,8 @@ data:
   batch_size: 32
   
 logging:
-  experiment_name: "full_DAVIS_cold"
-  save_dir: "data/results/full/DAVIS/cold"
+  experiment_name: "full_KIBA_cold"
+  save_dir: "data/results/full/KIBA/cold"
 
 gridsearch:
   training.learning_rate: [0.0001, 0.0005, 0.001]

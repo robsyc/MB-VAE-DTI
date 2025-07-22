@@ -9,8 +9,8 @@ data:
   batch_size: 32
 
 logging:
-  experiment_name: "multi_hybrid_pretrain_cold"
-  save_dir: "data/results/multi_hybrid/pretrain/cold"
+  experiment_name: "multi_hybrid_pretrain_rand"
+  save_dir: "data/results/multi_hybrid/pretrain/rand"
 
 gridsearch:
   # model.fusion_kwargs.hidden_dim: [128, 256, 512]

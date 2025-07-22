@@ -71,7 +71,6 @@ class MultiHybridDTIModel(pl.LightningModule):
         
         # Loss weights
         contrastive_weight: float,
-        temperature: float,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -137,18 +136,15 @@ class MultiHybridDTIModel(pl.LightningModule):
         
         # Contrastive learning heads (for pretraining)
         if phase in ["pretrain_drug", "pretrain_target"]:
-            contrastive_kwargs = infonce_head_kwargs or {}
-            contrastive_kwargs.setdefault("temperature", temperature)
-            
             if phase == "pretrain_drug":
                 self.drug_infonce_head = InfoNCEHead(
                     input_dim=embedding_dim,
-                    **contrastive_kwargs
+                    **infonce_head_kwargs
                 )
             elif phase == "pretrain_target":
                 self.target_infonce_head = InfoNCEHead(
                     input_dim=embedding_dim,
-                    **contrastive_kwargs
+                    **infonce_head_kwargs
                 )
         
         # Loss functions

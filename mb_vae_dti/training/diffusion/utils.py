@@ -3,6 +3,7 @@ Utility functions/classes used in the discrete diffusion decoder of the DTITree 
 """
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 from collections import Counter
 import rdkit.Chem as Chem
@@ -276,7 +277,7 @@ def sample_discrete_feature_noise(limit_dist, node_mask):
     bs, n_max = node_mask.shape
     x_limit = limit_dist.X[None, None, :].expand(bs, n_max, -1)
     e_limit = limit_dist.E[None, None, None, :].expand(bs, n_max, n_max, -1)
-    y_limit = limit_dist.y[None, :].expand(bs, -1)
+    # y_limit = limit_dist.y[None, :].expand(bs, -1)
     U_X = x_limit.flatten(end_dim=-2).multinomial(1).reshape(bs, n_max)
     U_E = e_limit.flatten(end_dim=-2).multinomial(1).reshape(bs, n_max, n_max)
     U_y = torch.empty((bs, 0))

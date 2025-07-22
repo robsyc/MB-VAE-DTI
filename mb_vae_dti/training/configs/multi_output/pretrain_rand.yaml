@@ -1,18 +1,3 @@
-model:
-  embedding_dim: 768
-  encoder_type: "transformer"
-  encoder_kwargs:
-    hidden_dim: 512
-    n_layers: 2
-    
-  fusion_kwargs:
-    hidden_dim: 512
-    n_layers: 2
-  
-  # Phase-specific parameters
-  finetune_score: null
-  checkpoint_path: null
-
 training:
   learning_rate: 0.001
   
@@ -24,13 +9,7 @@ logging:
   save_dir: "data/results/multi_output/pretrain/rand"
 
 gridsearch:
-  model.embedding_dim: [512, 768, 1024]
-  model.encoder_type: ["resnet", "transformer"]
-  model.encoder_kwargs.hidden_dim: [256, 512]
-  model.encoder_kwargs.n_layers: [2, 3]
-  
-  model.fusion_kwargs.hidden_dim: [256, 512]
-  model.fusion_kwargs.n_layers: [1, 2]
-  
-  training.learning_rate: [0.0001, 0.001]
+  model.fusion_kwargs.hidden_dim: [128, 256, 512]
+  model.fusion_kwargs.n_layers: [1, 2, 3]
+  training.learning_rate: [0.001, 0.0005, 0.0001]
   data.batch_size: [16, 32] 

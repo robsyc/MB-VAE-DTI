@@ -9,11 +9,11 @@ data:
   batch_size: 32
 
 logging:
-  experiment_name: "full_pretrain_cold"
-  save_dir: "data/results/full/pretrain/cold"
+  experiment_name: "full_pretrain_rand"
+  save_dir: "data/results/full/pretrain/rand"
 
 gridsearch:
   # model.fusion_kwargs.hidden_dim: [128, 256, 512]
   # model.fusion_kwargs.n_layers: [1, 2, 3]
   training.learning_rate: [0.001, 0.0005, 0.0001]
-  data.batch_size: [16, 32]
+  data.batch_size: [16, 32] 

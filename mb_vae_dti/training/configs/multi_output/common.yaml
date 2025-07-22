@@ -1,20 +1,39 @@
-# Multi-Modal Model Common Configuration
-#   These configurations are not tuned 
-#   They are shared across DAVIS/KIBA 
-#   & cold_split/random_split experiments
+# Full DTI Model Common Configuration
+#   Combines multi-modal inputs with multi-output predictions & drug reconstruction
+#   Supports individual branch pretraining with contrastive learning
+#   These configurations are shared across all training phases
 
 model:
+  embedding_dim: 1024
+  encoder_type: "transformer"
   encoder_kwargs:
     dropout: 0.1
     activation: "gelu"
-  
+    hidden_dim: 512
+    n_layers: 3
+
+  aggregator_type: "attentive"
+  aggregator_kwargs:
+    dropout: 0.1
+    activation: "gelu"
+
   fusion_kwargs:
     dropout: 0.1
     output_dim: 256
+    hidden_dim: 512
+    n_layers: 3
 
   dti_head_kwargs:
     hidden_dim: 128
-    
+    dropout: 0.1
+  
+  infonce_head_kwargs:
+    output_dim: 128
+    temperature: 0.07
+  
+  contrastive_weight: 0.1
+  accuracy_weight: 1.0
+
 training:
   scheduler: "one_cycle"  # "const", "step", "one_cycle", or "cosine"
     

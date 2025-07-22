@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Dict, Optional, Literal
 import argparse
 import gc
+import os
 
 import torch
 import pytorch_lightning as pl
@@ -279,8 +280,12 @@ def setup_model_multi_output(
 
     # Load pretrained weights if specified
     if config.model.get('checkpoint_path') is not None:
-        model.load_pretrained_weights(checkpoint_path=config.model.checkpoint_path)
-    
+        if os.path.exists(config.model.checkpoint_path):
+            model.load_pretrained_weights(checkpoint_path=config.model.checkpoint_path)
+        else:
+            logger.warning(f"Checkpoint file not found: {config.model.checkpoint_path}")
+            logger.warning("Continuing without pretrained weights")
+
     return model
 
 
@@ -341,17 +346,25 @@ def setup_model_multi_hybrid(
         phase=model_phase,
         finetune_score=finetune_score,
         contrastive_weight=config.model.get('contrastive_weight', 1.0),
-        temperature=config.model.get('temperature', 0.07),
     )
     
     # Load pretrained weights if specified
     if config.model.get('checkpoint_path') is not None:
-        model.load_pretrained_weights(checkpoint_path=config.model.checkpoint_path)
-    elif config.model.get('drug_checkpoint_path') is not None or config.model.get('target_checkpoint_path') is not None:
-        model.load_pretrained_weights(
-            drug_checkpoint_path=config.model.get('drug_checkpoint_path'),
-            target_checkpoint_path=config.model.get('target_checkpoint_path')
-        )
+        if os.path.exists(config.model.checkpoint_path):
+            model.load_pretrained_weights(checkpoint_path=config.model.checkpoint_path)
+        else:
+            logger.warning(f"Checkpoint file not found: {config.model.checkpoint_path}")
+            logger.warning("Continuing without pretrained weights")
+    elif config.model.get('drug_checkpoint_path') is not None and config.model.get('target_checkpoint_path') is not None:
+        if os.path.exists(config.model.drug_checkpoint_path) and os.path.exists(config.model.target_checkpoint_path):
+            model.load_pretrained_weights(
+                drug_checkpoint_path=config.model.drug_checkpoint_path,
+                target_checkpoint_path=config.model.target_checkpoint_path
+            )
+        else:
+            logger.warning(f"Checkpoint file not found: {config.model.drug_checkpoint_path}")
+            logger.warning(f"Checkpoint file not found: {config.model.target_checkpoint_path}")
+            logger.warning("Continuing without pretrained weights")
     
     return model
 
@@ -405,7 +418,7 @@ def setup_model_full(
             else:
                 dataset_key += split
             if phase == "finetune":
-                dataset_key += f"_{dataset}"
+                dataset_key += f"_{dataset.lower()}"
             dataset_statistics = {
                 "general": molecular_statistics["general"],
                 "dataset": molecular_statistics["datasets"][dataset_key]
@@ -442,12 +455,21 @@ def setup_model_full(
     
     # Load pretrained weights if specified
     if config.model.get('checkpoint_path') is not None:
-        model.load_pretrained_weights(checkpoint_path=config.model.checkpoint_path)
-    elif config.model.get('drug_checkpoint_path') is not None or config.model.get('target_checkpoint_path') is not None:
-        model.load_pretrained_weights(
-            drug_checkpoint_path=config.model.get('drug_checkpoint_path'),
-            target_checkpoint_path=config.model.get('target_checkpoint_path')
-        )
+        if os.path.exists(config.model.checkpoint_path):
+            model.load_pretrained_weights(checkpoint_path=config.model.checkpoint_path)
+        else:
+            logger.warning(f"Checkpoint file not found: {config.model.checkpoint_path}")
+            logger.warning("Continuing without pretrained weights")
+    elif config.model.get('drug_checkpoint_path') is not None and config.model.get('target_checkpoint_path') is not None:
+        if os.path.exists(config.model.drug_checkpoint_path) and os.path.exists(config.model.target_checkpoint_path):
+            model.load_pretrained_weights(
+                drug_checkpoint_path=config.model.drug_checkpoint_path,
+                target_checkpoint_path=config.model.target_checkpoint_path
+            )
+        else:
+            logger.warning(f"Checkpoint file not found: {config.model.drug_checkpoint_path}")
+            logger.warning(f"Checkpoint file not found: {config.model.target_checkpoint_path}")
+            logger.warning("Continuing without pretrained weights")
     
     return model
 

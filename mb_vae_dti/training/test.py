@@ -145,6 +145,41 @@ class DTITester:
         
         return configs
     
+    def get_full_configurations(self) -> List[TestConfiguration]:
+        """Get full model test configurations."""
+        configs = []
+        
+        # Pretraining phases
+        for pretrain_target in ["drug", "target"]:
+            configs.append(TestConfiguration(
+                model="full", 
+                phase="pretrain",
+                pretrain_target=pretrain_target,
+                description=f"Full: pretrain {pretrain_target}"
+            ))
+        
+        # Training phase
+        for split in ["cold", "rand"]:
+            configs.append(TestConfiguration(
+                model="full",
+                phase="train", 
+                split=split,
+                description=f"Full: train {split} split"
+            ))
+        
+        # Finetuning phase
+        for dataset in ["DAVIS", "KIBA"]:
+            for split in ["cold", "rand"]:
+                configs.append(TestConfiguration(
+                    model="full",
+                    phase="finetune",
+                    dataset=dataset,
+                    split=split,
+                    description=f"Full: finetune {dataset} {split} split"
+                ))
+        
+        return configs
+    
     def get_all_configurations(self, model_filter: str = None, phase_filter: str = None) -> List[TestConfiguration]:
         """Get all test configurations, optionally filtered."""
         all_configs = []
@@ -160,6 +195,9 @@ class DTITester:
             
         if model_filter is None or model_filter == "multi_hybrid":
             all_configs.extend(self.get_multi_hybrid_configurations())
+        
+        if model_filter is None or model_filter == "full":
+            all_configs.extend(self.get_full_configurations())
         
         # Apply phase filter
         if phase_filter:
@@ -187,7 +225,9 @@ class DTITester:
             "hardware.deterministic=false",
             "data.pin_memory=false", 
             "data.num_workers=0",
-            "logging.log_every_n_steps=1"
+            "logging.log_every_n_steps=1",
+            "diffusion.diffusion_steps=20",
+            "diffusion.num_samples_to_generate=1"
         ])
         
         logger.info(f"Running command: {' '.join(cmd_args)}")
@@ -446,7 +486,7 @@ def main():
     
     parser.add_argument(
         "--model",
-        choices=["baseline", "multi_modal", "multi_output", "multi_hybrid"],
+        choices=["baseline", "multi_modal", "multi_output", "multi_hybrid", "full"],
         help="Test only specific model type"
     )
     parser.add_argument(

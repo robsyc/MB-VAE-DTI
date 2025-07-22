@@ -1,24 +1,12 @@
-model:
-  embedding_dim: 768
-  encoder_type: "transformer"
-  encoder_kwargs:
-    hidden_dim: 512
-    n_layers: 2
-  
-  aggregator_type: "attentive"
-  
-  # checkpoint_path: null
-
 training:
   learning_rate: 0.001
   
 data:
-  batch_size: 128           # large bs for contrastive learning
+  batch_size: 128                        # large bs for contrastive learning
   h5_path: "data/input/targets.h5torch"  # Use drug pretraining dataset
-  load_in_memory: false
   drug_features: null
   target_features: ["EMB-ESM", "EMB-NT"]
 
 logging:
-  experiment_name: "multi_hybrid_pretrain_target"
-  save_dir: "data/results/multi_hybrid/pretrain/target"
+  experiment_name: "full_pretrain_target"
+  save_dir: "data/results/full/pretrain/target"
