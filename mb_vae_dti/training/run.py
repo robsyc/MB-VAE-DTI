@@ -43,9 +43,12 @@ import pytorch_lightning as pl
 from pytorch_lightning import Trainer
 from omegaconf import OmegaConf, DictConfig
 import wandb
+import json
 
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent.parent))
+
+MOLECULAR_STATISTICS_PATH = Path(__file__).parent.parent.parent / "data" / "processed" / "molecular_statistics.json"
 
 from mb_vae_dti.training.datasets import DTIDataModule, PretrainDataModule
 
@@ -357,6 +360,7 @@ def setup_model_full(
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
     dataset: Dataset = None,
+    split: Split = None,
     phase: TrainingPhase = None,
     pretrain_target: PretrainTarget = None
 ):
@@ -381,8 +385,6 @@ def setup_model_full(
     
     # Construct the correct phase value for pretrain
     if phase == "pretrain":
-        if pretrain_target is None:
-            raise ValueError("pretrain_target must be specified for pretrain phase")
         model_phase = f"pretrain_{pretrain_target}"
     else:
         model_phase = phase
@@ -393,21 +395,28 @@ def setup_model_full(
     else:
         finetune_score = None
     
-    # Prepare dataset statistics for diffusion decoder
-    dataset_statistics = config.model.get('dataset_statistics', None)
-    if dataset_statistics is not None:
-        # Convert OmegaConf DictConfig to a regular dict before further processing
-        dataset_statistics = OmegaConf.to_container(dataset_statistics, resolve=True)
-        # Convert marginals to tensors if present
-        if 'x_marginals' in dataset_statistics:
-            dataset_statistics['x_marginals'] = torch.tensor(dataset_statistics['x_marginals'])
-        if 'e_marginals' in dataset_statistics:
-            dataset_statistics['e_marginals'] = torch.tensor(dataset_statistics['e_marginals'])
+    # Fetch dataset statistics
+    if model_phase != "pretrain_target":
+        with open(MOLECULAR_STATISTICS_PATH, "r") as f:
+            molecular_statistics = json.load(f)
+            dataset_key = "drugs_"
+            if phase == "pretrain":
+                dataset_key += "pretrain"
+            else:
+                dataset_key += split
+            if phase == "finetune":
+                dataset_key += f"_{dataset}"
+            dataset_statistics = {
+                "general": molecular_statistics["general"],
+                "dataset": molecular_statistics["datasets"][dataset_key]
+            }
+    else:
+        dataset_statistics = None
     
     model = FullDTIModel(
+        embedding_dim=config.model.embedding_dim,
         drug_features=drug_features,
         target_features=target_features,
-        embedding_dim=config.model.embedding_dim,
         encoder_type=config.model.encoder_type,
         encoder_kwargs=OmegaConf.to_container(config.model.encoder_kwargs),
         aggregator_type=config.model.aggregator_type,
@@ -415,19 +424,20 @@ def setup_model_full(
         fusion_kwargs=OmegaConf.to_container(config.model.get('fusion_kwargs', {})),
         dti_head_kwargs=OmegaConf.to_container(config.model.get('dti_head_kwargs', {})),
         infonce_head_kwargs=OmegaConf.to_container(config.model.get('infonce_head_kwargs', {})),
-        variational_head_kwargs=OmegaConf.to_container(config.model.get('variational_head_kwargs', {})),
-        diffusion_decoder_kwargs=OmegaConf.to_container(config.model.get('diffusion_decoder_kwargs', {})),
+        diffusion_steps=config.diffusion.diffusion_steps,
+        num_samples_to_generate=config.diffusion.num_samples_to_generate,
+        graph_transformer_kwargs=OmegaConf.to_container(config.model.get('graph_transformer_kwargs', {})),
+        dataset_infos=dataset_statistics,
         learning_rate=config.training.learning_rate,
         weight_decay=config.training.weight_decay,
         scheduler=config.training.scheduler,
         phase=model_phase,
         finetune_score=finetune_score,
-        checkpoint_path=config.model.get('checkpoint_path'),
-        contrastive_weight=config.model.get('contrastive_weight', 1.0),
-        kl_weight=config.model.get('kl_weight', 0.1),
+        contrastive_weight=config.model.get('contrastive_weight', 0.1),
+        complexity_weight=config.model.get('complexity_weight', 0.001),
+        accuracy_weight=config.model.get('accuracy_weight', 1.0),
         reconstruction_weight=config.model.get('reconstruction_weight', 1.0),
-        temperature=config.model.get('temperature', 0.07),
-        dataset_statistics=dataset_statistics,
+        lambda_train=config.model.get('lambda_train', [1, 5, 0]),
     )
     
     # Load pretrained weights if specified
@@ -447,6 +457,7 @@ def setup_model(
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
     dataset: Dataset = None,
+    split: Split = None,
     phase: TrainingPhase = None,
     pretrain_target: PretrainTarget = None
 ):
@@ -460,7 +471,7 @@ def setup_model(
     elif model_type == "multi_hybrid":
         return setup_model_multi_hybrid(config, feature_dims, dataset, phase, pretrain_target)
     elif model_type == "full":
-        return setup_model_full(config, feature_dims, dataset, phase, pretrain_target)
+        return setup_model_full(config, feature_dims, dataset, split, phase, pretrain_target)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
@@ -569,7 +580,7 @@ def train_single_config(
             feature_dims = raw_feature_dims
         
         logger.info(f"Setting up {model_type} model...")
-        model = setup_model(model_type, config, feature_dims, dataset, phase, pretrain_target)
+        model = setup_model(model_type, config, feature_dims, dataset, split, phase, pretrain_target)
         
         # Setup logging & callbacks
         save_dir = Path(config.logging.save_dir) / config.logging.experiment_name

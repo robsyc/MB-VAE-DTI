@@ -72,6 +72,9 @@ def custom_collate_fn(batch):
         ])
     
     # Optional: Include other fields if needed (representations, IDs)
+    collated['drug']['representations'] = {
+        'smiles': [item['drug']['representations']['SMILES'] for item in batch]
+    }
     
     return collated
 

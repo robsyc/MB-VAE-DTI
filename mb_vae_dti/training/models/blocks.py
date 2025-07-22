@@ -284,8 +284,10 @@ class CrossAttentionFusion(nn.Module):
         self.input_proj_b = nn.Linear(input_dim, hidden_dim, bias=bias)
         
         # Cross-attention gates: simple gating mechanism for bidirectional information flow
-        self.cross_gates_a_to_b = nn.ModuleList()
+        self.cross_gates_a_to_b = nn.ModuleList() # Calculates a weight for a parameter update
         self.cross_gates_b_to_a = nn.ModuleList()
+        self.align_proj_b_to_a = nn.ModuleList()  # Projects b to align with a
+        self.align_proj_a_to_b = nn.ModuleList()  # Projects a to align with b
         
         # Self-attention gates: refinement of each embedding
         self.self_gates_a = nn.ModuleList()
@@ -297,6 +299,8 @@ class CrossAttentionFusion(nn.Module):
         
         for _ in range(n_layers):
             # Cross-attention gates (drug attends to target, target attends to drug)
+            self.align_proj_b_to_a.append(nn.Linear(hidden_dim, hidden_dim, bias=False))
+            self.align_proj_a_to_b.append(nn.Linear(hidden_dim, hidden_dim, bias=False))
             self.cross_gates_a_to_b.append(nn.Sequential(
                 nn.LayerNorm(hidden_dim * 2, bias=bias),
                 nn.Linear(hidden_dim * 2, hidden_dim // factor, bias=bias),
@@ -373,7 +377,8 @@ class CrossAttentionFusion(nn.Module):
             # Cross-attention: bidirectional information flow with gating
             gate_a = self.cross_gates_b_to_a[i](torch.cat([a, b], dim=-1))
             gate_b = self.cross_gates_a_to_b[i](torch.cat([b, a], dim=-1))
-            a, b = a + b * gate_a, b + a * gate_b
+            a = a + gate_a * self.align_proj_b_to_a[i](b)
+            b = b + gate_b * self.align_proj_a_to_b[i](a)
 
             # Self-attention: refine each embedding individually (like TransformerEncoder)
             a = a + a * self.self_gates_a[i](a)

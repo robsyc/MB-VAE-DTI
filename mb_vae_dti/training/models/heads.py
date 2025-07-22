@@ -283,13 +283,10 @@ class KLVariationalHead(nn.Module):
             x: Input tensor (batch_size, input_dim)
         
         Returns:
-            z: Sampled latent vector (batch_size, output_dim)
-            kl_loss: KL divergence loss (scalar)
+            mu and logvar: to be used for KL divergence
+            sampled: sampled latent vector (batch_size, output_dim)
         """
         mu = self.fc_mu(x)
         logvar = self.fc_logvar(x)
-        
-        z = self.reparameterize(mu, logvar)
-        kl_loss = self.kl_divergence(mu, logvar)
-        
-        return z, kl_loss
+        sampled = self.reparameterize(mu, logvar)
+        return mu, logvar, sampled

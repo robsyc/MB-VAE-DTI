@@ -154,9 +154,9 @@ class BondMetricsCE(MetricCollection):
 
 
 class TrainMolecularMetricsDiscrete(nn.Module):
-    def __init__(self, dataset_infos):
+    def __init__(self, atom_types: list[str]):
         super().__init__()
-        self.train_atom_metrics = AtomMetricsCE(dataset_infos=dataset_infos)
+        self.train_atom_metrics = AtomMetricsCE(atom_types=atom_types)
         self.train_bond_metrics = BondMetricsCE()
 
     def forward(self, masked_pred_X, masked_pred_E, true_X, true_E, log: bool):

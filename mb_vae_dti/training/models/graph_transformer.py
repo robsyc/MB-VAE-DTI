@@ -259,8 +259,8 @@ class NodeEdgeBlock(nn.Module):
 
         # Process y based on X axnd E
         y = self.y_y(y)
-        e_y = self.e_y(E, e_mask1, e_mask2)
-        x_y = self.x_y(X, x_mask)
+        e_y = self.e_y(E)
+        x_y = self.x_y(X)
         new_y = y + x_y + e_y
         new_y = self.y_out(new_y)               # bs, dy
 
@@ -273,7 +273,7 @@ class GraphTransformer(nn.Module):
     dims : dict -- contains dimensions for each feature type
     """
     def __init__(self, n_layers: int, input_dims: dict, hidden_mlp_dims: dict, hidden_dims: dict,
-                 output_dims: dict, act_fn_in=nn.ReLU(), act_fn_out=nn.ReLU(), **kwargs):
+                 output_dims: dict, act_fn_in: nn.ReLU, act_fn_out: nn.ReLU):
         super().__init__()
         self.n_layers = n_layers
         self.out_dim_X = output_dims['X']
@@ -295,7 +295,7 @@ class GraphTransformer(nn.Module):
                                                             n_head=hidden_dims['n_head'],
                                                             dim_ffX=hidden_dims['dim_ffX'],
                                                             dim_ffE=hidden_dims['dim_ffE'],
-                                                            dim_ffy=hidden_dims['dim_ffy'],)
+                                                            dim_ffy=hidden_dims['dim_ffy'])
                                         for i in range(n_layers)])
 
         self.mlp_out_X = nn.Sequential(nn.Linear(hidden_dims['dx'], hidden_mlp_dims['X']), act_fn_out,
@@ -328,9 +328,7 @@ class GraphTransformer(nn.Module):
 
         X = self.mlp_out_X(X)
         E = self.mlp_out_E(E)
-        y = self.mlp_out_y(y) 
-        # NOTE: processing this y is kind of pointless... because predictions are overwritten afterwards
-        # TODO: change this?
+        y = self.mlp_out_y(y)
 
         X = (X + X_to_out)
         E = (E + E_to_out) * diag_mask

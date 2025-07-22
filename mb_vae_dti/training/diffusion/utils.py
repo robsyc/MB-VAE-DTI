@@ -23,7 +23,7 @@ class PlaceHolder:
     - Store limit distribution graph (G^T) with marginal distributions of nodes & edges
     - 
     """
-    def __init__(self, X, E, y):
+    def __init__(self, X, E, y = None):
         self.X = X
         self.E = E
         self.y = y
@@ -32,7 +32,10 @@ class PlaceHolder:
         """ Changes the device and dtype of X, E, y. """
         self.X = self.X.type_as(x)
         self.E = self.E.type_as(x)
-        self.y = self.y.type_as(x)
+        try:
+            self.y = self.y.type_as(x)
+        except:
+            pass
         return self
 
     def mask(self, node_mask, collapse=False):
@@ -89,26 +92,31 @@ def to_dense(x, edge_index, edge_attr, batch):
     - in validation_step()
     """
     X, node_mask = to_dense_batch(x=x, batch=batch)
-    # node_mask = node_mask.float()
     edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
-    # TODO: carefully check if setting node_mask as a bool breaks the continuous case
     max_num_nodes = X.size(1)
     E = to_dense_adj(edge_index=edge_index, batch=batch, edge_attr=edge_attr, max_num_nodes=max_num_nodes)
     E = encode_no_edge(E)
-
     return PlaceHolder(X=X, E=E, y=None), node_mask
 
 def encode_no_edge(E):
-    assert len(E.shape) == 4
-    if E.shape[-1] == 0:
-        return E
+    # Create a new tensor with an additional dimension for no-edge type as the FIRST feature
+    bs, n, n, num_edge_types = E.shape
+    E_new = torch.zeros(bs, n, n, num_edge_types + 1, device=E.device, dtype=E.dtype)
+    
+    # Identify positions with no edges (sum of all edge types is 0)
     no_edge = torch.sum(E, dim=3) == 0
-    first_elt = E[:, :, :, 0]
-    first_elt[no_edge] = 1
-    E[:, :, :, 0] = first_elt
-    diag = torch.eye(E.shape[1], dtype=torch.bool).unsqueeze(0).expand(E.shape[0], -1, -1)
-    E[diag] = 0
-    return E
+    
+    # Set the first dimension (no-edge type) to 1 where there are no edges
+    E_new[:, :, :, 0] = no_edge.float()
+    
+    # Copy existing edge features to the remaining dimensions
+    E_new[:, :, :, 1:] = E
+    
+    # Set diagonal elements to 0 (no self-loops)
+    diag = torch.eye(n, dtype=torch.bool, device=E.device).unsqueeze(0).expand(bs, -1, -1)
+    E_new[diag] = 0
+    
+    return E_new
 
 ##################################################################################
 
@@ -155,13 +163,16 @@ def sample_discrete_features(probX, probE, node_mask):
 ##################################################################################
 
 class DistributionNodes:
-    def __init__(self, histogram: Counter):
+    def __init__(self, histogram: dict):
         """
         Compute the distribution of the number of nodes in the dataset (heavy atoms), 
         and sample from this distribution.
         
         historgram: The keys are num_nodes, the values are counts
         """
+        # histogram should be dict of int_keys, int_values
+        # convert keys to int if they are strings
+        histogram = {int(k): int(v) for k, v in histogram.items()}
         max_n_nodes = max(histogram.keys())
         prob = torch.zeros(max_n_nodes + 1)
         for num_nodes, count in histogram.items():
@@ -413,31 +424,39 @@ class SmilesToPyG:
         self.atom_encoder = atom_encoder
         self.bond_encoder = bond_encoder
 
-    def smiles_to_pyg(self, smiles: str) -> Data:
+    def smiles_to_mol(self, smiles: str) -> Chem.Mol:
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             mol = Chem.MolFromSmiles('')
+        return mol
+
+    def smiles_to_pyg(self, smiles: str) -> Data:
+        mol = self.smiles_to_mol(smiles)
 
         # Node features: atom type index
-        x = [self.atom_encoder[atom.GetSymbol()] for atom in mol.GetAtoms()]
-        x = torch.tensor(x, dtype=torch.long) if x else torch.zeros((0, 1), dtype=torch.long)
+        x_indices = [self.atom_encoder[atom.GetSymbol()] for atom in mol.GetAtoms()]
+        x_indices = torch.tensor(x_indices, dtype=torch.long)
+        
+        num_atom_types = max(self.atom_encoder.values()) + 1
+        x = torch.nn.functional.one_hot(x_indices, num_classes=num_atom_types).float()
 
         # Edge features: bond type index, undirected edges
         edge_indices, edge_attrs = [], []
         for bond in mol.GetBonds():
             i = bond.GetBeginAtomIdx()
             j = bond.GetEndAtomIdx()
+            bond_type_idx = self.bond_encoder[bond.GetBondType()]
             edge_indices += [[i, j], [j, i]]
-            edge_attrs += [[self.bond_encoder[bond.GetBondType()]], [self.bond_encoder[bond.GetBondType()]]]
+            edge_attrs += [[bond_type_idx], [bond_type_idx]]
 
         edge_index = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
-        edge_attr = torch.tensor(edge_attrs, dtype=torch.long)
+        edge_attr_indices = torch.tensor(edge_attrs, dtype=torch.long).squeeze(-1)
 
-        # possibly need to .view() here (https://pytorch-geometric.readthedocs.io/en/latest/_modules/torch_geometric/utils/smiles.html)
-        
-        if edge_index.numel() > 0: # sort indices
-            perm = (edge_index[0] * x.size(0) + edge_index[1]).argsort()
-            edge_index, edge_attr = edge_index[:, perm], edge_attr[perm]
+        num_bond_types = max(self.bond_encoder.values()) + 1
+        edge_attr = torch.nn.functional.one_hot(edge_attr_indices, num_classes=num_bond_types).float()
+
+        perm = (edge_index[0] * x.size(0) + edge_index[1]).argsort()
+        edge_index, edge_attr = edge_index[:, perm], edge_attr[perm]
 
         return Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
 

@@ -1,9 +1,11 @@
-# Multi-Hybrid Model Common Configuration
-#   Combines multi-modal inputs with multi-output predictions
+# Full DTI Model Common Configuration
+#   Combines multi-modal inputs with multi-output predictions & drug reconstruction
 #   Supports individual branch pretraining with contrastive learning
 #   These configurations are shared across all training phases
 
 model:
+  embedding_dim: 1024
+  encoder_type: "transformer"
   encoder_kwargs:
     dropout: 0.1
     activation: "gelu"
@@ -20,13 +22,29 @@ model:
     hidden_dim: 128
     dropout: 0.1
   
-  # Contrastive learning parameters
   infonce_head_kwargs:
     output_dim: 128
     temperature: 0.07
   contrastive_weight: 1.0
-  temperature: 0.07
-    
+  temperature: 0.07    
+
+  graph_transformer_kwargs:
+    n_layers: 5
+    input_dims: {'X': 16, 'E': 5, 'y': 1037} # after augmentation
+    output_dims: {'X': 8, 'E': 5, 'y': 1024}
+    hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 1024}
+    hidden_dims : {'dx': 256, 'de': 64, 'dy': 1024, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 1024}
+  
+  contrastive_weight: 0.1
+  complexity_weight: 0.001
+  accuracy_weight: 1.0
+  reconstruction_weight: 1.0
+  lambda_train: [1, 5, 0]
+
+diffusion:
+  diffusion_steps: 500
+  num_samples_to_generate: 100
+
 training:
   scheduler: "one_cycle"  # "const", "step", "one_cycle", or "cosine"
     

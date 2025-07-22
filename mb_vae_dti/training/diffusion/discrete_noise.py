@@ -48,11 +48,7 @@ class MarginalUniformTransition:
     """
     Called to get transition matrices for forward diffusion process.
     """
-    def __init__(
-            self, 
-            x_marginals = [7.3595e-01, 1.3072e-01, 6.5359e-04, 1.0719e-01, 1.2418e-02, 3.2680e-03, 9.8039e-03, 0.0000e+00], # 8 node types
-            e_marginals = [9.1326e-01, 4.4296e-02, 5.7754e-03, 1.5896e-04, 3.6507e-02], # 5 edge types
-            y_classes = 1024):
+    def __init__(self, x_marginals, e_marginals, y_classes):
         self.X_classes = len(x_marginals)
         self.E_classes = len(e_marginals)
         self.y_classes = y_classes

@@ -1,6 +1,4 @@
 model:
-  embedding_dim: 768
-  encoder_type: "transformer"
   encoder_kwargs:
     hidden_dim: 512
     n_layers: 2
@@ -15,8 +13,8 @@ model:
   # checkpoint_path: null  # Path to pretrained weights (set manually)
   
   # Alternative: Load drug and target branches separately
-  # drug_checkpoint_path: "outputs/multi_hybrid/pretrain/drug/best_model.pt"
-  # target_checkpoint_path: "outputs/multi_hybrid/pretrain/target/best_model.pt"
+  # drug_checkpoint_path: "outputs/full/pretrain/drug/best_model.pt"
+  # target_checkpoint_path: "outputs/full/pretrain/target/best_model.pt"
 
 training:
   learning_rate: 0.001
@@ -25,8 +23,8 @@ data:
   batch_size: 32
 
 logging:
-  experiment_name: "multi_hybrid_pretrain_cold"
-  save_dir: "data/results/multi_hybrid/pretrain/cold"
+  experiment_name: "full_pretrain_cold"
+  save_dir: "data/results/full/pretrain/cold"
 
 gridsearch: # 162 combinations
   model.fusion_kwargs.hidden_dim: [128, 256, 512]
