@@ -233,48 +233,6 @@ class RealDTIMetrics(MetricCollection):
                     raise e
         
         return results
-    
-    # def _check_metric_updated(self, metric) -> bool:
-    #     """
-    #     Check if a metric has been updated with any data.
-    #     This avoids the "UserWarning: The ``compute`` method of metric ... was called before update()"
-        
-    #     Args:
-    #         metric: The metric to check
-            
-    #     Returns:
-    #         True if the metric has been updated, False otherwise
-    #     """
-    #     # Check common metric state attributes to determine if metric has been updated
-        
-    #     # For MSE, RMSE - check if sum_squared_error has been set
-    #     if hasattr(metric, 'sum_squared_error'):
-    #         return metric.sum_squared_error.numel() > 0 and metric.sum_squared_error.sum() != 0
-        
-    #     # For Pearson correlation - check if n_total > 0
-    #     if hasattr(metric, 'n_total'):
-    #         return metric.n_total > 0
-        
-    #     # For R2Score - check if sum_squared_error exists and has data
-    #     if hasattr(metric, 'sum_squared_error') and hasattr(metric, 'sum_squared_observed'):
-    #         return (metric.sum_squared_error.numel() > 0 and 
-    #                 metric.sum_squared_observed.numel() > 0)
-        
-    #     # For ConcordanceIndex - check if estimates tensor has data
-    #     if hasattr(metric, 'estimates'):
-    #         return metric.estimates.numel() > 0
-        
-    #     # For metrics with a 'total' attribute (like accuracy)
-    #     if hasattr(metric, 'total'):
-    #         return metric.total > 0
-        
-    #     # For metrics with 'n_obs' attribute  
-    #     if hasattr(metric, 'n_obs'):
-    #         return metric.n_obs > 0
-        
-    #     # Default: assume it hasn't been updated if we can't determine otherwise
-    #     return False
-
 
 class MultiScoreRealDTIMetrics(torch.nn.Module):
     """

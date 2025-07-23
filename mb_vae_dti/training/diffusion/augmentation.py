@@ -25,13 +25,13 @@ class Augmentation:
             atom_weights=atom_weights
         )
     
-    def __call__(self, noisy_data):
+    def __call__(self, G_t, node_mask):
         """
         Compute both graph-structural features and molecular features,
         then combine them into a single PlaceHolder.
         """
-        graph_features = self.extra_graph_features(noisy_data)
-        molecular_features = self.extra_molecular_features(noisy_data)
+        graph_features = self.extra_graph_features(G_t.E, node_mask)
+        molecular_features = self.extra_molecular_features(G_t)
         
         # Combine the features
         combined_X = torch.cat((graph_features.X, molecular_features.X), dim=-1)
@@ -49,13 +49,12 @@ class ExtraFeatures:
         self.ncycles = NodeCycleFeatures()
         self.eigenfeatures = EigenFeatures()
 
-    def __call__(self, noisy_data):
-        n = noisy_data['node_mask'].sum(dim=1).unsqueeze(1) / self.max_n_nodes
-        x_cycles, y_cycles = self.ncycles(noisy_data)       # (bs, n_cycles)
+    def __call__(self, E_t, node_mask):
+        n = node_mask.sum(dim=1).unsqueeze(1) / self.max_n_nodes
+        x_cycles, y_cycles = self.ncycles(E_t, node_mask)       # (bs, n_cycles)
 
-        eigenfeatures = self.eigenfeatures(noisy_data)
-        E = noisy_data['E_t']
-        extra_edge_attr = torch.zeros((*E.shape[:-1], 0)).type_as(E)
+        eigenfeatures = self.eigenfeatures(E_t, node_mask)
+        extra_edge_attr = torch.zeros((*E_t.shape[:-1], 0)).type_as(E_t)
         n_components, batched_eigenvalues, nonlcc_indicator, k_lowest_eigvec = eigenfeatures
         # (bs, 1), (bs, 10), (bs, n, 1), (bs, n, 2)
 
@@ -69,11 +68,10 @@ class NodeCycleFeatures:
     def __init__(self):
         self.kcycles = KNodeCycles()
 
-    def __call__(self, noisy_data):
-        adj_matrix = noisy_data['E_t'][..., 1:].sum(dim=-1).float()
-
+    def __call__(self, E_t, node_mask):
+        adj_matrix = E_t[..., 1:].sum(dim=-1).float()
         x_cycles, y_cycles = self.kcycles.k_cycles(adj_matrix=adj_matrix)   # (bs, n_cycles)
-        x_cycles = x_cycles.type_as(adj_matrix) * noisy_data['node_mask'].unsqueeze(-1)
+        x_cycles = x_cycles.type_as(adj_matrix) * node_mask.unsqueeze(-1)
         # Avoid large values when the graph is dense
         x_cycles = x_cycles / 10
         y_cycles = y_cycles / 10
@@ -89,25 +87,23 @@ class EigenFeatures:
     def __init__(self):
         pass
 
-    def __call__(self, noisy_data):
-        E_t = noisy_data['E_t']
-        mask = noisy_data['node_mask']
-        A = E_t[..., 1:].sum(dim=-1).float() * mask.unsqueeze(1) * mask.unsqueeze(2)
+    def __call__(self, E_t, node_mask):
+        A = E_t[..., 1:].sum(dim=-1).float() * node_mask.unsqueeze(1) * node_mask.unsqueeze(2)
         L = compute_laplacian(A, normalize=False)
         mask_diag = 2 * L.shape[-1] * torch.eye(A.shape[-1]).type_as(L).unsqueeze(0)
-        mask_diag = mask_diag * (~mask.unsqueeze(1)) * (~mask.unsqueeze(2))
-        L = L * mask.unsqueeze(1) * mask.unsqueeze(2) + mask_diag
+        mask_diag = mask_diag * (~node_mask.unsqueeze(1)) * (~node_mask.unsqueeze(2))
+        L = L * node_mask.unsqueeze(1) * node_mask.unsqueeze(2) + mask_diag
 
         eigvals, eigvectors = torch.linalg.eigh(L)
-        eigvals = eigvals.type_as(A) / torch.sum(mask, dim=1, keepdim=True)
-        eigvectors = eigvectors * mask.unsqueeze(2) * mask.unsqueeze(1)
+        eigvals = eigvals.type_as(A) / torch.sum(node_mask, dim=1, keepdim=True)
+        eigvectors = eigvectors * node_mask.unsqueeze(2) * node_mask.unsqueeze(1)
         # Retrieve eigenvalues features
         n_connected_comp, batch_eigenvalues = get_eigenvalues_features(eigenvalues=eigvals)
 
         # Retrieve eigenvectors features
         nonlcc_indicator, k_lowest_eigenvector = get_eigenvectors_features(
             vectors=eigvectors,
-            node_mask=noisy_data['node_mask'],
+            node_mask=node_mask,
             n_connected=n_connected_comp
         )
         return n_connected_comp, batch_eigenvalues, nonlcc_indicator, k_lowest_eigenvector
@@ -296,12 +292,12 @@ class ExtraMolecularFeatures:
         self.valency = ValencyFeature()
         self.weight = WeightFeature(max_weight=max_weight, atom_weights=atom_weights)
 
-    def __call__(self, noisy_data):
-        charge = self.charge(noisy_data).unsqueeze(-1)      # (bs, n, 1)
-        valency = self.valency(noisy_data).unsqueeze(-1)    # (bs, n, 1)
-        weight = self.weight(noisy_data)                    # (bs, 1)
+    def __call__(self, G_t):
+        charge = self.charge(G_t).unsqueeze(-1)      # (bs, n, 1)
+        valency = self.valency(G_t).unsqueeze(-1)    # (bs, n, 1)
+        weight = self.weight(G_t)                    # (bs, 1)
 
-        extra_edge_attr = torch.zeros((*noisy_data['E_t'].shape[:-1], 0)).type_as(noisy_data['E_t'])
+        extra_edge_attr = torch.zeros((*G_t.E.shape[:-1], 0)).type_as(G_t.E)
 
         return PlaceHolder(X=torch.cat((charge, valency), dim=-1), E=extra_edge_attr, y=weight)
 
@@ -310,27 +306,27 @@ class ChargeFeature:
     def __init__(self, valencies):
         self.valencies = valencies
 
-    def __call__(self, noisy_data):
-        bond_orders = torch.tensor([0, 1, 2, 3, 1.5], device=noisy_data['E_t'].device).reshape(1, 1, 1, -1)
-        weighted_E = noisy_data['E_t'] * bond_orders      # (bs, n, n, de)
+    def __call__(self, G_t):
+        bond_orders = torch.tensor([0, 1, 2, 3, 1.5], device=G_t.E.device).reshape(1, 1, 1, -1)
+        weighted_E = G_t.E * bond_orders      # (bs, n, n, de)
         current_valencies = weighted_E.argmax(dim=-1).sum(dim=-1)   # (bs, n)
 
-        valencies = torch.tensor(self.valencies, device=noisy_data['X_t'].device).reshape(1, 1, -1)
-        X = noisy_data['X_t'] * valencies  # (bs, n, dx)
+        valencies = torch.tensor(self.valencies, device=G_t.X.device).reshape(1, 1, -1)
+        X = G_t.X * valencies  # (bs, n, dx)
         normal_valencies = torch.argmax(X, dim=-1)               # (bs, n)
 
-        return (normal_valencies - current_valencies).type_as(noisy_data['X_t'])
+        return (normal_valencies - current_valencies).type_as(G_t.X)
 
 
 class ValencyFeature:
     def __init__(self):
         pass
 
-    def __call__(self, noisy_data):
-        orders = torch.tensor([0, 1, 2, 3, 1.5], device=noisy_data['E_t'].device).reshape(1, 1, 1, -1)
-        E = noisy_data['E_t'] * orders      # (bs, n, n, de)
+    def __call__(self, G_t):
+        orders = torch.tensor([0, 1, 2, 3, 1.5], device=G_t.E.device).reshape(1, 1, 1, -1)
+        E = G_t.E * orders      # (bs, n, n, de)
         valencies = E.argmax(dim=-1).sum(dim=-1)    # (bs, n)
-        return valencies.type_as(noisy_data['X_t'])
+        return valencies.type_as(G_t.X)
 
 
 class WeightFeature:
@@ -338,7 +334,7 @@ class WeightFeature:
         self.max_weight = max_weight
         self.atom_weight_list = torch.tensor(atom_weights)
 
-    def __call__(self, noisy_data):
-        X = torch.argmax(noisy_data['X_t'], dim=-1)         # (bs, n)
+    def __call__(self, G_t):
+        X = torch.argmax(G_t.X, dim=-1)         # (bs, n)
         X_weights = self.atom_weight_list.to(X.device)[X]   # (bs, n)
-        return X_weights.sum(dim=-1).unsqueeze(-1).type_as(noisy_data['X_t']) / self.max_weight     # (bs, 1)
+        return X_weights.sum(dim=-1).unsqueeze(-1).type_as(G_t.X) / self.max_weight     # (bs, 1)

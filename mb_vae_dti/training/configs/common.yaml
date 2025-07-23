@@ -26,4 +26,4 @@ hardware:
   gpus: 1                      # run on cpu or set to 1 for gpu
   precision: 32-true           # https://lightning.ai/docs/pytorch/stable/common/precision_basic.html
   deterministic: true          # Set to False when on CPU
-  seed: 42 
+  seed: 42

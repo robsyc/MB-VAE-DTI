@@ -248,10 +248,10 @@ class FullDTIModel(pl.LightningModule):
             self.train_reconstruction_loss = TrainLossDiscrete(lambda_train = lambda_train)
             self.train_molecular_metrics = TrainMolecularMetricsDiscrete(dataset_infos["general"]["atom_types"])
 
-            self.val_nll = NLL()
-            self.val_X_kl = SumExceptBatchKL()
+            self.val_nll = NLL()                      # used at the end of compute_val_loss
+            self.val_X_kl = SumExceptBatchKL()        # used in nll component (compute_Lt) -> loss_all_t (diffusion loss)
             self.val_E_kl = SumExceptBatchKL()
-            self.val_X_logp = SumExceptBatchMetric()
+            self.val_X_logp = SumExceptBatchMetric()  # used in nll component (reconstruction_logp) -> loss_term_0 (reconstruction loss)
             self.val_E_logp = SumExceptBatchMetric()
             self.test_nll = NLL()
             self.test_X_kl = SumExceptBatchKL()
@@ -602,11 +602,13 @@ class FullDTIModel(pl.LightningModule):
         limit_E = self.limit_dist.E[None, None, None, :].expand(bs, n, n, -1).type_as(probE)
 
         # Make sure that masked rows do not contribute to the loss
-        limit_dist_X, limit_dist_E, probX, probE = mask_distributions(true_X=limit_X.clone(),
-                                                                                      true_E=limit_E.clone(),
-                                                                                      pred_X=probX,
-                                                                                      pred_E=probE,
-                                                                                      node_mask=node_mask)
+        limit_dist_X, limit_dist_E, probX, probE = mask_distributions(
+            true_X=limit_X.clone(),
+            true_E=limit_E.clone(),
+            pred_X=probX,
+            pred_E=probE,
+            node_mask=node_mask
+        )
 
         kl_distance_X = F.kl_div(input=probX.log(), target=limit_dist_X, reduction='none')
         kl_distance_E = F.kl_div(input=probE.log(), target=limit_dist_E, reduction='none')
@@ -625,20 +627,28 @@ class FullDTIModel(pl.LightningModule):
 
         # Compute distributions to compare with KL
         bs, n, d = X.shape
-        prob_true = posterior_distributions(X=X, E=E, y=y, X_t=noisy_data['X_t'], E_t=noisy_data['E_t'],
-                                                            y_t=noisy_data['y_t'], Qt=Qt, Qsb=Qsb, Qtb=Qtb)
+        prob_true = posterior_distributions(
+            X=X, E=E, y=y, 
+            X_t=noisy_data['X_t'], E_t=noisy_data['E_t'], y_t=noisy_data['y_t'], 
+            Qt=Qt, Qsb=Qsb, Qtb=Qtb
+        )
         prob_true.E = prob_true.E.reshape((bs, n, n, -1))
-        prob_pred = posterior_distributions(X=pred_probs_X, E=pred_probs_E, y=pred_probs_y,
-                                                            X_t=noisy_data['X_t'], E_t=noisy_data['E_t'],
-                                                            y_t=noisy_data['y_t'], Qt=Qt, Qsb=Qsb, Qtb=Qtb)
+
+        prob_pred = posterior_distributions(
+            X=pred_probs_X, E=pred_probs_E, y=pred_probs_y,
+            X_t=noisy_data['X_t'], E_t=noisy_data['E_t'], y_t=noisy_data['y_t'], 
+            Qt=Qt, Qsb=Qsb, Qtb=Qtb
+        )
         prob_pred.E = prob_pred.E.reshape((bs, n, n, -1))
 
         # Reshape and filter masked rows
-        prob_true_X, prob_true_E, prob_pred.X, prob_pred.E = mask_distributions(true_X=prob_true.X,
-                                                                                                true_E=prob_true.E,
-                                                                                                pred_X=prob_pred.X,
-                                                                                                pred_E=prob_pred.E,
-                                                                                                node_mask=node_mask)
+        prob_true_X, prob_true_E, prob_pred.X, prob_pred.E = mask_distributions(
+            true_X=prob_true.X,
+            true_E=prob_true.E,
+            pred_X=prob_pred.X,
+            pred_E=prob_pred.E,
+            node_mask=node_mask
+        )
         kl_x = (self.test_X_kl if test else self.val_X_kl)(prob_true.X, torch.log(prob_pred.X))
         kl_e = (self.test_E_kl if test else self.val_E_kl)(prob_true.E, torch.log(prob_pred.E))
         return self.T * (kl_x + kl_e)

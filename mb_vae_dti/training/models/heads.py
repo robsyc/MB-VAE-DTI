@@ -2,77 +2,100 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Union
+
+from mb_vae_dti.training.diffusion.utils import PlaceHolder
 
 
 class DTIHead(nn.Module):
     """
     Drug-Target Interaction prediction head with multi-target support.
-    
+
     Handles binary interaction prediction (always present) and optional 
     continuous targets (Kd, Ki, KIBA).
     """
-    
-    def __init__(self, 
-                 input_dim: int, 
-                 hidden_dim: int,
-                 dropout: float = 0.1):
-        """
-        Args:
-            input_dim: Input feature dimension
-            hidden_dim: Hidden layer dimension
-            dropout: Dropout rate
-        """
+    def __init__(
+            self, 
+            input_dim: int, 
+            proj_dim: int,
+            dropout: float,
+            bias: bool,
+            activation: nn.Module,
+            dti_weights: List[float]
+    ):
         super().__init__()
         
-        # Shared layers
+        self.activation = activation
+        self.dti_weights = {
+            "Y": dti_weights[0],
+            "Y_pKd": dti_weights[1],
+            "Y_pKi": dti_weights[2],
+            "Y_KIBA": dti_weights[3]
+        }
+
         self.shared_layers = nn.Sequential(
             nn.LayerNorm(input_dim),
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
+            nn.Linear(input_dim, proj_dim, bias=bias),
+            self.activation,
             nn.Dropout(dropout),
         )
         
-        # Prediction heads
-        self.binary_head = nn.Linear(hidden_dim, 1)
-        self.pKd_head = nn.Linear(hidden_dim, 1)
-        self.pKi_head = nn.Linear(hidden_dim, 1)
-        self.KIBA_head = nn.Linear(hidden_dim, 1)
-        
-        self._init_weights()
-    
-    def _init_weights(self):
-        """Initialize weights using Xavier uniform."""
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-    
+        self.binary_head = nn.Linear(proj_dim, 1)
+        self.pKd_head = nn.Linear(proj_dim, 1)
+        self.pKi_head = nn.Linear(proj_dim, 1)
+        self.KIBA_head = nn.Linear(proj_dim, 1)
+
     def forward(self, features: torch.Tensor) -> Dict[str, torch.Tensor]:
         """
         Args:
             features: Input features (batch_size, input_dim)
         
         Returns:
-            predictions: Dict with prediction for each target (binary, Kd, Ki, KIBA)
+            predictions: Dict with predictions for each DTI score (Y, pKd, pKi, KIBA)
         """
         shared_features = self.shared_layers(features)
-        
-        # Get predictions
-        pred_binary_logits = self.binary_head(shared_features)
-        pred_pKd = self.pKd_head(shared_features)
-        pred_pKi = self.pKi_head(shared_features)
-        pred_KIBA = self.KIBA_head(shared_features)
-        
-        predictions = {
-            'binary_logits': pred_binary_logits,
-            'pKd_pred': pred_pKd,
-            'pKi_pred': pred_pKi,
-            'KIBA_pred': pred_KIBA
+        return {
+            'Y': self.binary_head(shared_features).squeeze(-1),  # (B,)
+            'Y_pKd': self.pKd_head(shared_features).squeeze(-1),   # (B,)
+            'Y_pKi': self.pKi_head(shared_features).squeeze(-1),   # (B,)
+            'Y_KIBA': self.KIBA_head(shared_features).squeeze(-1)  # (B,)
         }
+
+    def loss(
+            self, 
+            predictions: Dict[str, torch.Tensor], 
+            targets: Dict[str, torch.Tensor],
+            masks: Dict[str, torch.Tensor]
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        """
+        Computation of DTI losses
+
+        Args:
+            predictions, targets, masks: Dict with predictions, targets, and masks
+            for each DTI score (Y, Y_pKd, Y_pKi, Y_KIBA)
         
-        return predictions
+        Returns:
+            total_loss: Total loss (scalar)
+            losses: Dict with losses for each DTI score (Y, Y_pKd, Y_pKi, Y_KIBA)
+        """
+        binary_loss = self.dti_weights["Y"] * F.binary_cross_entropy_with_logits(predictions["Y"], targets["Y"])
+        real_losses = {}
+
+        for key in ["Y_pKd", "Y_pKi", "Y_KIBA"]:
+            if masks[key].any():
+                valid_mask = masks[key]
+                pred = predictions[key][valid_mask]
+                true = targets[key][valid_mask]
+                real_losses[key] = self.dti_weights[key] * F.mse_loss(pred, true)
+            else:
+                real_losses[key] = torch.tensor(0.0)
+
+        total_loss = binary_loss + sum(real_losses.values())
+        
+        return total_loss, {
+            "Y": binary_loss,
+            **real_losses
+        }
 
 
 class InfoNCEHead(nn.Module):
@@ -83,21 +106,24 @@ class InfoNCEHead(nn.Module):
     to identify positive pairs and apply InfoNCE loss, encouraging the model to learn
     representations that respect molecular similarity.
     """
-    
     def __init__(
             self, 
             input_dim: int, 
-            output_dim: int, 
-            temperature: float = 0.07, 
-            use_negative_weighting: bool = True):
+            proj_dim: int,
+            dropout: float,
+            bias: bool,
+            activation: nn.Module,
+            contrastive_temp: float
+    ):
         super().__init__()
+        self.activation = activation
+        self.contrastive_temp = contrastive_temp
         self.projection = nn.Sequential(
-            nn.Linear(input_dim, output_dim),
-            nn.ReLU(),
-            nn.Linear(output_dim, output_dim)
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, proj_dim, bias=bias),
+            self.activation,
+            nn.Dropout(dropout),
         )
-        self.temperature = temperature
-        self.use_negative_weighting = use_negative_weighting
 
     @staticmethod
     def tanimoto_similarity(fp: torch.Tensor) -> torch.Tensor:
@@ -122,43 +148,12 @@ class InfoNCEHead(nn.Module):
         
         return intersection / union
 
-    def simple_info_nce_loss(self, features: torch.Tensor, similarity: torch.Tensor) -> torch.Tensor:
-        """
-        Compute standard InfoNCE loss with discrete positive pairs.
-        
-        Simple implementation following standard InfoNCE: project, normalize, 
-        find top-1 positive, apply cross-entropy.
-        
-        Args:
-            features: Projected features (batch_size, output_dim)
-            similarity: Pairwise Tanimoto similarity matrix (batch_size, batch_size)
-        
-        Returns:
-            InfoNCE loss (scalar)
-        """
-        batch_size = features.shape[0]
-        device = features.device
-        
-        # 1. Project and normalize features
-        features = F.normalize(features, dim=1)
-        
-        # 2. Compute cosine similarity logits
-        logits = torch.mm(features, features.T) / self.temperature
-        
-        # 3. Mask out self-similarities (diagonal)
-        eye_mask = torch.eye(batch_size, device=device).bool()
-        logits = logits.masked_fill(eye_mask, -float('inf'))
-        
-        # 4. Find positive pairs: top-1 similar molecule for each anchor
-        similarity_no_diag = similarity.masked_fill(eye_mask, 0.0)
-        positive_indices = similarity_no_diag.argmax(dim=1)
-        
-        # 5. Compute cross-entropy loss
-        loss = F.cross_entropy(logits, positive_indices)
-        
-        return loss
-
-    def info_nce_loss(self, features: torch.Tensor, similarity: torch.Tensor) -> torch.Tensor:
+    def info_nce_loss(
+            self, 
+            features: torch.Tensor, 
+            similarity_matrix: torch.Tensor,
+            temperature: float
+    ) -> torch.Tensor:
         """
         Compute InfoNCE loss with discrete positive pairs based on Tanimoto similarity.
         
@@ -167,15 +162,12 @@ class InfoNCEHead(nn.Module):
         
         Args:
             features: Projected features (batch_size, output_dim)
-            similarity: Pairwise Tanimoto similarity matrix (batch_size, batch_size)
+            similarity_matrix: Pairwise Tanimoto similarity matrix (batch_size, batch_size)
+            temperature: Temperature for logits scaling
         
         Returns:
-            InfoNCE loss (scalar)
+            InfoNCE loss tensorscalar)
         """
-        # Use simple version if negative weighting is disabled
-        if not self.use_negative_weighting:
-            return self.simple_info_nce_loss(features, similarity)
-        
         batch_size = features.shape[0]
         device = features.device
         
@@ -183,7 +175,7 @@ class InfoNCEHead(nn.Module):
         features = F.normalize(features, dim=1)
         
         # 2. Compute cosine similarity logits
-        logits = torch.mm(features, features.T) / self.temperature
+        logits = torch.mm(features, features.T) / temperature
         
         # 3. Mask out self-similarities (diagonal)
         eye_mask = torch.eye(batch_size, device=device).bool()
@@ -191,14 +183,14 @@ class InfoNCEHead(nn.Module):
         
         # 4. Find positive pairs: top-1 similar molecule for each anchor
         # Mask out diagonal in similarity matrix
-        similarity_no_diag = similarity.masked_fill(eye_mask, 0.0)
+        similarity_matrix = similarity_matrix.masked_fill(eye_mask, 0.0)
         
         # Get the index of the most similar molecule for each anchor
-        positive_indices = similarity_no_diag.argmax(dim=1)
+        positive_indices = similarity_matrix.argmax(dim=1)
         
         # 5. Optional: Weight negatives by (1 - Tanimoto) to soften hard negatives
         # This reduces the penalty for negative pairs that are actually similar
-        negative_weights = 1.0 - similarity_no_diag
+        negative_weights = 1.0 - similarity_matrix
         negative_weights = negative_weights.masked_fill(eye_mask, 0.0)
         
         # Apply negative weighting to logits (vectorized approach)
@@ -219,27 +211,26 @@ class InfoNCEHead(nn.Module):
         
         return loss
 
-    def forward(self, embeddings: torch.Tensor, fingerprints: torch.Tensor) -> torch.Tensor:
+    def forward(
+            self, 
+            x: torch.Tensor, 
+            fingerprints: torch.Tensor,
+            temperature: float = None
+            ) -> torch.Tensor:
         """
-        Forward pass through InfoNCE head.
-        
         Args:
-            embeddings: Raw embeddings from encoder (batch_size, input_dim)
-            fingerprints: Binary fingerprints for similarity computation (batch_size, n_bits)
-        
+            x: Input tensor (batch_size, input_dim)
+            fingerprints: Binary fingerprints (batch_size, n_bits)
+
         Returns:
-            InfoNCE loss (scalar)
+            loss: InfoNCE loss (scalar)
         """
-        # Project embeddings
-        projected_features = self.projection(embeddings)
-        
-        # Compute Tanimoto similarity matrix
+        if temperature is None:
+            temperature = self.contrastive_temp
+            
+        z = self.projection(x)
         similarity_matrix = self.tanimoto_similarity(fingerprints)
-        
-        # Compute InfoNCE loss
-        loss = self.info_nce_loss(projected_features, similarity_matrix)
-        
-        return loss
+        return self.info_nce_loss(z, similarity_matrix, temperature)
 
 
 class KLVariationalHead(nn.Module):
@@ -250,11 +241,14 @@ class KLVariationalHead(nn.Module):
     applies reparameterization sampling, and computes KL divergence
     from standard normal prior.
     """
-    
-    def __init__(self, input_dim: int, output_dim: int):
+    def __init__(
+            self, 
+            input_dim: int, 
+            proj_dim: int
+        ):
         super().__init__()
-        self.fc_mu = nn.Linear(input_dim, output_dim)
-        self.fc_logvar = nn.Linear(input_dim, output_dim)
+        self.fc_mu = nn.Linear(input_dim, proj_dim, bias=True)
+        self.fc_logvar = nn.Linear(input_dim, proj_dim, bias=True)
         
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         """Reparameterization trick for differentiable sampling."""
@@ -277,16 +271,54 @@ class KLVariationalHead(nn.Module):
         
         return kl_normalized
     
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Args:
             x: Input tensor (batch_size, input_dim)
         
         Returns:
-            mu and logvar: to be used for KL divergence
-            sampled: sampled latent vector (batch_size, output_dim)
+            z: sampled latent vector (batch_size, proj_dim)
+            mu: mean of the latent distribution (batch_size, proj_dim)
+            logvar: log-variance of the latent distribution (batch_size, proj_dim)
         """
-        mu = self.fc_mu(x)
-        logvar = self.fc_logvar(x)
-        sampled = self.reparameterize(mu, logvar)
-        return mu, logvar, sampled
+        mu, logvar = self.fc_mu(x), self.fc_logvar(x)
+        return self.reparameterize(mu, logvar), mu, logvar
+
+
+class ReconstructionHead(nn.Module):
+    """
+    Reconstruction head for the diffusion model.
+    """
+    def __init__(self, diff_weights: List[int]):
+        super().__init__()
+        self.diff_weights = diff_weights
+
+    def forward(self, pred: PlaceHolder, true: PlaceHolder) -> torch.Tensor:
+        """
+        Args:
+            pred: Predicted masked graph X, E
+            true: True graph X, E
+        
+        Returns:
+            loss: Reconstruction loss (scalar) weighted by diff_weights
+        """
+        true_X = torch.reshape(true.X, (-1, true.X.size(-1)))  # (bs * n, dx)
+        true_E = torch.reshape(true.E, (-1, true.E.size(-1)))  # (bs * n * n, de)
+        masked_pred_X = torch.reshape(pred.X, (-1, pred.X.size(-1)))  # (bs * n, dx)
+        masked_pred_E = torch.reshape(pred.E, (-1, pred.E.size(-1)))   # (bs * n * n, de)
+
+        # Remove masked rows
+        mask_X = (true_X != 0.).any(dim=-1)
+        mask_E = (true_E != 0.).any(dim=-1)
+        
+        flat_true_X = torch.argmax(true_X[mask_X, :], dim=-1)
+        flat_pred_X = masked_pred_X[mask_X, :]
+
+        flat_true_E = torch.argmax(true_E[mask_E, :], dim=-1)
+        flat_pred_E = masked_pred_E[mask_E, :]
+
+        loss_X = F.cross_entropy(flat_pred_X, flat_true_X, reduction='sum') if true_X.numel() > 0 else 0.0
+        loss_E = F.cross_entropy(flat_pred_E, flat_true_E, reduction='sum') if true_E.numel() > 0 else 0.0
+
+        return loss_X * self.diff_weights[0] + \
+               loss_E * self.diff_weights[1]

@@ -7,7 +7,7 @@ Used to process and transform fixed-size arbitrary-length feature vectors.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Union, List, Tuple
+from typing import Union, List, Tuple, Literal
 import math
 
 
@@ -18,30 +18,20 @@ import math
 class ResidualEncoder(nn.Module):
     """ MLP encoder with residual connections and pre-norm architecture. """
     def __init__(
-        self, 
-        input_dim: int, 
-        hidden_dim: int,
-        output_dim: int, 
-        n_layers: int, 
-        factor: int = 4,
-        dropout: float = 0.1, 
-        bias: bool = True,
-        activation: Union[str, nn.Module] = "gelu"
-    ):
+            self, 
+            input_dim: int, 
+            hidden_dim: int,
+            output_dim: int, 
+            n_layers: int, 
+            factor: int = 4,
+            dropout: float = 0.1, 
+            bias: bool = True,
+            activation: nn.Module = nn.ReLU()
+):
         super().__init__()
 
         self.n_layers = n_layers
-
-        if isinstance(activation, str):
-            activation_map = {
-                "relu": nn.ReLU(),
-                "gelu": nn.GELU(),
-                "swish": nn.SiLU(),
-                "mish": nn.Mish()
-            }
-            self.activation = activation_map.get(activation.lower(), nn.GELU())
-        else:
-            self.activation = activation
+        self.activation = activation
         
         self.input_proj = nn.Linear(input_dim, hidden_dim, bias=bias)
         self.layers = nn.ModuleList()
@@ -87,23 +77,13 @@ class TransformerEncoder(nn.Module):
         factor: int = 4, 
         dropout: float = 0.1, 
         bias: bool = True,
-        activation: Union[str, nn.Module] = "gelu"
+        activation: nn.Module = nn.ReLU()
     ):
         super().__init__()
 
         self.n_layers = n_layers
-        
-        if isinstance(activation, str):
-            activation_map = {
-                "relu": nn.ReLU(),
-                "gelu": nn.GELU(),
-                "swish": nn.SiLU(),
-                "mish": nn.Mish()
-            }
-            self.activation = activation_map.get(activation.lower(), nn.GELU())
-        else:
-            self.activation = activation
-        
+        self.activation = activation
+
         self.input_proj = nn.Linear(input_dim, hidden_dim, bias=bias)
         self.att_layers = nn.ModuleList()
         self.mlp_layers = nn.ModuleList()
@@ -154,28 +134,19 @@ class TransformerEncoder(nn.Module):
 ################################################################################
 
 class ConcatAggregator(nn.Module):
-    """ Concatenates multiple feature vectors and projects to common dimension. """
+    """ Concatenates multiple feature vectors and projects to output dimension. """
     def __init__(
             self, 
             input_dim: int, 
-            n_features: int,
             output_dim: int, 
+            n_features: int,
             dropout: float = 0.1, 
-            activation: Union[str, nn.Module] = "gelu"
+            activation: nn.Module = nn.ReLU()
         ):
         super().__init__()
-        total_dim = input_dim * n_features
 
-        if isinstance(activation, str):
-            activation_map = {
-                "relu": nn.ReLU(),
-                "gelu": nn.GELU(),
-                "swish": nn.SiLU(),
-                "mish": nn.Mish()
-            }
-            self.activation = activation_map.get(activation.lower(), nn.GELU())
-        else:
-            self.activation = activation
+        total_dim = input_dim * n_features
+        self.activation = activation
 
         self.projection = nn.Sequential(
             nn.LayerNorm(total_dim),
@@ -187,7 +158,7 @@ class ConcatAggregator(nn.Module):
     def forward(self, features: List[torch.Tensor]) -> torch.Tensor:
         """
         Args:
-            features: List of tensors, each of shape (batch_size, dim_i)
+            features: List of tensors, each of shape (batch_size, input_dim)
         
         Returns:
             Aggregated tensor of shape (batch_size, output_dim)
@@ -198,26 +169,17 @@ class ConcatAggregator(nn.Module):
 
 
 class AttentiveAggregator(nn.Module):
-    """ Aggregates features using attention mechanism. """
+    """ Aggregates features using simple attention-weighted sum. """
     def __init__(
             self, 
             input_dim: int, 
-            n_features: int,
             output_dim: int, 
+            n_features: int,
             dropout: float = 0.1, 
-            activation: Union[str, nn.Module] = "gelu"):
+            activation: nn.Module = nn.ReLU()):
         super().__init__()
         
-        if isinstance(activation, str):
-            activation_map = {
-                "relu": nn.ReLU(),
-                "gelu": nn.GELU(),
-                "swish": nn.SiLU(),
-                "mish": nn.Mish()
-            }
-            self.activation = activation_map.get(activation.lower(), nn.GELU())
-        else:
-            self.activation = activation
+        self.activation = activation
 
         self.to_attn_logits = nn.Conv1d(input_dim, 1, 1)
 
@@ -250,38 +212,20 @@ class AttentiveAggregator(nn.Module):
 ################################################################################
 
 class CrossAttentionFusion(nn.Module):
-    """ 
-    Simplified cross-attention fusion for drug-target interaction.
-    Uses bidirectional gating to merge two entity embeddings with residual flow.
-    """
+    """ Cross-attention fusion for drug-target interaction. """
     def __init__(
             self, 
             input_dim: int,
-            hidden_dim: int,
             output_dim: int,
             n_layers: int,
             factor: int = 4,
             dropout: float = 0.1, 
             bias: bool = True,
-            activation: Union[str, nn.Module] = "gelu"):
+            activation: nn.Module = nn.ReLU()):
         super().__init__()
 
-        if isinstance(activation, str):
-            activation_map = {
-                "relu": nn.ReLU(),
-                "gelu": nn.GELU(),
-                "swish": nn.SiLU(),
-                "mish": nn.Mish()
-            }
-            self.activation = activation_map.get(activation.lower(), nn.GELU())
-        else:
-            self.activation = activation
-
         self.n_layers = n_layers
-
-        # Input projections for drug (a) and target (b)
-        self.input_proj_a = nn.Linear(input_dim, hidden_dim, bias=bias)
-        self.input_proj_b = nn.Linear(input_dim, hidden_dim, bias=bias)
+        self.activation = activation
         
         # Cross-attention gates: simple gating mechanism for bidirectional information flow
         self.cross_gates_a_to_b = nn.ModuleList() # Calculates a weight for a parameter update
@@ -299,65 +243,66 @@ class CrossAttentionFusion(nn.Module):
         
         for _ in range(n_layers):
             # Cross-attention gates (drug attends to target, target attends to drug)
-            self.align_proj_b_to_a.append(nn.Linear(hidden_dim, hidden_dim, bias=False))
-            self.align_proj_a_to_b.append(nn.Linear(hidden_dim, hidden_dim, bias=False))
+            self.align_proj_b_to_a.append(nn.Linear(input_dim, input_dim, bias=False))
+            self.align_proj_a_to_b.append(nn.Linear(input_dim, input_dim, bias=False))
             self.cross_gates_a_to_b.append(nn.Sequential(
-                nn.LayerNorm(hidden_dim * 2, bias=bias),
-                nn.Linear(hidden_dim * 2, hidden_dim // factor, bias=bias),
+                nn.LayerNorm(input_dim * 2, bias=bias),
+                nn.Linear(input_dim * 2, input_dim // factor, bias=bias),
                 self.activation,
-                nn.Linear(hidden_dim // factor, hidden_dim, bias=bias),
+                nn.Linear(input_dim // factor, input_dim, bias=bias),
                 nn.Sigmoid(),
                 nn.Dropout(dropout)
             ))
             self.cross_gates_b_to_a.append(nn.Sequential(
-                nn.LayerNorm(hidden_dim * 2, bias=bias),
-                nn.Linear(hidden_dim * 2, hidden_dim // factor, bias=bias),
+                nn.LayerNorm(input_dim * 2, bias=bias),
+                nn.Linear(input_dim * 2, input_dim // factor, bias=bias),
                 self.activation,
-                nn.Linear(hidden_dim // factor, hidden_dim, bias=bias),
+                nn.Linear(input_dim // factor, input_dim, bias=bias),
                 nn.Sigmoid(),
                 nn.Dropout(dropout)
             ))
             
             # Self-attention gates (same pattern as TransformerEncoder)
             self.self_gates_a.append(nn.Sequential(
-                nn.LayerNorm(hidden_dim, bias=bias),
-                nn.Linear(hidden_dim, hidden_dim // factor, bias=bias),
+                nn.LayerNorm(input_dim, bias=bias),
+                nn.Linear(input_dim, input_dim // factor, bias=bias),
                 self.activation,
-                nn.Linear(hidden_dim // factor, hidden_dim, bias=bias),
+                nn.Linear(input_dim // factor, input_dim, bias=bias),
                 nn.Sigmoid(),
                 nn.Dropout(dropout)
             ))
             self.self_gates_b.append(nn.Sequential(
-                nn.LayerNorm(hidden_dim, bias=bias),
-                nn.Linear(hidden_dim, hidden_dim // factor, bias=bias),
+                nn.LayerNorm(input_dim, bias=bias),
+                nn.Linear(input_dim, input_dim // factor, bias=bias),
                 self.activation,
-                nn.Linear(hidden_dim // factor, hidden_dim, bias=bias),
+                nn.Linear(input_dim // factor, input_dim, bias=bias),
                 nn.Sigmoid(),
                 nn.Dropout(dropout)
             ))
 
             # MLP blocks
             self.mlp_a.append(nn.Sequential(
-                nn.LayerNorm(hidden_dim, bias=bias),
-                nn.Linear(hidden_dim, hidden_dim * factor, bias=bias),
+                nn.LayerNorm(input_dim, bias=bias),
+                nn.Linear(input_dim, input_dim * factor, bias=bias),
                 self.activation,
                 nn.Dropout(dropout),
-                nn.Linear(hidden_dim * factor, hidden_dim, bias=bias)
+                nn.Linear(input_dim * factor, input_dim, bias=bias)
             ))
             self.mlp_b.append(nn.Sequential(
-                nn.LayerNorm(hidden_dim, bias=bias),
-                nn.Linear(hidden_dim, hidden_dim * factor, bias=bias),
+                nn.LayerNorm(input_dim, bias=bias),
+                nn.Linear(input_dim, input_dim * factor, bias=bias),
                 self.activation,
                 nn.Dropout(dropout),
-                nn.Linear(hidden_dim * factor, hidden_dim, bias=bias)
+                nn.Linear(input_dim * factor, input_dim, bias=bias)
             ))
 
         # Final aggregation
-        self.output_proj = nn.Sequential(
-            nn.LayerNorm(hidden_dim * 2, bias=bias),
-            nn.Linear(hidden_dim * 2, output_dim, bias=bias),
-            self.activation,
-            nn.Dropout(dropout)
+        self.att_agg = AttentiveAggregator(
+            input_dim=input_dim,
+            output_dim=output_dim,
+            n_features=2,
+            dropout=dropout,
+            activation=activation
         )
 
     def forward(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -369,10 +314,6 @@ class CrossAttentionFusion(nn.Module):
         Returns:
             Fused tensor of shape (batch_size, output_dim)
         """
-        # Project to hidden dimension
-        a = self.input_proj_a(a)       # (B, hidden_dim) 
-        b = self.input_proj_b(b)       # (B, hidden_dim)
-        
         for i in range(self.n_layers):
             # Cross-attention: bidirectional information flow with gating
             gate_a = self.cross_gates_b_to_a[i](torch.cat([a, b], dim=-1))
@@ -387,8 +328,6 @@ class CrossAttentionFusion(nn.Module):
             # MLP blocks
             a = a + self.mlp_a[i](a)
             b = b + self.mlp_b[i](b)
-
         
-        # Final fusion: concatenate and project
-        fused = torch.cat([a, b], dim=-1)  # (B, hidden_dim * 2)
-        return self.output_proj(fused)
+        # Final aggregation
+        return self.att_agg([a, b])

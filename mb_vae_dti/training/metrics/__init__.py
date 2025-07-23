@@ -27,6 +27,41 @@ from .dti_metrics import (
     DTIMetricsCollection,
 )
 
+# Simplified diffusion metrics collection
+class DiffusionMetrics:
+    """Simplified collection of diffusion-related metrics."""
+    
+    def __init__(self, prefix: str = ""):
+        self.prefix = prefix
+        self.nll = NLL()
+        self.X_kl = SumExceptBatchKL()
+        self.E_kl = SumExceptBatchKL()
+        self.X_logp = SumExceptBatchMetric()
+        self.E_logp = SumExceptBatchMetric()
+        
+        # Molecular metrics (to be added later if needed)
+        # self.validity = ValidityMetric()
+        # self.uniqueness = UniquenessMetric()
+        # self.novelty = NoveltyMetric()
+    
+    def reset(self):
+        """Reset all metrics."""
+        self.nll.reset()
+        self.X_kl.reset()
+        self.E_kl.reset()
+        self.X_logp.reset()
+        self.E_logp.reset()
+    
+    def compute(self):
+        """Compute all metrics."""
+        return {
+            f"{self.prefix}NLL": self.nll.compute(),
+            f"{self.prefix}X_KL": self.X_kl.compute(),
+            f"{self.prefix}E_KL": self.E_kl.compute(),
+            f"{self.prefix}X_logp": self.X_logp.compute(),
+            f"{self.prefix}E_logp": self.E_logp.compute(),
+        }
+
 __all__ = [
     # Validation Metrics
     "NLL",
