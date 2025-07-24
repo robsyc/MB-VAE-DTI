@@ -3,10 +3,11 @@
 Unified training script for all DTI model variants and training phases.
 
 Model types:
-- baseline: Single drug/target feature, single DTI score prediction
+- baseline: Single drug/target feature, single DTI score prediction (finetune only)
 - multi_modal: Multiple drug/target features, single DTI score prediction
-- multi_output: Single drug/target feature, multiple DTI score prediction
-- full: Multiple drug/target features, multiple DTI scores, pre-training support
+- multi_output: Single drug/target feature, multiple DTI score prediction (+ train)
+- multi_hybrid: Combination prior w/ contrastive loss (+ pretrain)
+- full: Adds discrete diffusion decoder to the drug branch
 
 Training phases:
 - pretrain: Pre-train drug or target branch on unlabeled data
@@ -15,16 +16,15 @@ Training phases:
 
 Usage:
     # Single training run
+    CUDA_VISIBLE_DEVICES=0 ...
     python run.py --model baseline --phase finetune --dataset DAVIS --split rand
+
     python run.py --model multi_modal --phase finetune --dataset DAVIS --split cold
     
     # With overrides
     python run.py --model baseline --phase finetune --dataset DAVIS --split rand --override training.max_epochs=2
     
     # Gridsearch
-    python run.py --model baseline --phase finetune --dataset DAVIS --split rand --gridsearch
-    
-    # HPC batch processing
     python run.py --model baseline --phase finetune --dataset DAVIS --split rand --gridsearch --batch_index 0 --total_batches 5
 
     # Ensemble
@@ -62,11 +62,10 @@ from mb_vae_dti.training.modules import (
 )
 
 from mb_vae_dti.training.utils import (
-    ConfigManager, save_config, get_config_summary,
-    setup_callbacks,
+    ConfigManager, get_config_summary,
+    setup_callbacks, BestMetricsCallback,
     setup_logging, generate_experiment_name,
-    collect_validation_results, save_gridsearch_results,
-    collect_test_results, save_ensemble_member_results, aggregate_ensemble_results
+    collect_results, save_results
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -134,7 +133,7 @@ def get_config_path(
     dataset: Optional[Dataset] = None,
     split: Optional[Split] = None,
     pretrain_target: Optional[PretrainTarget] = None
-) -> str:
+) -> Path:
     """
     Get the config file path based on model type, phase, and other parameters.
     
@@ -142,7 +141,7 @@ def get_config_path(
         model: Model type
         phase: Training phase
         dataset: Dataset (for finetune phase)
-        split: Split type (for finetune phase)
+        split: Split type (for finetune and train phases)
         pretrain_target: Pretrain target (for pretrain phase)
         
     Returns:
@@ -158,32 +157,6 @@ def get_config_path(
         raise ValueError(f"Unknown phase: {phase}")
 
 
-def get_model_class(model: ModelType):
-    """Get the model class for the specified model type."""
-    if model == "baseline":
-        return BaselineDTIModel
-    elif model == "multi_modal":
-        return MultiModalDTIModel
-    elif model == "multi_output":
-        return MultiOutputDTIModel
-    elif model == "multi_hybrid":
-        return MultiHybridDTIModel
-    elif model == "full":
-        return FullDTIModel
-    else:
-        raise ValueError(f"Unknown model type: {model}")
-
-
-def get_datamodule_class(phase: TrainingPhase):
-    """Get the datamodule class for the specified training phase."""
-    if phase == "pretrain":
-        return PretrainDataModule
-    elif phase in ["train", "finetune"]:
-        return DTIDataModule
-    else:
-        raise ValueError(f"Unknown phase: {phase}")
-
-
 def setup_model_baseline(
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
@@ -191,18 +164,28 @@ def setup_model_baseline(
 ) -> BaselineDTIModel:
     """Setup baseline model with single drug/target features."""
 
+    drug_feats = {name: dim for name, dim in feature_dims['drug'].items() if name in config.data.drug_features}
+    target_feats = {name: dim for name, dim in feature_dims['target'].items() if name in config.data.target_features}
+
     model = BaselineDTIModel(
-        embedding_dim=config.model.embedding_dim,
-        drug_input_dim=feature_dims['drug'][config.data.drug_feature],
-        target_input_dim=feature_dims['target'][config.data.target_feature],
-        encoder_type=config.model.encoder_type,
-        encoder_kwargs=OmegaConf.to_container(config.model.encoder_kwargs),
+        phase="finetune",
+        finetune_score="Y_pKd" if dataset == "DAVIS" else "Y_KIBA",
+
         learning_rate=config.training.learning_rate,
         weight_decay=config.training.weight_decay,
         scheduler=config.training.scheduler,
-        finetune_score="Y_pKd" if dataset == "DAVIS" else "Y_KIBA",
-        drug_feature=config.data.drug_feature,
-        target_feature=config.data.target_feature
+
+        drug_features=drug_feats,
+        target_features=target_feats,
+
+        encoder_type=config.model.encoder_type,
+        embedding_dim=config.model.embedding_dim,
+        hidden_dim=config.model.hidden_dim,
+        factor=config.model.factor,
+        n_layers=config.model.n_layers,
+        activation=config.model.activation,
+        dropout=config.model.dropout,
+        bias=config.model.bias,
     )
     
     return model
@@ -474,74 +457,51 @@ def setup_model_full(
     return model
 
 
-def setup_model(
-    model_type: ModelType,
-    config: DictConfig,
-    feature_dims: Dict[str, Dict[str, int]],
-    dataset: Dataset = None,
-    split: Split = None,
-    phase: TrainingPhase = None,
-    pretrain_target: PretrainTarget = None
-):
-    """Setup model based on type."""
-    if model_type == "baseline":
-        return setup_model_baseline(config, feature_dims, dataset)
-    elif model_type == "multi_modal":
-        return setup_model_multi_modal(config, feature_dims, dataset)
-    elif model_type == "multi_output":
-        return setup_model_multi_output(config, feature_dims, dataset, phase)
-    elif model_type == "multi_hybrid":
-        return setup_model_multi_hybrid(config, feature_dims, dataset, phase, pretrain_target)
-    elif model_type == "full":
-        return setup_model_full(config, feature_dims, dataset, split, phase, pretrain_target)
-    else:
-        raise ValueError(f"Unknown model type: {model_type}")
-
-
 ########################################################
 
 
 def train_single_config(
     config: DictConfig,
     model_type: ModelType,
-    dataset: Dataset,
-    split: Split,
     phase: TrainingPhase,
-    pretrain_target: PretrainTarget = None,
-    config_index: Optional[int] = None,
-    batch_index: Optional[int] = None,
-    is_ensemble: bool = False,
+    dataset: Optional[Dataset] = None,
+    split: Optional[Split] = None,
+    pretrain_target: Optional[PretrainTarget] = None,
+    save_checkpoint: bool = False
 ) -> None:
     """
     Train a single configuration.
     
     Args:
         config: Configuration to train
-        model_type: Type of model to train
+
+        model: Type of model to train
         phase: Training phase
+        dataset: Dataset (for finetune phase)
+        split: Split type (for finetune and train phases)
+        pretrain_target: Pretrain target (for pretrain phase)
+
         config_index: Optional index of the config in the gridsearch experiment batch
         batch_index: Optional index of the batch in the gridsearch experiment
         is_ensemble: Whether this is part of an ensemble run
+        is_gridsearch: Whether this is part of a gridsearch experiment
+
+        save_checkpoint: Whether to save the final model to disk
+        run_test: Whether to run the test set after training
+        test_only: Whether to only run the test set
     """
-    # Determine if we're in gridsearch mode
-    is_gridsearch = config_index is not None and not is_ensemble
-    
-    # Update experiment name if this is a gridsearch or ensemble run
-    if is_gridsearch:
-        original_name = OmegaConf.select(config, "logging.experiment_name", default="experiment")
-        config.logging.experiment_name = generate_experiment_name(
-            original_name, batch_index, config_index
-        )
-    elif is_ensemble:
-        original_name = OmegaConf.select(config, "logging.experiment_name", default="experiment")
-        config.logging.experiment_name = f"{original_name}_ensemble_{config_index+1}"
-    
+    logger.info(f"Experiment name: {config.logging.experiment_name}")
+    save_dir = Path(config.logging.save_dir) / config.logging.experiment_name
+    logger.info(f"Save directory: {save_dir}")
+    logger.info(get_config_summary(config))
+
     # Initialize variables to None for proper cleanup
-    model = None
     data_module = None
+    model = None
     trainer = None
-    loggers = None
-    callbacks = None
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     
     try:
         # Set random seed for reproducibility
@@ -550,20 +510,21 @@ def train_single_config(
         elif config.hardware.gpus == 0:
             pl.seed_everything(config.hardware.seed, workers=False)
         
+        ###############################################################
         # Setup data module
-        logger.info("Setting up data module...")
-        datamodule_class = get_datamodule_class(phase)
-        
+        ###############################################################
+        logger.info("Setting up data module...")        
         if phase == "pretrain":
             # Pretrain datamodule (drugs.h5torch or targets.h5torch)
-            data_module = datamodule_class(
+            data_module = PretrainDataModule(
                 h5_path=config.data.h5_path,
                 batch_size=config.data.batch_size,
                 num_workers=config.data.num_workers,
                 pin_memory=config.data.pin_memory,
                 shuffle_train=config.data.shuffle_train,
                 drop_last=config.data.drop_last,
-                load_in_memory=config.data.load_in_memory
+                load_in_memory=config.data.load_in_memory,
+                return_pyg=(model_type == "full" and pretrain_target != "target")
             )
         else:
             # DTI training/finetuning
@@ -572,7 +533,7 @@ def train_single_config(
                 provenance_cols = ["in_DAVIS"] if dataset == "DAVIS" else ["in_KIBA"]
             else:
                 provenance_cols = None
-            data_module = datamodule_class(
+            data_module = DTIDataModule(
                 h5_path=config.data.h5_path,
                 batch_size=config.data.batch_size,
                 num_workers=config.data.num_workers,
@@ -581,35 +542,43 @@ def train_single_config(
                 drop_last=config.data.drop_last,
                 split_type=split_type,
                 provenance_cols=provenance_cols,
-                load_in_memory=config.data.load_in_memory
+                load_in_memory=config.data.load_in_memory,
+                return_pyg=(model_type == "full" and pretrain_target != "target")
             )
         
+        ###############################################################
         # Setup lightning module
+        ###############################################################
         data_module.setup("fit")
         raw_feature_dims = data_module.get_feature_dims()
         
         # Transform feature dimensions for pretraining phases
         if phase == "pretrain":
-            # For pretraining, we need to map flat feature dims to drug/target structure
-            if pretrain_target == "drug":
-                feature_dims = {'drug': raw_feature_dims, 'target': {}}
-            elif pretrain_target == "target":
-                feature_dims = {'drug': {}, 'target': raw_feature_dims}
-            else:
-                raise ValueError(f"Unknown pretrain phase: {pretrain_target}")
+            feature_dims = {
+                'drug': raw_feature_dims if pretrain_target == "drug" else {},
+                'target': raw_feature_dims if pretrain_target == "target" else {}
+            }
         else:
-            # For DTI training/finetuning, feature_dims is already structured
             feature_dims = raw_feature_dims
         
+        # Setup model based on type
         logger.info(f"Setting up {model_type} model...")
-        model = setup_model(model_type, config, feature_dims, dataset, split, phase, pretrain_target)
+        model_setup_functions = {
+            "baseline": lambda: setup_model_baseline(config, feature_dims, dataset),
+            "multi_modal": lambda: setup_model_multi_modal(config, feature_dims, dataset),
+            "multi_output": lambda: setup_model_multi_output(config, feature_dims, dataset, phase),
+            "multi_hybrid": lambda: setup_model_multi_hybrid(config, feature_dims, dataset, phase, pretrain_target),
+            "full": lambda: setup_model_full(config, feature_dims, dataset, split, phase, pretrain_target)
+        }
         
-        # Setup logging & callbacks
-        save_dir = Path(config.logging.save_dir) / config.logging.experiment_name
-        loggers = setup_logging(config, save_dir, phase)
-        callbacks = setup_callbacks(config, save_dir, is_gridsearch=is_gridsearch)
+        if model_type not in model_setup_functions:
+            raise ValueError(f"Unknown model type: {model_type}")
         
+        model = model_setup_functions[model_type]()
+        
+        ###############################################################
         # Setup trainer
+        ###############################################################
         logger.info("Setting up trainer...")
         trainer = Trainer(
             max_epochs=config.training.max_epochs,
@@ -618,51 +587,85 @@ def train_single_config(
             precision=config.hardware.precision,
             gradient_clip_val=config.training.get('gradient_clip_val'),
             deterministic=config.hardware.get('deterministic', False),
-            logger=loggers,
-            callbacks=callbacks,
+            logger=setup_logging(config, save_dir, model_type, phase, dataset, split, pretrain_target),
+            callbacks=setup_callbacks(config, save_dir, save_checkpoint=save_checkpoint),
             log_every_n_steps=config.logging.log_every_n_steps,
-            enable_checkpointing=not is_gridsearch,
+            enable_checkpointing=save_checkpoint,
             default_root_dir=str(save_dir),
             # Debug mode limits - set from config if debug mode is enabled
             limit_train_batches=config.training.get('limit_train_batches', 1.0),
             limit_val_batches=config.training.get('limit_val_batches', 1.0),
             limit_test_batches=config.training.get('limit_test_batches', 1.0)
         )
-        
-        # Save configuration
-        save_config(config, save_dir / "config.yaml")
-        
-        # Train model
+
+        ###############################################################
+        # Train/Test loop
+        ###############################################################
         logger.info("Starting training...")
         trainer.fit(model, data_module)
         
         # Test model on best checkpoint
-        if not (is_gridsearch or is_ensemble) and not phase == "pretrain":
+        if phase != "pretrain":
             logger.info("Testing on best checkpoint...")
-            trainer.test(model, data_module, ckpt_path="best")
 
-            final_model_path = save_dir / "final_model.pt"
-            torch.save(model.state_dict(), final_model_path)
-            logger.info(f"Saved final model to {final_model_path}")
-        elif is_gridsearch:
-            logger.info("Collecting gridsearch results...")
-            results = collect_validation_results(config, trainer)
-            save_gridsearch_results(results, Path(config.logging.save_dir) / "gridsearch_results")
-        elif is_ensemble and not phase == "pretrain":
-            logger.info("Testing ensemble model on best checkpoint...")
-            trainer.test(model, data_module, ckpt_path="best")
-            logger.info("Collecting ensemble test results...")
-            test_results = collect_test_results(config, trainer, config_index)
-            save_ensemble_member_results(test_results, Path(config.logging.save_dir), config_index)
-        
+            if save_checkpoint: # use default ModelCheckpoint
+                trainer.test(model, data_module, ckpt_path="best")
+                final_model_path = save_dir / "final_model.pt"
+                torch.save(model.state_dict(), final_model_path)
+                logger.info(f"Saved final model to {final_model_path}")
+
+            else: # custom BestMetricsCallback's best state dict
+                best_metrics_callback = None
+                for callback in trainer.callbacks:
+                    if isinstance(callback, BestMetricsCallback):
+                        best_metrics_callback = callback
+                        break
+                if best_metrics_callback and best_metrics_callback.best_model_state_dict is not None:
+                    model.load_state_dict(best_metrics_callback.best_model_state_dict)
+                    trainer.test(model, data_module)
+                else:
+                    try:
+                        trainer.test(model, data_module, ckpt_path="best")
+                    except Exception as e:
+                        logger.info("No best checkpoint found - testing on last checkpoint...")
+                        trainer.test(model, data_module, ckpt_path="last")
+
+
+        ###############################################################
+        # Collect results
+        ###############################################################
+        logger.info("Collecting results...")
+        results = collect_results(config, trainer)
+        save_results(results, save_dir)
+
         logger.info("Training completed!")
         
     except Exception as e:
         logger.error(f"Training failed: {e}")
         raise
+
     finally:
         # Comprehensive cleanup - this is critical for gridsearch
         logger.info("Starting cleanup...")
+        
+        # Print system memory info before cleanup
+        if torch.cuda.is_available():
+            logger.info(f"CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+            logger.info(f"CUDA memory reserved: {torch.cuda.memory_reserved() / 1024**3:.2f} GB")
+        
+        if model is not None:
+            del model
+        if data_module is not None:
+            del data_module
+        if trainer is not None:
+            del trainer
+        gc.collect()
+        
+        # Print memory info after cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            logger.info(f"After cleanup - CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+            logger.info(f"After cleanup - CUDA memory reserved: {torch.cuda.memory_reserved() / 1024**3:.2f} GB")
         
         # Close wandb run if it was initialized
         try:
@@ -711,7 +714,7 @@ def main(args):
     logger.info(f"Using config: {config_path}")
     
     # Initialize configuration manager
-    config_manager = ConfigManager(config_root="configs")
+    config_manager = ConfigManager()
     
     # Load configuration(s)
     configs = config_manager.load_config(
@@ -727,24 +730,25 @@ def main(args):
     
     # Apply debug settings if debug mode is enabled
     if args.debug:
-        logger.info("Debug mode enabled - applying debug settings to all configs")
+        logger.info("Debug mode enabled - only keeping max 2 configs and applying debug settings")
+        configs = configs[:2]
         for config in configs:
             # Limit batches to 5 for each split
             config.training.limit_train_batches = 5
             config.training.limit_val_batches = 5
             config.training.limit_test_batches = 5
             
-            # Reduce epochs to speed up testing
+            # Ease computational load for local CPU testing
+            config.logging.log_every_n_steps = 2
             config.training.max_epochs = min(config.training.max_epochs, 2)
-            
-            # Reduce batch size if it's too large
+            config.diffusion.diffusion_steps = min(config.diffusion.diffusion_steps, 5)
+            config.diffusion.num_samples_to_generate = min(config.diffusion.num_samples_to_generate, 2)
             config.data.batch_size = min(config.data.batch_size, 8)
-            
-            # Disable some expensive operations
-            config.hardware.deterministic = False
             config.data.pin_memory = False
             config.data.num_workers = 0
+            config.data.load_in_memory = False
             config.hardware.gpus = 0
+            config.hardware.deterministic = False
     
     # Handle batch processing for gridsearch
     if args.gridsearch:
@@ -771,10 +775,9 @@ def main(args):
     for i, config in enumerate(configs):
         config_index = i if (args.gridsearch or args.ensemble) else None
 
-        # Clear memory
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        config.logging.experiment_name = generate_experiment_name(
+            model_type, phase, args.dataset, args.split, args.pretrain_target, config_index, args.batch_index, args.ensemble
+        )
         
         logger.info(f"\n{'='*50}")
         logger.info(f"Training configuration {i+1}/{len(configs)}")
@@ -791,21 +794,22 @@ def main(args):
             train_single_config(
                 config, 
                 model_type, 
+                phase,
                 args.dataset,
                 args.split,
-                phase, 
                 args.pretrain_target,
-                config_index, 
-                args.batch_index,
-                args.ensemble
+                save_checkpoint=not (args.gridsearch or args.ensemble)
             )
         except Exception as e:
             logger.error(f"Failed to train configuration {i+1}: {e}")
             logger.error(f"Configuration summary: {get_config_summary(config)}")
             
             if args.gridsearch or args.ensemble:
-                logger.warning("Continuing with next configuration...")
-                continue
+                if args.debug:
+                    raise e
+                else:
+                    logger.warning("Continuing with next configuration...")
+                    continue
             else:
                 raise
     
@@ -813,38 +817,6 @@ def main(args):
     logger.info("All training runs completed!")
     logger.info(f"Total configurations processed: {len(configs)}")
     logger.info(f"{'='*50}")
-    
-    # Aggregate ensemble results if this was an ensemble run
-    if args.ensemble and not phase == "pretrain":
-        logger.info("\n" + "="*50)
-        logger.info("Aggregating ensemble results...")
-        logger.info("="*50)
-        
-        try:
-            # Get the base save directory from the first config
-            base_save_dir = Path(configs[0].logging.save_dir)
-            
-            # Aggregate results
-            aggregated_results = aggregate_ensemble_results(
-                save_dir=base_save_dir,
-                expected_members=len(configs)
-            )
-            
-            logger.info("Ensemble aggregation completed successfully!")
-            logger.info(f"Results saved to: {base_save_dir}/ensemble_results/aggregated_results.json")
-            
-            # Print summary of key metrics
-            test_metrics = aggregated_results.get("test_metrics", {})
-            if test_metrics:
-                logger.info("\nEnsemble Test Results Summary:")
-                for metric_name, stats in test_metrics.items():
-                    logger.info(f"  {metric_name}: {stats['mean']:.6f} ± {stats['std']:.6f} "
-                               f"(min: {stats['min']:.6f}, max: {stats['max']:.6f})")
-            
-        except Exception as e:
-            logger.error(f"Failed to aggregate ensemble results: {e}")
-            logger.error("Individual member results should still be available in ensemble_results/ directory")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Unified DTI model training script")

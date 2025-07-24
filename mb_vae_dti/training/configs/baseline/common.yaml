@@ -3,15 +3,7 @@
 #   They are shared across DAVIS/KIBA 
 #   & cold_split/random_split experiments
 
-model:
-  encoder_kwargs:
-    dropout: 0.1
-    activation: "gelu"
-    
-training:
-  scheduler: "one_cycle"  # "const", "step", "one_cycle", or "cosine"
-    
 data:
   h5_path: "data/input/dti.h5torch"
-  drug_feature: "FP-Morgan"
-  target_feature: "FP-ESP"
+  drug_features: ["FP-Morgan"]
+  target_features: ["FP-ESP"]

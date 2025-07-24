@@ -3,17 +3,6 @@
 #   They are shared across DAVIS/KIBA 
 #   & cold_split/random_split experiments
 
-model:
-  encoder_kwargs:
-    dropout: 0.1
-    activation: "gelu"
-  aggregator_kwargs:
-    dropout: 0.1
-    activation: "gelu"
-    
-training:
-  scheduler: "one_cycle"  # "const", "step", "one_cycle", or "cosine"
-    
 data:
   h5_path: "data/input/dti.h5torch"
   drug_features: ["EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"]

@@ -19,13 +19,13 @@ from mb_vae_dti.training.models import (
 )
 from mb_vae_dti.training.models.heads import DTIHead
 from mb_vae_dti.training.metrics import DTIMetricsCollection, RealDTIMetrics
-from .optimizer_utils import configure_optimizer_and_scheduler
+from .utils import AbstractDTIModel
 
 
 logger = logging.getLogger(__name__)
 
 
-class MultiOutputDTIModel(pl.LightningModule):
+class MultiOutputDTIModel(AbstractDTIModel):
     """
     Multi-output DTI model with DTI prediction head for simultaneous multi-score prediction.
     
@@ -200,16 +200,6 @@ class MultiOutputDTIModel(pl.LightningModule):
         
         for param in self.target_encoder.parameters():
             param.requires_grad = True
-    
-    def configure_optimizers(self):
-        """Configure optimizer and scheduler using utility function."""
-        return configure_optimizer_and_scheduler(
-            model_parameters=self.parameters(),
-            learning_rate=self.hparams.learning_rate,
-            weight_decay=self.hparams.weight_decay,
-            scheduler=self.hparams.scheduler,
-            trainer=self.trainer
-        )
     
     def forward(
         self, 

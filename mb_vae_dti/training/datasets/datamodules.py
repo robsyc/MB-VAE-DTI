@@ -5,12 +5,16 @@ Provides efficient data loading and preprocessing for drug-target interaction da
 """
 
 import pytorch_lightning as pl
+from torch_geometric.data import Data, Batch
 from torch.utils.data import DataLoader
 from pathlib import Path
 from typing import Optional, Dict, Union, List, Any, Literal
 import logging
 import torch
 import numpy as np
+import rdkit.Chem as Chem
+from rdkit.Chem.rdchem import BondType as BT
+from functools import partial
 
 from mb_vae_dti.training.datasets.h5datasets import DTIDataset, PretrainDataset
 
@@ -18,11 +22,83 @@ from mb_vae_dti.training.datasets.h5datasets import DTIDataset, PretrainDataset
 logger = logging.getLogger(__name__)
 
 
-def custom_collate_fn(batch):
+class SmilesToPyG:
+    """
+    Efficient helper for converting a SMILES string to a PyTorch Geometric Data object,
+    using only minimal node and edge features:
+      - Node feature: atom type as integer index (from atom_types list)
+      - Edge feature: bond type as integer index (from bond_types list)
+    """
+    def __init__(
+            self, 
+            atom_encoder = {"C": 0, "O": 1, "P": 2, "N": 3, "S": 4, "Cl": 5, "F": 6, "H": 7}, 
+            bond_encoder = {BT.SINGLE: 0, BT.DOUBLE: 1, BT.TRIPLE: 2, BT.AROMATIC: 3}
+            ):
+        self.atom_encoder = atom_encoder
+        self.bond_encoder = bond_encoder
+
+    def smiles_to_mol(self, smiles: str) -> Chem.Mol:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            mol = Chem.MolFromSmiles('')
+        return mol
+
+    def smiles_to_pyg(self, smiles: str) -> Data:
+        mol = self.smiles_to_mol(smiles)
+
+        # Node features: atom type index
+        try:
+            x_indices = [self.atom_encoder.get(atom.GetSymbol(), 0) for atom in mol.GetAtoms()]  # Default to 0 for unknown atoms
+        except:
+            x_indices = [0]  # Fallback
+        
+        x_indices = torch.tensor(x_indices, dtype=torch.long)
+        
+        num_atom_types = max(self.atom_encoder.values()) + 1
+        x = torch.nn.functional.one_hot(x_indices, num_classes=num_atom_types).float()
+
+        # Edge features: bond type index, undirected edges
+        edge_indices, edge_attrs = [], []
+        for bond in mol.GetBonds():
+            i = bond.GetBeginAtomIdx()
+            j = bond.GetEndAtomIdx()
+            bond_type_idx = self.bond_encoder.get(bond.GetBondType(), 0)  # Default to 0 for unknown bond types
+            edge_indices += [[i, j], [j, i]]
+            edge_attrs += [[bond_type_idx], [bond_type_idx]]
+
+        if edge_indices:  # Only if we have edges
+            edge_index = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
+            edge_attr_indices = torch.tensor(edge_attrs, dtype=torch.long).squeeze(-1)
+
+            num_bond_types = max(self.bond_encoder.values()) + 1
+            edge_attr = torch.nn.functional.one_hot(edge_attr_indices, num_classes=num_bond_types).float()
+
+            perm = (edge_index[0] * x.size(0) + edge_index[1]).argsort()
+            edge_index, edge_attr = edge_index[:, perm], edge_attr[perm]
+        else:
+            # No edges
+            edge_index = torch.zeros((2, 0), dtype=torch.long)
+            num_bond_types = max(self.bond_encoder.values()) + 1
+            edge_attr = torch.zeros((0, num_bond_types), dtype=torch.float32)
+
+        return Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+
+    def smiles_to_pyg_batch(self, smiles: List[str]) -> Batch:
+        return Batch.from_data_list([self.smiles_to_pyg(smiles) for smiles in smiles])
+
+
+def dti_collate_fn(batch, smiles_to_pyg_converter=None):
     """
     Custom collate function to handle DTI dataset samples with None Y values.
     
     Uses masking approach for Y values where some scores may be None.
+    
+    Args:
+        batch: List of dataset items
+        smiles_to_pyg_converter: Optional SmilesToPyG instance for converting drug SMILES to PyG objects
+    
+    Returns:
+        Collated batch with optional 'G' key containing PyG batch for drug molecules
     """
     collated = {
         'id': [],
@@ -34,23 +110,21 @@ def custom_collate_fn(batch):
     # Simple ID collation
     collated['id'] = torch.tensor([item['id'] for item in batch])
     
-    # Binary values - always present
+    # Binary interaction values - always present
     collated['y']['Y'] = torch.tensor([item['y']['Y'] for item in batch], dtype=torch.float32)
 
-    # Real-valued Y values with masking - this is key!
+    # Real-valued Y values with masking
     for key in ['Y_KIBA', 'Y_pKd', 'Y_pKi']:
         values = [item['y'].get(key, None) for item in batch]
 
-        tensor_values = []
-        mask_values = []
-        
-        for v in values:
-            if v is None or (isinstance(v, float) and np.isnan(v)):
-                tensor_values.append(0.0)  # Fill with 0, mask will indicate invalid
-                mask_values.append(False)  # Invalid
-            else:
-                tensor_values.append(float(v))
-                mask_values.append(True)   # Valid
+        tensor_values = [
+            0.0 if (v is None or (isinstance(v, float) and np.isnan(v))) else float(v)
+            for v in values
+        ]
+        mask_values = [
+            False if (v is None or (isinstance(v, float) and np.isnan(v))) else True
+            for v in values
+        ]
         
         collated['y'][key] = torch.tensor(tensor_values, dtype=torch.float32)
         collated['y'][f'{key}_mask'] = torch.tensor(mask_values, dtype=torch.bool)
@@ -71,11 +145,84 @@ def custom_collate_fn(batch):
             torch.from_numpy(np.array(f, dtype=np.float32)) for f in features
         ])
     
+    # Convert drug SMILES to PyG objects if converter is provided
+    if smiles_to_pyg_converter is not None:
+        # Check if SMILES representations are available in the batch
+        if batch[0]['drug'].get('representations') and 'SMILES' in batch[0]['drug']['representations']:
+            collated['drug']['representations'] = {
+                'smiles': [item['drug']['representations']['SMILES'] for item in batch]
+            }
+            smiles = collated['drug']['representations']['smiles']
+            try:
+                collated['drug']['G'] = smiles_to_pyg_converter.smiles_to_pyg_batch(smiles)
+            except Exception as e:
+                logger.warning(f"Failed to convert drug SMILES batch to PyG: {e}")
+                # Create empty batch as fallback
+                empty_graph = Data(
+                    x=torch.zeros((1, len(smiles_to_pyg_converter.atom_encoder)), dtype=torch.float32),
+                    edge_index=torch.zeros((2, 0), dtype=torch.long),
+                    edge_attr=torch.zeros((0, len(smiles_to_pyg_converter.bond_encoder)), dtype=torch.float32)
+                )
+                collated['drug']['G'] = Batch.from_data_list([empty_graph] * len(smiles))
+    
     # Optional: Include other fields if needed (representations, IDs)
-    collated['drug']['representations'] = {
-        'smiles': [item['drug']['representations']['SMILES'] for item in batch]
+    # collated['target']['representations'] = {
+    #     'dna': [item['target']['representations']['DNA'] for item in batch]
+    # }
+    
+    return collated
+
+
+def pretrain_collate_fn(batch, smiles_to_pyg_converter=None):
+    """
+    Custom collate function for pretrain datasets with optional PyG graph support.
+    
+    Args:
+        batch: List of dataset items
+        smiles_to_pyg_converter: Optional SmilesToPyG instance for converting SMILES to PyG objects
+    
+    Returns:
+        Collated batch with optional 'G' key containing PyG batch
+    """
+    collated = {
+        'id': [],
+        'representations': {},
+        'features': {}
     }
     
+    # Simple ID collation
+    collated['id'] = torch.tensor([item['id'] for item in batch])
+
+    # Collate features (convert to tensors)
+    for key in batch[0]['features'].keys():
+        features = [item['features'][key] for item in batch]
+        collated['features'][key] = torch.stack([
+            torch.from_numpy(np.array(f, dtype=np.float32)) for f in features
+        ])
+        
+    
+    # Convert SMILES to PyG objects if converter is provided
+    if smiles_to_pyg_converter is not None:
+        if 'smiles' in batch[0]['representations'].keys():
+            collated['representations']['smiles'] = [item['representations']['smiles'] for item in batch]
+            smiles = collated['representations']['smiles']
+            try:
+                collated['G'] = smiles_to_pyg_converter.smiles_to_pyg_batch(smiles)
+            except Exception as e:
+                logger.warning(f"Failed to convert SMILES batch to PyG: {e}")
+                # Create empty batch as fallback
+                empty_graph = Data(
+                    x=torch.zeros((1, len(smiles_to_pyg_converter.atom_encoder)), dtype=torch.float32),
+                    edge_index=torch.zeros((2, 0), dtype=torch.long),
+                    edge_attr=torch.zeros((0, len(smiles_to_pyg_converter.bond_encoder)), dtype=torch.float32)
+                )
+                collated['G'] = Batch.from_data_list([empty_graph] * len(smiles))
+    
+    # Optionally, add representations e.g. smiles, DNA, etc.
+    # collated['representations'] = {
+    #     'smiles': [item['representations']['aa'] for item in batch]
+    # }
+
     return collated
 
 
@@ -88,6 +235,9 @@ class DTIDataModule(pl.LightningDataModule):
     
     Note: This module loads ALL available features. 
     Feature selection is handled by the model during forward pass.
+    
+    When return_pyg=True, drug SMILES are converted to PyTorch Geometric 
+    graph objects and included in the batch as collated['drug']['G'].
     """
     
     def __init__(
@@ -102,6 +252,7 @@ class DTIDataModule(pl.LightningDataModule):
         split_type: Literal["split_rand", "split_cold"] = "split_rand",
         provenance_cols: Optional[List[Literal["in_DAVIS", "in_KIBA", "in_Metz", "in_BindingDB_Kd", "in_BindingDB_Ki"]]] = None,
         load_in_memory: bool = False,
+        return_pyg: bool = False,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -121,6 +272,10 @@ class DTIDataModule(pl.LightningDataModule):
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
+        
+        # SMILES to PyG converter when return_pyg is enabled
+        self.return_pyg = return_pyg
+        self.smiles_to_pyg = SmilesToPyG() if return_pyg else None
         
     def prepare_data(self):
         """Verify data file exists."""
@@ -168,6 +323,8 @@ class DTIDataModule(pl.LightningDataModule):
             
     def train_dataloader(self):
         """Return training dataloader."""
+        collate_fn = partial(dti_collate_fn, smiles_to_pyg_converter=self.smiles_to_pyg)
+        
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -176,11 +333,13 @@ class DTIDataModule(pl.LightningDataModule):
             pin_memory=self.pin_memory,
             drop_last=self.drop_last,
             persistent_workers=self.num_workers > 0,
-            collate_fn=custom_collate_fn
+            collate_fn=collate_fn
         )
         
     def val_dataloader(self):
         """Return validation dataloader."""
+        collate_fn = partial(dti_collate_fn, smiles_to_pyg_converter=self.smiles_to_pyg)
+        
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
@@ -189,11 +348,13 @@ class DTIDataModule(pl.LightningDataModule):
             pin_memory=self.pin_memory,
             drop_last=False,
             persistent_workers=self.num_workers > 0,
-            collate_fn=custom_collate_fn
+            collate_fn=collate_fn
         )
         
     def test_dataloader(self):
         """Return test dataloader."""
+        collate_fn = partial(dti_collate_fn, smiles_to_pyg_converter=self.smiles_to_pyg)
+        
         return DataLoader(
             self.test_dataset,
             batch_size=self.batch_size,
@@ -202,7 +363,7 @@ class DTIDataModule(pl.LightningDataModule):
             pin_memory=self.pin_memory,
             drop_last=False,
             persistent_workers=self.num_workers > 0,
-            collate_fn=custom_collate_fn
+            collate_fn=collate_fn
         )
         
     def get_feature_dims(self) -> Dict[str, Dict[str, int]]:
@@ -225,17 +386,11 @@ class DTIDataModule(pl.LightningDataModule):
         
         # Extract all drug feature dimensions
         for feat_name, feat_value in sample['drug']['features'].items():
-            if hasattr(feat_value, 'shape'):
-                feature_dims['drug'][feat_name] = feat_value.shape[-1]
-            else:
-                feature_dims['drug'][feat_name] = 1
+            feature_dims['drug'][feat_name] = feat_value.shape[-1]
                     
         # Extract all target feature dimensions
         for feat_name, feat_value in sample['target']['features'].items():
-            if hasattr(feat_value, 'shape'):
-                feature_dims['target'][feat_name] = feat_value.shape[-1]
-            else:
-                feature_dims['target'][feat_name] = 1
+            feature_dims['target'][feat_name] = feat_value.shape[-1]
                     
         return feature_dims
         
@@ -275,6 +430,7 @@ class PretrainDataModule(pl.LightningDataModule):
         shuffle_train: bool = True,
         drop_last: bool = False,
         load_in_memory: bool = False,
+        return_pyg: bool = False,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -291,6 +447,10 @@ class PretrainDataModule(pl.LightningDataModule):
         self.train_dataset = None
         self.val_dataset = None
         # No test dataset for pretraining
+        
+        # Smiles to PyG converter when running the discrete diffusion decoder
+        self.return_pyg = return_pyg
+        self.smiles_to_pyg = SmilesToPyG() if return_pyg else None
         
     def prepare_data(self):
         """Verify data file exists."""
@@ -324,6 +484,14 @@ class PretrainDataModule(pl.LightningDataModule):
             
     def train_dataloader(self):
         """Return training dataloader."""
+        # Use custom collate function with PyG converter if needed
+        collate_fn = None
+        if self.return_pyg:
+            from functools import partial
+            collate_fn = partial(pretrain_collate_fn, smiles_to_pyg_converter=self.smiles_to_pyg)
+        else:
+            collate_fn = partial(pretrain_collate_fn, smiles_to_pyg_converter=None)
+        
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -331,11 +499,20 @@ class PretrainDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             drop_last=self.drop_last,
-            persistent_workers=self.num_workers > 0
+            persistent_workers=self.num_workers > 0,
+            collate_fn=collate_fn
         )
         
     def val_dataloader(self):
         """Return validation dataloader."""
+        # Use custom collate function with PyG converter if needed
+        collate_fn = None
+        if self.return_pyg:
+            from functools import partial
+            collate_fn = partial(pretrain_collate_fn, smiles_to_pyg_converter=self.smiles_to_pyg)
+        else:
+            collate_fn = partial(pretrain_collate_fn, smiles_to_pyg_converter=None)
+        
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
@@ -343,7 +520,8 @@ class PretrainDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             drop_last=False,
-            persistent_workers=self.num_workers > 0
+            persistent_workers=self.num_workers > 0,
+            collate_fn=collate_fn
         )
         
     def test_dataloader(self):
@@ -367,10 +545,7 @@ class PretrainDataModule(pl.LightningDataModule):
         
         # Extract all feature dimensions
         for feat_name, feat_value in sample['features'].items():
-            if hasattr(feat_value, 'shape'):
-                feature_dims[feat_name] = feat_value.shape[-1]
-            else:
-                feature_dims[feat_name] = 1
+            feature_dims[feat_name] = feat_value.shape[-1]
                     
         return feature_dims
         

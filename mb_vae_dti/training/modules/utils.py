@@ -4,10 +4,23 @@ Utility functions for DTI PyTorch Lightning modules
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import pytorch_lightning as pl
 from typing import Dict, Optional, Any, Tuple, Literal, List, Union
 import logging
 from pathlib import Path
+
+
+# Data containers - available for structured data flow
+from mb_vae_dti.training.data_containers import (
+    GraphData, EmbeddingData, PredictionData, LossData, BatchData
+)
+
+# Diffusion utilities - only imported when needed for complex models
+try:
+    from mb_vae_dti.training.diffusion.utils import PlaceHolder, to_dense
+except ImportError:
+    PlaceHolder = to_dense = None
 
 
 logger = logging.getLogger(__name__)
@@ -18,6 +31,7 @@ class AbstractDTIModel(pl.LightningModule):
     Abstract base class for DTI PyTorch Lightning modules.
     
     Provides common functionality for:
+    - Activation parsing from string names
     - Optimizer and scheduler configuration
     - Metrics setup and epoch handling
     - Feature extraction from batches
@@ -32,9 +46,55 @@ class AbstractDTIModel(pl.LightningModule):
         self.test_metrics = None
         
         # Additional metrics for diffusion models (set by subclass if needed)
-        self.train_diffusion_metrics = None
-        self.val_diffusion_metrics = None
-        self.test_diffusion_metrics = None
+        self.train_diffusion_metrics = None  # BCEs & validity
+        self.val_diffusion_metrics = None    # nll & validity
+        self.test_diffusion_metrics = None   # nll & validity
+
+    @staticmethod
+    def parse_activation(activation: Union[str, nn.Module]) -> nn.Module:
+        """
+        Parse activation from string name or return the module if already instantiated.
+        
+        Args:
+            activation: Either a string name (e.g., "relu", "gelu") or PyTorch module
+            
+        Returns:
+            PyTorch activation module
+            
+        Raises:
+            ValueError: If activation string is not recognized
+        """
+        if isinstance(activation, nn.Module):
+            return activation
+        
+        if isinstance(activation, str):
+            activation_map = {
+                "relu": nn.ReLU(),
+                "gelu": nn.GELU(),
+                "elu": nn.ELU(),
+                "leaky_relu": nn.LeakyReLU(),
+                "selu": nn.SELU(),
+                "swish": nn.SiLU(),  # SiLU is PyTorch's implementation of Swish
+                "silu": nn.SiLU(),
+                "tanh": nn.Tanh(),
+                "sigmoid": nn.Sigmoid(),
+                "mish": nn.Mish(),
+                "glu": nn.GLU(),
+            }
+            
+            activation_lower = activation.lower()
+            if activation_lower in activation_map:
+                return activation_map[activation_lower]
+            else:
+                available_activations = list(activation_map.keys())
+                raise ValueError(
+                    f"Unknown activation '{activation}'. "
+                    f"Available activations: {available_activations}"
+                )
+        
+        raise TypeError(
+            f"Activation must be either a string or nn.Module, got {type(activation)}"
+        )
 
     def configure_optimizers(self):
         """Configure optimizer and scheduler using utility function."""
@@ -115,6 +175,7 @@ class AbstractDTIModel(pl.LightningModule):
             finetune_score: Score to fine-tune on (required for finetune phase)
         """
         from mb_vae_dti.training.metrics import DTIMetricsCollection, RealDTIMetrics
+        # TODO: add metrics for diffusion models -> validation NLL & molecular validity
         
         if phase in ["pretrain_drug", "pretrain_target"]:
             # No specific metrics for pretraining - just log contrastive loss
@@ -210,18 +271,13 @@ class AbstractDTIModel(pl.LightningModule):
         if hasattr(self, 'phase') and getattr(self, 'phase', None) == "finetune":
             self.freeze_encoders()
     
-    def _encode_drug_features(self, drug_features: List[torch.Tensor]) -> torch.Tensor:
-        """Encode and aggregate drug features. To be implemented by subclass."""
-        raise NotImplementedError("Subclass must implement _encode_drug_features")
-        
-    def _encode_target_features(self, target_features: List[torch.Tensor]) -> torch.Tensor:
-        """Encode and aggregate target features. To be implemented by subclass.""" 
-        raise NotImplementedError("Subclass must implement _encode_target_features")
-    
     def _get_features_from_batch(
         self, 
         batch: Dict[str, Any]
-    ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[List[torch.Tensor]]]:
+    ) -> Union[
+        Tuple[torch.Tensor, torch.Tensor], 
+        Tuple[List[torch.Tensor], List[torch.Tensor]]
+        ]:
         """
         Extract and prepare drug and target features from batch.
         Returns either
@@ -229,45 +285,41 @@ class AbstractDTIModel(pl.LightningModule):
             - Tuple of (drug_feats, target_feats) if multiple features are used (e.g. MultiModal, MultiHybrid and Full models)
         
         One of the items may be None when pretraining drug or target
-        """
-        drug_feats = []
-        target_feats = []
-        
-        # Handle different phases
-        if hasattr(self.hparams, 'phase') and self.hparams.phase == "pretrain_drug":
-            # For drug pretraining, extract drug features from batch["features"]
-            for feat_name in self.hparams.drug_features.keys():
-                if feat_name in batch["features"]:
-                    drug_feats.append(batch["features"][feat_name])
-        elif hasattr(self.hparams, 'phase') and self.hparams.phase == "pretrain_target":
-            # For target pretraining, extract target features from batch["features"]
-            for feat_name in self.hparams.target_features.keys():
-                if feat_name in batch["features"]:
-                    target_feats.append(batch["features"][feat_name])
+        """        
+        # Determine source based on phase
+        if self.hparams.phase == "pretrain_drug":
+            drug_feats, target_feats = [
+                batch["features"][feat_name]
+                for feat_name in self.hparams.drug_features.keys()
+            ], []
+        elif self.hparams.phase == "pretrain_target":
+            drug_feats, target_feats = [], [
+                batch["features"][feat_name]
+                for feat_name in self.hparams.target_features.keys()
+            ]
         else:
-            # For DTI training/fine-tuning
-            for feat_name in self.hparams.drug_features.keys():
-                if feat_name in batch["drug"]["features"]:
-                    drug_feats.append(batch["drug"]["features"][feat_name])
-            for feat_name in self.hparams.target_features.keys():
-                if feat_name in batch["target"]["features"]:
-                    target_feats.append(batch["target"]["features"][feat_name])
+            # DTI training/fine-tuning
+            drug_feats, target_feats = [
+                batch["drug"]["features"][feat_name]
+                for feat_name in self.hparams.drug_features.keys()
+            ], [
+                batch["target"]["features"][feat_name]
+                for feat_name in self.hparams.target_features.keys()
+            ]
 
         # Convert to single tensor if only one feature
         drug_feats = drug_feats[0] if len(drug_feats) == 1 else drug_feats
         target_feats = target_feats[0] if len(target_feats) == 1 else target_feats
-
-        if not drug_feats and not target_feats:
-            raise ValueError("Could not find appropriate features in batch")
         
         return drug_feats, target_feats
     
     def _get_smiles_from_batch(self, batch: Dict[str, Any]) -> List[str]:
         """Extract SMILES from batch."""
-        if hasattr(self.hparams, 'phase') and self.hparams.phase == "pretrain_drug":
-            return batch["representations"]["smiles"]
+        # we don't actually use this anymore, SMILES to graph conversion is done in the dataloader
+        if self.hparams.phase == "pretrain_drug":
+            return batch["representations"]["smiles"] # pretrain dataloader
         else:
-            return batch["drug"]["representations"]["smiles"]
+            return batch["drug"]["representations"]["SMILES"]
     
     def _get_fingerprints_from_batch(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -275,20 +327,24 @@ class AbstractDTIModel(pl.LightningModule):
         Returns Tuple of (drug_fp, target_fp)
         One of the items may be None when pretraining drug or target
         """
-        if hasattr(self.hparams, 'phase') and self.hparams.phase == "pretrain_drug":
+        if self.hparams.phase == "pretrain_drug":
             return batch["features"]["FP-Morgan"], None
-        elif hasattr(self.hparams, 'phase') and self.hparams.phase == "pretrain_target":
+        elif self.hparams.phase == "pretrain_target":
             return None, batch["features"]["FP-ESP"]
         else:
             return batch["drug"]["features"]["FP-Morgan"], batch["target"]["features"]["FP-ESP"]
     
-    def _get_target_from_batch(self, batch: Dict[str, Any], key: Literal["Y_pKd", "Y_KIBA"]) -> torch.Tensor:
+    def _get_target_from_batch(self, batch: Dict[str, Any]) -> torch.Tensor:
         """Get single target score from batch."""
-        return batch["y"][key]
+        return batch["y"][self.hparams.finetune_score]
     
-    def _get_target_mask_from_batch(self, batch: Dict[str, Any], key: Literal["Y_pKd", "Y_KIBA"]) -> torch.Tensor:
-        """Get mask for single target score from batch."""
-        return batch["y"][f"{key}_mask"]
+    def _get_mask_from_batch(self, batch: Dict[str, Any]) -> torch.Tensor:
+        """Get mask from batch."""
+        return batch["y"][f"{self.hparams.finetune_score}_mask"]
+
+    def _get_target_mask_from_batch(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get single target score and its mask from batch."""
+        return batch["y"][self.hparams.finetune_score], batch["y"][f"{self.hparams.finetune_score}_mask"]
     
     def _get_targets_from_batch(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
         """Get all target scores from batch."""
@@ -298,15 +354,56 @@ class AbstractDTIModel(pl.LightningModule):
             "Y_KIBA": batch["y"]["Y_KIBA"],
             "Y_pKi": batch["y"]["Y_pKi"]
         }
-
-    def _get_targets_masks_from_batch(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
-        """Get all target score masks from batch."""
+    
+    def _get_masks_from_batch(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
+        """Get all target masks from batch."""
         return {
             "Y": batch["y"]["Y_mask"],
             "Y_pKd": batch["y"]["Y_pKd_mask"],
             "Y_KIBA": batch["y"]["Y_KIBA_mask"],
             "Y_pKi": batch["y"]["Y_pKi_mask"]
         }
+
+    def _get_targets_masks_from_batch(self, batch: Dict[str, Any]) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        """Get all target scores and their masks from batch."""
+        targets = self._get_targets_from_batch(batch)
+        masks = self._get_masks_from_batch(batch)
+        return targets, masks
+    
+    def _extract_graph_data(self, batch: Dict[str, Any]) -> 'GraphData':
+        """
+        Extract graph data from batch and convert to dense representation.
+        
+        Handles both DTI batches (batch["drug"]["G"]) and pretrain batches (batch["G"]).
+        Only available when diffusion modules are imported.
+        """
+        if to_dense is None:
+            raise ImportError("Graph data extraction requires diffusion modules")
+            
+        # Get PyG batch based on batch type
+        if "drug" in batch and "G" in batch["drug"]:
+            pyg_batch = batch["drug"]["G"]  # DTI batch
+        elif "G" in batch:
+            pyg_batch = batch["G"]  # Pretrain batch
+        else:
+            raise ValueError("No graph data found in batch")
+        
+        graph_data = GraphData(pyg_batch=pyg_batch)
+        
+        # Convert to dense representation
+        if pyg_batch is not None:
+            dense_data, node_mask = to_dense(
+                pyg_batch.x, 
+                pyg_batch.edge_index, 
+                pyg_batch.edge_attr, 
+                pyg_batch.batch
+            )
+            graph_data.X = dense_data.X
+            graph_data.E = dense_data.E
+            graph_data.y = dense_data.y  # Will be replaced with drug_embedding later
+            graph_data.node_mask = node_mask
+        
+        return graph_data
     
     def _update_multi_score_metrics(
         self, 
@@ -378,7 +475,7 @@ class AbstractDTIModel(pl.LightningModule):
         # Update metrics only for valid samples
         if score_mask.any():
             metrics.update(score_pred[score_mask], score_target[score_mask])
-
+    
     def on_train_epoch_end(self):
         """Compute and log training metrics."""
         if self.train_metrics is not None:

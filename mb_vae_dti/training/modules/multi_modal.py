@@ -16,13 +16,13 @@ from mb_vae_dti.training.models import (
     ConcatAggregator, AttentiveAggregator
 )
 from mb_vae_dti.training.metrics import RealDTIMetrics
-from .optimizer_utils import configure_optimizer_and_scheduler
+from .utils import AbstractDTIModel
 
 
 logger = logging.getLogger(__name__)
 
 
-class MultiModalDTIModel(pl.LightningModule):
+class MultiModalDTIModel(AbstractDTIModel):
     """
     Multi-modal two-tower DTI model with dot-product prediction.
     
@@ -110,16 +110,6 @@ class MultiModalDTIModel(pl.LightningModule):
         # Store aggregator type for handling different return formats
         self.aggregator_type = aggregator_type
     
-    def configure_optimizers(self):
-        """Configure optimizer and scheduler using utility function."""
-        return configure_optimizer_and_scheduler(
-            model_parameters=self.parameters(),
-            learning_rate=self.hparams.learning_rate,
-            weight_decay=self.hparams.weight_decay,
-            scheduler=self.hparams.scheduler,
-            trainer=self.trainer
-        )
-
     def forward(
         self, 
         drug_features: List[torch.Tensor], 

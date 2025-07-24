@@ -33,8 +33,14 @@ MB-VAE-DTI/
 │   │   └── split.py            # DTI dataset splitting
 |   |
 │   ├── training/               # Model training (in progress)
-│   │   ├── ...
-│   │   └── ...
+│   │   ├── configs/            # Configuration files (incl. gridsearch & ensemble)
+│   │   ├── datasets/           # PyTorch Lightning DataModules for DTI & pretraining
+│   │   ├── models/             # Model architectures & components
+│   │   ├── metrics/            # Pyl metrics for DTI accuracy, and molecular reconstruction
+|   |   ├── modules/            # Pyl modules for DTI models
+|   |   ├── diffusion/          # Diffusion utilities (in progress)
+│   │   ├── utils/              # Training & testing utilities
+│   │   └── run.py & test.py    # Main training & testing scripts
 |   |
 │   └── validating/             # Validation and analysis (in progress)
 │       ├── ...
@@ -54,26 +60,18 @@ MB-VAE-DTI/
 │   ├── processed/              # Processed datasets & embeddings
 │   ├── input/                  # Input datasets (h5torch)
 │   ├── images/                 # Plots and visualizations
-│   ├── checkpoints/            # Model checkpoints
-│   └── results/                # Model outputs and analyses
+│   └── results/                # Model outputs and checkpoints
 |
 ├── notebooks/                  # Jupyter notebooks for reproducing experiments
 │   ├── loading.ipynb           # Data loading, pre-processing and exploration
 │   ├── processing.ipynb        # Embedding generation and h5torch file creation
-│   ├── training.ipynb          # Model inspection and training processes (in progress)
-│   └── validating.ipynb        # Result analysis and validation (in progress)
+│   ├── training.ipynb          # Gridsearch analysis & metrics (in progress)
+│   └── validating.ipynb        # Inspection of generative quirks (in progress)
 |
-├── scripts/                    # Shell scripts for running experiments (in progress)
-│   ├── configs/                # Configuration files
-│   │   ├── pretrain.json
-│   │   ├── train.json
-│   │   └── valid.json
-│   ├── embedding.sh            # Embedding generation (assumes data/ & external/ are set up)
-│   ├── h5torch_creation.py     # h5torch file creation (assumes external/temp/ is populated)
-│   ├── pretrain.sh             # Shell script for pretraining (in progress)
-│   ├── train.sh                # Shell script for training (in progress)
-│   ├── validate.sh             # Shell script for validation (in progress)
-│   └── hpc.pbs                 # PBS script with batch indexing (in progress)
+├── scripts/                    # Shell scripts for running jobs
+│   ├── embedding/
+│   ├── training/
+│   └── molecular_statistics.py # Molecular properties, marginal distributions, ...
 |
 ├── setup.py                    # Package installation script (may be in conflict with some external repo dependencies)
 ├── environment.yml             # Conda environment specification
@@ -116,23 +114,31 @@ MB-VAE-DTI/
    - Link: TBA (coming soon)
    - This provides everything needed to immediately start experimenting with the models
    - Alternatively, you can consult the notebooks to generate the data & run all experiments from scratch
+  
+  ```bash
+  # simplest baseline on random split of DAVIS
+  python mb_vae_dti/training/run.py --model baseline --phase finetune --dataset DAVIS --split rand
 
-**Note:** This project is currently in development, with the processing section implemented and training/validation components in progress.
+  # full model on cold split of KIBA
+  python mb_vae_dti/training/run.py --model full --phase finetune --dataset KIBA --split cold
+  ```
+
+  See `training/run.py` and `training/configs/` for more examples and details.
+
+**Note:** This project is currently in development (training/validation components in progress). There currently are still some `archive` folders spread throughout the repository, which contain old code to be refactored.
 
 ## Current Progress
 
 - ✅ Data loading and preprocessing
 - ✅ Embedding generation and processing
 - ✅ h5torch file creation and dataset splitting
-- 🔄 Setting up model architectures (in progress)
-- 🔄 Model pre-training w/ contrastive, complexity, (reconstruction) loss (later)
+- ✅ Setting up model architectures
+- 🔄 Model pre-training w/ contrastive, complexity, (reconstruction) loss
   - Contrastive loss: SimCLR with InfoNCE (1 positive pair and many negatives weighted w/ Tanimoto similarity)
   - Complexity loss: KL divergence between the encoder's output and a standard normal distribution
   - Reconstruction loss: MSE between the diffusion decoder's output and the input (only for the drug branch)
-- 🔄 Training baseline model (MLP on FPs & dot-product) and full model (incl. DTI accuracy loss) (later)
-- 🔄 Model validation and analysis (later)
-
-The training section has not yet been refactored to the new codebase. We are actively working on implementing and testing the quickstart. There currently are still some `archive` folders spread throughout the repository, which contain old code to be refactored.
+- 🔄 Training baseline model (MLP on FPs & dot-product) and full model (incl. DTI accuracy loss)
+- 🔄 Model validation and analysis
 
 ## Citation
 

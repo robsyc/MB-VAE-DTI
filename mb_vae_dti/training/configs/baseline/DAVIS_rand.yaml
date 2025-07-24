@@ -1,9 +1,10 @@
 model:
   embedding_dim: 768
+  hidden_dim: 128
+  factor: 4
+  n_layers: 3
+  dropout: 0.2
   encoder_type: "resnet"
-  encoder_kwargs:
-    hidden_dim: 128
-    n_layers: 3
 
 training:
   learning_rate: 0.001
@@ -12,14 +13,50 @@ data:
   batch_size: 32
   
 logging:
-  experiment_name: "baseline_DAVIS_rand"
   save_dir: "data/results/baseline/DAVIS/rand"
 
 gridsearch:
   model.embedding_dim: [512, 768, 1024]
   model.encoder_type: ["resnet", "transformer"]
-  model.encoder_kwargs.hidden_dim: [128, 256, 512]
-  model.encoder_kwargs.n_layers: [2, 3, 4]
+  model.hidden_dim: [128, 256, 512]
+  model.n_layers: [2, 3, 4]
 
   training.learning_rate: [0.0005, 0.001, 0.002]
   data.batch_size: [16, 32, 64]
+
+ensemble: # TODO
+  configs:
+    - training.learning_rate: 0.0005
+      data.batch_size: 32
+      model.hidden_dim: 128
+      model.n_layers: 3
+      model.embedding_dim: 768
+      model.encoder_type: "resnet"
+    
+    - training.learning_rate: 0.0010
+      data.batch_size: 16
+      model.hidden_dim: 128
+      model.n_layers: 2
+      model.embedding_dim: 512
+      model.encoder_type: "resnet"
+    
+    - training.learning_rate: 0.0020
+      data.batch_size: 16
+      model.hidden_dim: 128
+      model.n_layers: 3
+      model.embedding_dim: 512
+      model.encoder_type: "resnet"
+    
+    - training.learning_rate: 0.0005
+      data.batch_size: 16
+      model.hidden_dim: 128
+      model.n_layers: 2
+      model.embedding_dim: 512
+      model.encoder_type: "resnet"
+    
+    - training.learning_rate: 0.0010
+      data.batch_size: 32
+      model.hidden_dim: 128
+      model.n_layers: 3
+      model.embedding_dim: 768
+      model.encoder_type: "resnet"

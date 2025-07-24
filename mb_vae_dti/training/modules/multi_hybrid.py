@@ -21,13 +21,13 @@ from mb_vae_dti.training.models import (
 )
 from mb_vae_dti.training.models.heads import DTIHead, InfoNCEHead
 from mb_vae_dti.training.metrics import DTIMetricsCollection, RealDTIMetrics
-from .optimizer_utils import configure_optimizer_and_scheduler
+from .utils import AbstractDTIModel
 
 
 logger = logging.getLogger(__name__)
 
 
-class MultiHybridDTIModel(pl.LightningModule):
+class MultiHybridDTIModel(AbstractDTIModel):
     """
     Multi-hybrid DTI model combining multi-modal inputs with multi-output predictions.
     
@@ -197,158 +197,6 @@ class MultiHybridDTIModel(pl.LightningModule):
         
         # Note: Checkpoint loading is now handled in run.py setup function
         # to support both single and dual checkpoint loading
-    
-    def load_pretrained_weights(self, checkpoint_path: str = None, drug_checkpoint_path: str = None, target_checkpoint_path: str = None) -> None:
-        """
-        Load pretrained weights from checkpoint(s) with smart matching.
-        
-        Args:
-            checkpoint_path: Path to a single checkpoint file (original functionality)
-            drug_checkpoint_path: Path to drug branch pretrained weights
-            target_checkpoint_path: Path to target branch pretrained weights
-        """
-        if checkpoint_path is not None:
-            # Original single-checkpoint loading
-            self._load_single_checkpoint(checkpoint_path)
-        elif drug_checkpoint_path is not None or target_checkpoint_path is not None:
-            # Load drug and target branch weights separately
-            self._load_branch_checkpoints(drug_checkpoint_path, target_checkpoint_path)
-        else:
-            logger.warning("No checkpoint path provided")
-            return
-    
-    def _load_single_checkpoint(self, checkpoint_path: str) -> None:
-        """Load weights from a single checkpoint file."""
-        checkpoint_path = Path(checkpoint_path)
-        if not checkpoint_path.exists():
-            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-        
-        logger.info(f"Loading pretrained weights from {checkpoint_path}")
-        
-        # Load checkpoint
-        checkpoint = torch.load(checkpoint_path, map_location="cpu")
-        
-        # Extract state dict
-        if "state_dict" in checkpoint:
-            state_dict = checkpoint["state_dict"]
-        else:
-            state_dict = checkpoint
-        
-        # Load compatible weights
-        model_dict = self.state_dict()
-        pretrained_dict = {}
-        
-        for k, v in state_dict.items():
-            if k in model_dict and model_dict[k].shape == v.shape:
-                pretrained_dict[k] = v
-                logger.debug(f"Loaded weight: {k}")
-            else:
-                logger.warning(f"Skipping weight: {k} (shape mismatch or not found)")
-        
-        # Update model dict and load
-        model_dict.update(pretrained_dict)
-        self.load_state_dict(model_dict)
-        
-        logger.info(f"Loaded {len(pretrained_dict)} pretrained weights")
-        
-        # Optionally freeze encoder weights for fine-tuning
-        if self.phase == "finetune":
-            self.freeze_encoders()
-    
-    def _load_branch_checkpoints(self, drug_checkpoint_path: str = None, target_checkpoint_path: str = None) -> None:
-        """Load drug and target branch weights from separate checkpoints."""
-        model_dict = self.state_dict()
-        total_loaded = 0
-        
-        # Load drug branch weights
-        if drug_checkpoint_path is not None:
-            drug_path = Path(drug_checkpoint_path)
-            if drug_path.exists():
-                logger.info(f"Loading drug branch weights from {drug_path}")
-                drug_checkpoint = torch.load(drug_path, map_location="cpu")
-                
-                # Extract state dict
-                if "state_dict" in drug_checkpoint:
-                    drug_state_dict = drug_checkpoint["state_dict"]
-                else:
-                    drug_state_dict = drug_checkpoint
-                
-                # Load drug-specific weights
-                drug_loaded = 0
-                for k, v in drug_state_dict.items():
-                    if k.startswith("drug_") and k in model_dict and model_dict[k].shape == v.shape:
-                        model_dict[k] = v
-                        drug_loaded += 1
-                        logger.debug(f"Loaded drug weight: {k}")
-                
-                logger.info(f"Loaded {drug_loaded} drug branch weights")
-                total_loaded += drug_loaded
-            else:
-                logger.warning(f"Drug checkpoint not found: {drug_path}")
-        
-        # Load target branch weights
-        if target_checkpoint_path is not None:
-            target_path = Path(target_checkpoint_path)
-            if target_path.exists():
-                logger.info(f"Loading target branch weights from {target_path}")
-                target_checkpoint = torch.load(target_path, map_location="cpu")
-                
-                # Extract state dict
-                if "state_dict" in target_checkpoint:
-                    target_state_dict = target_checkpoint["state_dict"]
-                else:
-                    target_state_dict = target_checkpoint
-                
-                # Load target-specific weights
-                target_loaded = 0
-                for k, v in target_state_dict.items():
-                    if k.startswith("target_") and k in model_dict and model_dict[k].shape == v.shape:
-                        model_dict[k] = v
-                        target_loaded += 1
-                        logger.debug(f"Loaded target weight: {k}")
-                
-                logger.info(f"Loaded {target_loaded} target branch weights")
-                total_loaded += target_loaded
-            else:
-                logger.warning(f"Target checkpoint not found: {target_path}")
-        
-        # Update model
-        self.load_state_dict(model_dict)
-        logger.info(f"Total loaded weights: {total_loaded}")
-        
-        # Optionally freeze encoder weights for fine-tuning
-        if self.phase == "finetune":
-            self.freeze_encoders()
-    
-    def freeze_encoders(self) -> None:
-        """Freeze encoder weights during fine-tuning."""
-        logger.info("Freezing encoder weights for fine-tuning")
-        
-        for param in self.drug_encoders.parameters():
-            param.requires_grad = False
-        
-        for param in self.target_encoders.parameters():
-            param.requires_grad = False
-    
-    def unfreeze_encoders(self) -> None:
-        """Unfreeze encoder weights."""
-        logger.info("Unfreezing encoder weights")
-        
-        for param in self.drug_encoders.parameters():
-            param.requires_grad = True
-        
-        for param in self.target_encoders.parameters():
-            param.requires_grad = True
-    
-    def configure_optimizers(self):
-        """Configure optimizer and scheduler using utility function."""
-        return configure_optimizer_and_scheduler(
-            model_parameters=self.parameters(),
-            learning_rate=self.hparams.learning_rate,
-            weight_decay=self.hparams.weight_decay,
-            scheduler=self.hparams.scheduler,
-            trainer=self.trainer
-        )
     
     def _encode_drug_features(self, drug_features: List[torch.Tensor]) -> torch.Tensor:
         """

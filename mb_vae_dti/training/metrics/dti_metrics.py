@@ -172,7 +172,7 @@ class RealDTIMetrics(MetricCollection):
         Initialize real-valued DTI metrics.
         
         Args:
-            prefix: Prefix for metric names (e.g., "val_" or "test_")
+            prefix: Prefix for metric names (e.g., "val/" or "test/")
         """
         metrics = {
             "mse": MeanSquaredError(),

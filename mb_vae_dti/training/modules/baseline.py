@@ -8,13 +8,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
-from typing import Dict, Optional, Any, Tuple, Literal, List
+from typing import Dict, Optional, Any, Tuple, Literal, List, Union
 import logging
 
 from .utils import AbstractDTIModel
-
 from mb_vae_dti.training.models import ResidualEncoder, TransformerEncoder
-from mb_vae_dti.training.metrics import RealDTIMetrics
+from mb_vae_dti.training.data_containers import BatchData, EmbeddingData, PredictionData, LossData
 
 
 logger = logging.getLogger(__name__)
@@ -53,7 +52,7 @@ class BaselineDTIModel(AbstractDTIModel):
         hidden_dim: int,
         factor: int,
         n_layers: int,
-        activation: nn.Module,
+        activation: Union[str, nn.Module],
         dropout: float,
         bias: bool,
         
@@ -64,7 +63,11 @@ class BaselineDTIModel(AbstractDTIModel):
         self.model_dtype = torch.float32
         self.phase = phase
         self.finetune_score = finetune_score
+        activation = self.parse_activation(activation)
 
+        # Check that the model is configured correctly
+        assert phase == "finetune" and finetune_score in ["Y_pKd", "Y_KIBA"], \
+            "Baseline model only supports finetune phase and Y_pKd/Y_KIBA finetune score must be specified"
         assert len(drug_features) == 1 and len(target_features) == 1, \
             "Baseline model only supports single feature for drug and target"
 
@@ -92,16 +95,35 @@ class BaselineDTIModel(AbstractDTIModel):
             activation=activation
         )
 
-        # Metrics - using RealDTIMetrics for single score prediction
-        self.train_metrics_dti = RealDTIMetrics(prefix="train/")
-        self.val_metrics_dti = RealDTIMetrics(prefix="val/")
-        self.test_metrics_dti = RealDTIMetrics(prefix="test/")
+        # Setup metrics using AbstractDTIModel's method
+        self.setup_metrics(phase=phase, finetune_score=finetune_score)
+
+    def _create_batch_data( 
+            self, 
+            batch: Dict[str, Any]
+        ) -> BatchData:
+        """Create structured batch data using basic utilities & custom logic."""
+        batch_data = BatchData(raw_batch=batch)
+        batch_data.drug_features, batch_data.target_features = self._get_features_from_batch(batch)
+        batch_data.dti_targets, batch_data.dti_masks = self._get_target_mask_from_batch(batch)
+        return batch_data
+
+    def _create_embedding_data(
+            self, 
+            drug_features: torch.Tensor, 
+            target_features: torch.Tensor
+        ) -> EmbeddingData:
+        """Create structured embedding data using basic utilities."""
+        return EmbeddingData(
+            drug_embedding=self.drug_encoder(drug_features),
+            target_embedding=self.target_encoder(target_features)
+        )
 
     def forward(
-        self, 
-        drug_features: torch.Tensor,
-        target_features: torch.Tensor
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+            self, 
+            drug_features: torch.Tensor,
+            target_features: torch.Tensor
+        ) -> Tuple[EmbeddingData, PredictionData]:
         """
         Forward pass through the two-tower model.
         
@@ -110,101 +132,98 @@ class BaselineDTIModel(AbstractDTIModel):
             target_features: Target feature tensor [batch_size, target_input_dim]
             
         Returns:
-            predictions: dot-product predictions of DTI score (batch_size)
-            outputs: intermediate embeddings & attention weights
+            score_pred: dot-product prediction of DTI score [batch_size]
+            outputs: intermediate outputs dictionary
         """
-        # Encode drug and target
-        drug_embedding = self.drug_encoder(drug_features)       # (batch_size, embedding_dim)
-        target_embedding = self.target_encoder(target_features) # (batch_size, embedding_dim)
-        
-        # Predict DTI score w/ dot product
-        score_pred = torch.sum(drug_embedding * target_embedding, dim=-1) # (batch_size)
-
-        return score_pred.squeeze(-1), {
-            "drug_embedding": drug_embedding,
-            "target_embedding": target_embedding
-        }
-        
+        embedding_data = self._create_embedding_data(drug_features, target_features)
+        prediction_data = PredictionData(
+            score_pred=torch.sum(  # dot-product prediction of DTI score
+                embedding_data.drug_embedding * embedding_data.target_embedding,
+                dim=-1).squeeze(-1)
+        )
+        return embedding_data, prediction_data
+    
     def _common_step(
         self, 
         batch: Dict[str, Any]
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[BatchData, EmbeddingData, PredictionData, LossData]:
         """
-        Common step logic shared across train/val/test.
+        Common step logic shared across train/val/test using structured containers.
 
-        Returns three tensors:
-            - predictions: dot-product dti_preds of finetune score (batch_size)
-            - targets: true dti_targets after masking
-            - losses: standard MSE loss (accuracy)
+        Returns:
+            batch_data: Sturctured batch data incl. targets and masks
+            prediction_data: Structured predictions (already masked for valid samples)
+            embedding_data: Structured embeddings
+            loss_data: MSE accuracy loss computed on valid samples
         """
-
-        # Extract features and targets
-        drug_features, target_features = self._get_features_from_batch(batch)
-        dti_targets = self._get_target_from_batch(batch, self.hparams.finetune_score)
-        dti_masks = self._get_target_mask_from_batch(batch, self.hparams.finetune_score)
+        # Create structured batch data
+        batch_data = self._create_batch_data(batch)
         
         # Forward pass
-        dti_preds, outputs = self.forward(drug_features, target_features)
+        embedding_data, prediction_data = self.forward(batch_data.drug_features, batch_data.target_features)
         
-        # Mask predictions and targets
-        dti_preds = dti_preds[dti_masks]
-        dti_targets = dti_targets[dti_masks]
+        mask = batch_data.dti_masks
+        # Handle case with no valid samples
+        if not mask.any():
+            return batch_data, prediction_data, LossData(accuracy=torch.tensor(0.0, device=self.device))
+            
+        # Apply mask and compute loss
+        prediction_data.score_pred = prediction_data.score_pred[mask]
+        batch_data.dti_targets = batch_data.dti_targets[mask]
+        loss_data = LossData(
+            accuracy=F.mse_loss(
+                prediction_data.score_pred,
+                batch_data.dti_targets
+            )
+        )
         
-        return dti_preds, dti_targets, F.mse_loss(dti_preds, dti_targets)
+        return batch_data, embedding_data, prediction_data, loss_data
 
     def training_step(self, batch: Dict[str, Any], batch_idx: int):
-        """Training step."""
-        dti_preds, dti_targets, loss = self._common_step(batch)
-
-        # Update metrics
-        self.train_metrics_dti.update(
-            dti_preds, 
-            dti_targets)
+        """Training step using structured data containers."""
+        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
         
-        # Logging
-        self.log(f"train/loss", loss)
+        # Update metrics if we have valid predictions
+        if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
+            # Get corresponding targets for the masked predictions
+            self.train_metrics.update(
+                prediction_data.score_pred,
+                batch_data.dti_targets
+            )
         
-        return loss
+        # Log loss
+        self.log("train/loss", loss_data.accuracy, prog_bar=True)
+        
+        return loss_data.accuracy
         
     def validation_step(self, batch: Dict[str, Any], batch_idx: int):
-        """Validation step."""
-        dti_preds, dti_targets, loss = self._common_step(batch)
-            
-        self.val_metrics_dti.update(
-            dti_preds, 
-            dti_targets)
+        """Validation step using structured data containers."""
+        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
         
-        self.log("val/loss", loss)
-        return loss
+        # Update metrics if we have valid predictions
+        if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
+            self.val_metrics.update(
+                prediction_data.score_pred,
+                batch_data.dti_targets
+            )
+        
+        # Log loss
+        self.log("val/loss", loss_data.accuracy, prog_bar=True)
+        
+        return loss_data.accuracy
             
     def test_step(self, batch: Dict[str, Any], batch_idx: int):
-        """Test step - similar to validation."""
-        dti_preds, dti_targets, loss = self._common_step(batch)
+        """Test step using structured data containers."""
+        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
         
-        self.test_metrics_dti.update(
-            dti_preds, 
-            dti_targets)
+        # Update metrics if we have valid predictions
+        if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
+            self.test_metrics.update(
+                prediction_data.score_pred,
+                batch_data.dti_targets
+            )
         
-        self.log("test/loss", loss)
-        return loss
+        # Log loss
+        self.log("test/loss", loss_data.accuracy, prog_bar=True)
         
-    def on_train_epoch_end(self):
-        """Compute and log training metrics."""
-        train_metrics_dti = self.train_metrics_dti.compute()
-        for name, value in train_metrics_dti.items():
-            self.log(name, value)
-        self.train_metrics_dti.reset()
-    
-    def on_validation_epoch_end(self):
-        """Compute and log validation metrics."""
-        val_metrics_dti = self.val_metrics_dti.compute()
-        for name, value in val_metrics_dti.items():
-            self.log(name, value)
-        self.val_metrics_dti.reset()
-    
-    def on_test_epoch_end(self):
-        """Compute and log test metrics."""
-        test_metrics_dti = self.test_metrics_dti.compute()
-        for name, value in test_metrics_dti.items():
-            self.log(name, value)
-        self.test_metrics_dti.reset() 
+        return loss_data.accuracy
