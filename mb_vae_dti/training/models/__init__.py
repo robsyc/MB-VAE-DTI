@@ -13,6 +13,9 @@ from .blocks import (
     ConcatAggregator, AttentiveAggregator,
     CrossAttentionFusion
 )
+from .heads import (
+    DTIHead, KLVariationalHead, InfoNCEHead, ReconstructionHead
+)
 from .graph_transformer import GraphTransformer
 
 __all__ = [

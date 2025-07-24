@@ -1,5 +1,5 @@
 """
-Utility functions for DTI PyTorch Lightning modules
+Utility classes and functions for DTI PyTorch Lightning modules
 """
 
 import torch
@@ -25,6 +25,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+# PARENT PYTORCH LIGHTNING MODULE
 
 class AbstractDTIModel(pl.LightningModule):
     """
@@ -96,6 +98,7 @@ class AbstractDTIModel(pl.LightningModule):
             f"Activation must be either a string or nn.Module, got {type(activation)}"
         )
 
+
     def configure_optimizers(self):
         """Configure optimizer and scheduler using utility function."""
         optimizer = torch.optim.AdamW(
@@ -166,6 +169,7 @@ class AbstractDTIModel(pl.LightningModule):
             }
         } 
 
+
     def setup_metrics(self, phase: str, finetune_score: str = None):
         """
         Set up metrics based on training phase.
@@ -207,9 +211,10 @@ class AbstractDTIModel(pl.LightningModule):
             if finetune_score is None:
                 raise ValueError("finetune_score must be specified for finetune phase")
 
-            self.train_metrics = RealDTIMetrics(prefix="train/")
-            self.val_metrics = RealDTIMetrics(prefix="val/")
-            self.test_metrics = RealDTIMetrics(prefix="test/")
+            self.train_metrics = RealDTIMetrics(prefix=f"train/{finetune_score}_")
+            self.val_metrics = RealDTIMetrics(prefix=f"val/{finetune_score}_")
+            self.test_metrics = RealDTIMetrics(prefix=f"test/{finetune_score}_")
+
 
     def _freeze_module(self, module):
         for param in module.parameters():
@@ -271,18 +276,14 @@ class AbstractDTIModel(pl.LightningModule):
         if hasattr(self, 'phase') and getattr(self, 'phase', None) == "finetune":
             self.freeze_encoders()
     
+
     def _get_features_from_batch(
         self, 
         batch: Dict[str, Any]
-    ) -> Union[
-        Tuple[torch.Tensor, torch.Tensor], 
-        Tuple[List[torch.Tensor], List[torch.Tensor]]
-        ]:
+    ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
         """
         Extract and prepare drug and target features from batch.
-        Returns either
-            - Tuple of (drug_feat, target_feat) if single feature is used (e.g. Baseline & MultiOutput models)
-            - Tuple of (drug_feats, target_feats) if multiple features are used (e.g. MultiModal, MultiHybrid and Full models)
+        Returns Tuple of (drug_feats, target_feats) (child classes should handle list)
         
         One of the items may be None when pretraining drug or target
         """        
@@ -306,7 +307,7 @@ class AbstractDTIModel(pl.LightningModule):
                 batch["target"]["features"][feat_name]
                 for feat_name in self.hparams.target_features.keys()
             ]
-
+        
         # Convert to single tensor if only one feature
         drug_feats = drug_feats[0] if len(drug_feats) == 1 else drug_feats
         target_feats = target_feats[0] if len(target_feats) == 1 else target_feats
@@ -334,34 +335,35 @@ class AbstractDTIModel(pl.LightningModule):
         else:
             return batch["drug"]["features"]["FP-Morgan"], batch["target"]["features"]["FP-ESP"]
     
+
     def _get_target_from_batch(self, batch: Dict[str, Any]) -> torch.Tensor:
         """Get single target score from batch."""
-        return batch["y"][self.hparams.finetune_score]
+        return batch["y"][self.hparams.finetune_score].squeeze(-1)
     
     def _get_mask_from_batch(self, batch: Dict[str, Any]) -> torch.Tensor:
         """Get mask from batch."""
-        return batch["y"][f"{self.hparams.finetune_score}_mask"]
+        return batch["y"][f"{self.hparams.finetune_score}_mask"].squeeze(-1)
 
     def _get_target_mask_from_batch(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Get single target score and its mask from batch."""
-        return batch["y"][self.hparams.finetune_score], batch["y"][f"{self.hparams.finetune_score}_mask"]
+        return batch["y"][self.hparams.finetune_score].squeeze(-1), batch["y"][f"{self.hparams.finetune_score}_mask"].squeeze(-1)
     
     def _get_targets_from_batch(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
         """Get all target scores from batch."""
         return {
-            "Y": batch["y"]["Y"],
-            "Y_pKd": batch["y"]["Y_pKd"],
-            "Y_KIBA": batch["y"]["Y_KIBA"],
-            "Y_pKi": batch["y"]["Y_pKi"]
+            "Y": batch["y"]["Y"].squeeze(-1),
+            "Y_pKd": batch["y"]["Y_pKd"].squeeze(-1),
+            "Y_KIBA": batch["y"]["Y_KIBA"].squeeze(-1),
+            "Y_pKi": batch["y"]["Y_pKi"].squeeze(-1)
         }
     
     def _get_masks_from_batch(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
         """Get all target masks from batch."""
         return {
-            "Y": batch["y"]["Y_mask"],
-            "Y_pKd": batch["y"]["Y_pKd_mask"],
-            "Y_KIBA": batch["y"]["Y_KIBA_mask"],
-            "Y_pKi": batch["y"]["Y_pKi_mask"]
+            "Y": batch["y"]["Y_mask"].squeeze(-1),
+            "Y_pKd": batch["y"]["Y_pKd_mask"].squeeze(-1),
+            "Y_KIBA": batch["y"]["Y_KIBA_mask"].squeeze(-1),
+            "Y_pKi": batch["y"]["Y_pKi_mask"].squeeze(-1)
         }
 
     def _get_targets_masks_from_batch(self, batch: Dict[str, Any]) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
@@ -369,6 +371,7 @@ class AbstractDTIModel(pl.LightningModule):
         targets = self._get_targets_from_batch(batch)
         masks = self._get_masks_from_batch(batch)
         return targets, masks
+    
     
     def _extract_graph_data(self, batch: Dict[str, Any]) -> 'GraphData':
         """
@@ -405,77 +408,7 @@ class AbstractDTIModel(pl.LightningModule):
         
         return graph_data
     
-    def _update_multi_score_metrics(
-        self, 
-        outputs: Dict[str, torch.Tensor], 
-        batch: Dict[str, Any], 
-        metrics
-    ):
-        """Update multi-score metrics for general training."""
-        if metrics is None:
-            return
-            
-        # Binary metrics
-        binary_preds = outputs["binary_pred"].squeeze()
-        binary_targets = batch["y"]["Y"]
-        
-        # Real-valued metrics
-        real_preds = {}
-        real_targets = {}
-        real_masks = {}
-        
-        # Check each score
-        for score_name, pred_key in [("pKd", "pKd_pred"), ("pKi", "pKi_pred"), ("KIBA", "KIBA_pred")]:
-            batch_key = f"Y_{score_name}"
-            mask_key = f"{batch_key}_mask"
-            
-            if batch_key in batch["y"] and mask_key in batch["y"]:
-                real_preds[score_name] = outputs[pred_key].squeeze()
-                real_targets[score_name] = batch["y"][batch_key]
-                real_masks[score_name] = batch["y"][mask_key]
-        
-        # Update metrics
-        metrics.update(
-            binary_preds=binary_preds,
-            binary_targets=binary_targets,
-            real_preds=real_preds,
-            real_targets=real_targets,
-            real_masks=real_masks
-        )
-    
-    def _update_single_score_metrics(
-        self, 
-        outputs: Dict[str, torch.Tensor], 
-        batch: Dict[str, Any], 
-        metrics,
-        finetune_score: str = None
-    ):
-        """Update single-score metrics for fine-tuning."""
-        if metrics is None or finetune_score is None:
-            return
-        
-        # Get the specific score being fine-tuned
-        if finetune_score == "Y_pKd":
-            pred_key = "pKd_pred"
-        elif finetune_score == "Y_KIBA":
-            pred_key = "KIBA_pred"
-        elif finetune_score == "Y_pKi":
-            pred_key = "pKi_pred"
-        else:
-            # For baseline model with simple prediction
-            pred_key = "score_pred"
-        
-        if pred_key not in outputs:
-            return
-            
-        score_pred = outputs[pred_key].squeeze()
-        score_target = batch["y"][finetune_score]
-        score_mask = batch["y"][f"{finetune_score}_mask"]
-        
-        # Update metrics only for valid samples
-        if score_mask.any():
-            metrics.update(score_pred[score_mask], score_target[score_mask])
-    
+
     def on_train_epoch_end(self):
         """Compute and log training metrics."""
         if self.train_metrics is not None:

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Literal, Union, Any
 import torch
 from torch_geometric.data import Data, Batch
-from torch_geometric.utils import to_dense_adj, to_dense_batch, remove_self_loops
+
 
 class PlaceHolder:
     def __init__(self, X, E, y = None):
@@ -206,13 +206,12 @@ class EmbeddingData:
 @dataclass
 class PredictionData:
     """Container for model predictions."""
-    # DTI predictions - flexible to handle different phases
+    # Single score prediction (for baseline/single-output models)
+    score_pred: Optional[torch.Tensor] = None
+    # Multi-score predictions (for multi-output models)
     dti_scores: Optional[Dict[
         Literal["Y", "Y_pKd", "Y_pKi", "Y_KIBA"], torch.Tensor
     ]] = None
-    
-    # Single score prediction (for baseline/single-output models)
-    score_pred: Optional[torch.Tensor] = None
     
     # Graph predictions (for diffusion models)
     graph_reconstruction: Optional['PlaceHolder'] = None
@@ -252,34 +251,6 @@ class LossData:
     # Individual components for detailed logging
     components: Dict[str, torch.Tensor] = field(default_factory=dict)
     
-    # TODO: I feel iffy about this code below... perhaps we shouldn't be storing
-    # the NLL loss here, since it serves more as a metric than a loss.
-    # Maybe even a distinct NLLData class? We will have to dig deeper into the compute_val_loss
-    def total_loss(self, weights: Optional[List[float]] = None) -> torch.Tensor:
-        """
-        Compute weighted total loss with phase-aware logic.
-        
-        Args:
-            weights: [accuracy, complexity, contrastive, reconstruction] weights
-            phase: "train" uses weighted sum, "val"/"test" may use NLL instead
-        """
-        # if phase in ["val", "test"] and self.nll is not None:
-        #     # For validation/test, prioritize NLL if available
-        #     return self.nll
-            
-        # For training or when NLL not available, use weighted component sum
-        if weights is None:
-            weights = [1.0, 1.0, 1.0, 1.0]  # Default equal weights
-            
-        total = torch.tensor(0.0, device=self._get_device())
-        loss_components = [self.accuracy, self.complexity, self.contrastive, self.reconstruction]
-        
-        for weight, loss_component in zip(weights, loss_components):
-            if loss_component is not None:
-                total = total + weight * loss_component
-                
-        return total
-    
     def _get_device(self) -> torch.device:
         """Get device from first available tensor."""
         for loss_component in [self.accuracy, self.complexity, self.contrastive, 
@@ -287,24 +258,6 @@ class LossData:
             if loss_component is not None:
                 return loss_component.device
         return torch.device('cpu')
-    
-    # NOTE: how is this to be used with logger_fn?
-    def log_components(self, logger_fn, prefix: str = ""):
-        """Log all loss components with given prefix."""
-        if self.accuracy is not None:
-            logger_fn(f"{prefix}accuracy_loss", self.accuracy)
-        if self.complexity is not None:
-            logger_fn(f"{prefix}complexity_loss", self.complexity)
-        if self.contrastive is not None:
-            logger_fn(f"{prefix}contrastive_loss", self.contrastive)
-        if self.reconstruction is not None:
-            logger_fn(f"{prefix}reconstruction_loss", self.reconstruction)
-        if self.nll is not None:
-            logger_fn(f"{prefix}nll", self.nll)
-        
-        # Log additional components
-        for name, value in self.components.items():
-            logger_fn(f"{prefix}{name}", value)
 
 
 @dataclass
@@ -319,13 +272,17 @@ class BatchData:
     raw_batch: Dict[str, Any]
     
     # Processed components
-    drug_features: Optional[Union[torch.Tensor, List[torch.Tensor]]] = None   # single or multiple features
-    target_features: Optional[Union[torch.Tensor, List[torch.Tensor]]] = None
-    graph_data: Optional[GraphData] = None
+    drug_feature: Optional[torch.Tensor] = None
+    target_feature: Optional[torch.Tensor] = None
+    drug_features: Optional[List[torch.Tensor]] = None
+    target_features: Optional[List[torch.Tensor]] = None
+    graph_data: Optional[GraphData] = None # graph data for full diffusion module
     
     # Targets and masks
-    dti_targets: Optional[Union[torch.Tensor, Dict[str, torch.Tensor]]] = None # single or multiple targets
-    dti_masks: Optional[Union[torch.Tensor, Dict[str, torch.Tensor]]] = None # single or multiple masks
+    dti_target: Optional[torch.Tensor] = None
+    dti_mask: Optional[torch.Tensor] = None
+    dti_targets: Optional[Dict[str, torch.Tensor]] = None
+    dti_masks: Optional[Dict[str, torch.Tensor]] = None
     
     # Additional data
     drug_fp: Optional[torch.Tensor] = None

@@ -1,9 +1,3 @@
-"""
-Baseline DTI PyTorch Lightning module with
-- Unimodal encoders (ResidualEncoder or TransformerEncoder)
-- Dot-product prediction of single DTI interaction score
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,10 +5,13 @@ import pytorch_lightning as pl
 from typing import Dict, Optional, Any, Tuple, Literal, List, Union
 import logging
 
-from .utils import AbstractDTIModel
-from mb_vae_dti.training.models import ResidualEncoder, TransformerEncoder
-from mb_vae_dti.training.data_containers import BatchData, EmbeddingData, PredictionData, LossData
-
+from .utils import *
+from mb_vae_dti.training.models import (
+    ResidualEncoder, TransformerEncoder
+)
+from mb_vae_dti.training.data_containers import (
+    BatchData, EmbeddingData, PredictionData, LossData
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +68,11 @@ class BaselineDTIModel(AbstractDTIModel):
         assert len(drug_features) == 1 and len(target_features) == 1, \
             "Baseline model only supports single feature for drug and target"
 
+        logger.info(f"Baseline model with:
+        - Drug branch: {drug_features.keys()} (dims: {drug_features.values()})
+        - Target branch: {target_features.keys()} (dims: {target_features.values()})
+        - Phase: {phase} (finetune_score: {finetune_score})")
+
         encoder_type = ResidualEncoder if encoder_type == "resnet" else TransformerEncoder
         
         self.drug_encoder = encoder_type(
@@ -104,20 +106,9 @@ class BaselineDTIModel(AbstractDTIModel):
         ) -> BatchData:
         """Create structured batch data using basic utilities & custom logic."""
         batch_data = BatchData(raw_batch=batch)
-        batch_data.drug_features, batch_data.target_features = self._get_features_from_batch(batch)
-        batch_data.dti_targets, batch_data.dti_masks = self._get_target_mask_from_batch(batch)
+        batch_data.drug_feature, batch_data.target_feature = self._get_features_from_batch(batch)
+        batch_data.dti_target, batch_data.dti_mask = self._get_target_mask_from_batch(batch)
         return batch_data
-
-    def _create_embedding_data(
-            self, 
-            drug_features: torch.Tensor, 
-            target_features: torch.Tensor
-        ) -> EmbeddingData:
-        """Create structured embedding data using basic utilities."""
-        return EmbeddingData(
-            drug_embedding=self.drug_encoder(drug_features),
-            target_embedding=self.target_encoder(target_features)
-        )
 
     def forward(
             self, 
@@ -130,16 +121,18 @@ class BaselineDTIModel(AbstractDTIModel):
         Args:
             drug_features: Drug feature tensor [batch_size, drug_input_dim]
             target_features: Target feature tensor [batch_size, target_input_dim]
-            
         Returns:
-            score_pred: dot-product prediction of DTI score [batch_size]
-            outputs: intermediate outputs dictionary
+            embedding_data: Structured embeddings for drugs and targets
+            prediction_data: Structured predictions with single-score dot-product dti prediction
         """
-        embedding_data = self._create_embedding_data(drug_features, target_features)
+        embedding_data = EmbeddingData(
+            drug_embedding=self.drug_encoder(drug_features),
+            target_embedding=self.target_encoder(target_features)
+        )
         prediction_data = PredictionData(
             score_pred=torch.sum(  # dot-product prediction of DTI score
                 embedding_data.drug_embedding * embedding_data.target_embedding,
-                dim=-1).squeeze(-1)
+                dim=-1).squeeze(-1) # (batch_size)
         )
         return embedding_data, prediction_data
     
@@ -160,20 +153,21 @@ class BaselineDTIModel(AbstractDTIModel):
         batch_data = self._create_batch_data(batch)
         
         # Forward pass
-        embedding_data, prediction_data = self.forward(batch_data.drug_features, batch_data.target_features)
+        embedding_data, prediction_data = self.forward(
+            batch_data.drug_feature, 
+            batch_data.target_feature
+        )
         
-        mask = batch_data.dti_masks
-        # Handle case with no valid samples
-        if not mask.any():
-            return batch_data, prediction_data, LossData(accuracy=torch.tensor(0.0, device=self.device))
-            
         # Apply mask and compute loss
-        prediction_data.score_pred = prediction_data.score_pred[mask]
-        batch_data.dti_targets = batch_data.dti_targets[mask]
+        if not batch_data.dti_mask.any(): # no valid samples
+            return batch_data, embedding_data, prediction_data, LossData(accuracy=torch.tensor(0.0, device=self.device))
+            
+        prediction_data.score_pred = prediction_data.score_pred[batch_data.dti_mask]
+        batch_data.dti_target = batch_data.dti_target[batch_data.dti_mask]
         loss_data = LossData(
             accuracy=F.mse_loss(
                 prediction_data.score_pred,
-                batch_data.dti_targets
+                batch_data.dti_target
             )
         )
         
@@ -183,47 +177,43 @@ class BaselineDTIModel(AbstractDTIModel):
         """Training step using structured data containers."""
         batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
         
-        # Update metrics if we have valid predictions
+        # Update RealDTIMetrics if we have valid predictions
         if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
-            # Get corresponding targets for the masked predictions
             self.train_metrics.update(
                 prediction_data.score_pred,
-                batch_data.dti_targets
+                batch_data.dti_target
             )
         
-        # Log loss
-        self.log("train/loss", loss_data.accuracy, prog_bar=True)
-        
+        # Log MSE accuracy loss & return to trainer
+        self.log("train/loss", loss_data.accuracy)
         return loss_data.accuracy
         
     def validation_step(self, batch: Dict[str, Any], batch_idx: int):
         """Validation step using structured data containers."""
         batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
         
-        # Update metrics if we have valid predictions
+        # Update RealDTIMetrics if we have valid predictions
         if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
             self.val_metrics.update(
                 prediction_data.score_pred,
-                batch_data.dti_targets
+                batch_data.dti_target
             )
         
-        # Log loss
-        self.log("val/loss", loss_data.accuracy, prog_bar=True)
-        
+        # Log MSE accuracy loss & return to trainer
+        self.log("val/loss", loss_data.accuracy)
         return loss_data.accuracy
             
     def test_step(self, batch: Dict[str, Any], batch_idx: int):
         """Test step using structured data containers."""
         batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
         
-        # Update metrics if we have valid predictions
+        # Update RealDTIMetrics if we have valid predictions
         if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
             self.test_metrics.update(
                 prediction_data.score_pred,
                 batch_data.dti_targets
             )
         
-        # Log loss
-        self.log("test/loss", loss_data.accuracy, prog_bar=True)
-        
+        # Log MSE accuracy loss & return to trainer
+        self.log("test/loss", loss_data.accuracy)
         return loss_data.accuracy

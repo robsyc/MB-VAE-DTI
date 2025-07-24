@@ -38,6 +38,7 @@ from typing import Dict, Optional, Literal
 import argparse
 import gc
 import os
+import shutil
 
 import torch
 import pytorch_lightning as pl
@@ -160,16 +161,21 @@ def get_config_path(
 def setup_model_baseline(
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
-    dataset: Dataset = None
+    dataset: Dataset
 ) -> BaselineDTIModel:
-    """Setup baseline model with single drug/target features."""
-
+    phase = "finetune"
+    finetune_score = "Y_pKd" if dataset == "DAVIS" else "Y_KIBA"
     drug_feats = {name: dim for name, dim in feature_dims['drug'].items() if name in config.data.drug_features}
     target_feats = {name: dim for name, dim in feature_dims['target'].items() if name in config.data.target_features}
 
+    logger.info(f"Drug features: {drug_feats}")
+    logger.info(f"Target features: {target_feats}")
+    logger.info(f"Phase: {phase}")
+    logger.info(f"Finetune score: {finetune_score}")
+
     model = BaselineDTIModel(
-        phase="finetune",
-        finetune_score="Y_pKd" if dataset == "DAVIS" else "Y_KIBA",
+        phase=phase,
+        finetune_score=finetune_score,
 
         learning_rate=config.training.learning_rate,
         weight_decay=config.training.weight_decay,
@@ -194,37 +200,38 @@ def setup_model_baseline(
 def setup_model_multi_modal(
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
-    dataset: Dataset = None
+    dataset: Dataset
 ) -> MultiModalDTIModel:
-    """Setup multi-modal model with multiple drug/target features."""
-    # Build feature dimension dictionaries
-    drug_features = {}
-    target_features = {}
-    
-    for feat_name in config.data.drug_features:
-        if feat_name in feature_dims['drug']:
-            drug_features[feat_name] = feature_dims['drug'][feat_name]
-        else:
-            raise ValueError(f"Drug feature '{feat_name}' not found in dataset")
-    
-    for feat_name in config.data.target_features:
-        if feat_name in feature_dims['target']:
-            target_features[feat_name] = feature_dims['target'][feat_name]
-        else:
-            raise ValueError(f"Target feature '{feat_name}' not found in dataset")
+    phase = "finetune"
+    finetune_score = "Y_pKd" if dataset == "DAVIS" else "Y_KIBA"
+    drug_feats = {name: dim for name, dim in feature_dims['drug'].items() if name in config.data.drug_features}
+    target_feats = {name: dim for name, dim in feature_dims['target'].items() if name in config.data.target_features}
+
+    logger.info(f"Drug features: {drug_feats}")
+    logger.info(f"Target features: {target_feats}")
+    logger.info(f"Phase: {phase}")
+    logger.info(f"Finetune score: {finetune_score}")
 
     model = MultiModalDTIModel(
-        embedding_dim=config.model.embedding_dim,
-        drug_features=drug_features,
-        target_features=target_features,
-        encoder_type=config.model.encoder_type,
-        encoder_kwargs=OmegaConf.to_container(config.model.encoder_kwargs),
-        aggregator_type=config.model.aggregator_type,
-        aggregator_kwargs=OmegaConf.to_container(config.model.aggregator_kwargs),
+        phase=phase,
+        finetune_score=finetune_score,
+
         learning_rate=config.training.learning_rate,
         weight_decay=config.training.weight_decay,
         scheduler=config.training.scheduler,
-        finetune_score="Y_pKd" if dataset == "DAVIS" else "Y_KIBA",
+
+        drug_features=drug_feats,
+        target_features=target_feats,
+
+        encoder_type=config.model.encoder_type,
+        aggregator_type=config.model.aggregator_type,
+        embedding_dim=config.model.embedding_dim,
+        hidden_dim=config.model.hidden_dim,
+        factor=config.model.factor,
+        n_layers=config.model.n_layers,
+        activation=config.model.activation,
+        dropout=config.model.dropout,
+        bias=config.model.bias,
     )
     
     return model
@@ -233,32 +240,42 @@ def setup_model_multi_modal(
 def setup_model_multi_output(
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
-    dataset: Dataset = None,
-    phase: TrainingPhase = None
+    dataset: Dataset,
+    phase: TrainingPhase
 ) -> MultiOutputDTIModel:
-    """Setup multi-output model with single drug/target features and DTI prediction head."""
-
     # Set finetune score based on phase & dataset
     if phase == "finetune":
         finetune_score = "Y_pKd" if dataset == "DAVIS" else "Y_KIBA"
     else:
         finetune_score = None
+    drug_feats = {name: dim for name, dim in feature_dims['drug'].items() if name in config.data.drug_features}
+    target_feats = {name: dim for name, dim in feature_dims['target'].items() if name in config.data.target_features}
+    
+    logger.info(f"Drug features: {drug_feats}")
+    logger.info(f"Target features: {target_feats}")
+    logger.info(f"Phase: {phase}")
+    logger.info(f"Finetune score: {finetune_score}")
     
     model = MultiOutputDTIModel(
-        embedding_dim=config.model.embedding_dim,
-        drug_input_dim=feature_dims['drug'][config.data.drug_feature],
-        target_input_dim=feature_dims['target'][config.data.target_feature],
-        encoder_type=config.model.encoder_type,
-        encoder_kwargs=OmegaConf.to_container(config.model.encoder_kwargs),
-        fusion_kwargs=OmegaConf.to_container(config.model.fusion_kwargs),
-        dti_head_kwargs=OmegaConf.to_container(config.model.dti_head_kwargs),
+        phase=phase,
+        finetune_score=finetune_score,
+        dti_weights=config.loss.dti_weights,
+
         learning_rate=config.training.learning_rate,
         weight_decay=config.training.weight_decay,
         scheduler=config.training.scheduler,
-        drug_feature=config.data.drug_feature,
-        target_feature=config.data.target_feature,
-        phase=phase,
-        finetune_score=finetune_score
+
+        drug_features=drug_feats,
+        target_features=target_feats,
+
+        encoder_type=config.model.encoder_type,
+        embedding_dim=config.model.embedding_dim,
+        hidden_dim=config.model.hidden_dim,
+        factor=config.model.factor,
+        n_layers=config.model.n_layers,
+        activation=config.model.activation,
+        dropout=config.model.dropout,
+        bias=config.model.bias,
     )
 
     # Load pretrained weights if specified
@@ -467,28 +484,20 @@ def train_single_config(
     dataset: Optional[Dataset] = None,
     split: Optional[Split] = None,
     pretrain_target: Optional[PretrainTarget] = None,
-    save_checkpoint: bool = False
+    cleanup_checkpoints: bool = False
 ) -> None:
     """
     Train a single configuration.
     
     Args:
         config: Configuration to train
-
-        model: Type of model to train
+        model_type: Type of model to train
         phase: Training phase
         dataset: Dataset (for finetune phase)
         split: Split type (for finetune and train phases)
         pretrain_target: Pretrain target (for pretrain phase)
-
-        config_index: Optional index of the config in the gridsearch experiment batch
-        batch_index: Optional index of the batch in the gridsearch experiment
-        is_ensemble: Whether this is part of an ensemble run
-        is_gridsearch: Whether this is part of a gridsearch experiment
-
-        save_checkpoint: Whether to save the final model to disk
-        run_test: Whether to run the test set after training
-        test_only: Whether to only run the test set
+        cleanup_checkpoints: Whether to delete checkpoint files after training
+                           (useful for gridsearch to save disk space)
     """
     logger.info(f"Experiment name: {config.logging.experiment_name}")
     save_dir = Path(config.logging.save_dir) / config.logging.experiment_name
@@ -588,9 +597,9 @@ def train_single_config(
             gradient_clip_val=config.training.get('gradient_clip_val'),
             deterministic=config.hardware.get('deterministic', False),
             logger=setup_logging(config, save_dir, model_type, phase, dataset, split, pretrain_target),
-            callbacks=setup_callbacks(config, save_dir, save_checkpoint=save_checkpoint),
+            callbacks=setup_callbacks(config, save_dir, cleanup_checkpoints=cleanup_checkpoints),
             log_every_n_steps=config.logging.log_every_n_steps,
-            enable_checkpointing=save_checkpoint,
+            enable_checkpointing=True,
             default_root_dir=str(save_dir),
             # Debug mode limits - set from config if debug mode is enabled
             limit_train_batches=config.training.get('limit_train_batches', 1.0),
@@ -607,28 +616,24 @@ def train_single_config(
         # Test model on best checkpoint
         if phase != "pretrain":
             logger.info("Testing on best checkpoint...")
-
-            if save_checkpoint: # use default ModelCheckpoint
-                trainer.test(model, data_module, ckpt_path="best")
+            trainer.test(model, data_module, ckpt_path="best")
+            
+            # Save final model state dict if this is a regular run (not gridsearch/ensemble)
+            if not cleanup_checkpoints:
                 final_model_path = save_dir / "final_model.pt"
                 torch.save(model.state_dict(), final_model_path)
                 logger.info(f"Saved final model to {final_model_path}")
-
-            else: # custom BestMetricsCallback's best state dict
-                best_metrics_callback = None
-                for callback in trainer.callbacks:
-                    if isinstance(callback, BestMetricsCallback):
-                        best_metrics_callback = callback
-                        break
-                if best_metrics_callback and best_metrics_callback.best_model_state_dict is not None:
-                    model.load_state_dict(best_metrics_callback.best_model_state_dict)
-                    trainer.test(model, data_module)
-                else:
-                    try:
-                        trainer.test(model, data_module, ckpt_path="best")
-                    except Exception as e:
-                        logger.info("No best checkpoint found - testing on last checkpoint...")
-                        trainer.test(model, data_module, ckpt_path="last")
+            
+            # Cleanup checkpoint files if requested (for gridsearch/ensemble)
+            if cleanup_checkpoints:
+                checkpoint_dir = save_dir / "checkpoints"
+                if checkpoint_dir.exists():
+                    shutil.rmtree(checkpoint_dir)
+                    logger.info(f"Cleaned up checkpoint directory: {checkpoint_dir}")
+                wandb_dir = save_dir / "wandb"
+                if wandb_dir.exists():
+                    shutil.rmtree(wandb_dir)
+                    logger.info(f"Cleaned up wandb directory: {wandb_dir}")
 
 
         ###############################################################
@@ -730,8 +735,8 @@ def main(args):
     
     # Apply debug settings if debug mode is enabled
     if args.debug:
-        logger.info("Debug mode enabled - only keeping max 2 configs and applying debug settings")
-        configs = configs[:2]
+        logger.info("Debug mode enabled - only keeping max 3 configs and applying debug settings")
+        configs = configs[:3]
         for config in configs:
             # Limit batches to 5 for each split
             config.training.limit_train_batches = 5
@@ -798,7 +803,7 @@ def main(args):
                 args.dataset,
                 args.split,
                 args.pretrain_target,
-                save_checkpoint=not (args.gridsearch or args.ensemble)
+                cleanup_checkpoints=(args.gridsearch or args.ensemble)
             )
         except Exception as e:
             logger.error(f"Failed to train configuration {i+1}: {e}")

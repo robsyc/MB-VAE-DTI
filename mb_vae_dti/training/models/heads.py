@@ -51,7 +51,7 @@ class DTIHead(nn.Module):
             features: Input features (batch_size, input_dim)
         
         Returns:
-            predictions: Dict with predictions for each DTI score (Y, pKd, pKi, KIBA)
+            predictions: Dict with dti_scores preds (Y, pKd, pKi, KIBA)
         """
         shared_features = self.shared_layers(features)
         return {
@@ -59,42 +59,6 @@ class DTIHead(nn.Module):
             'Y_pKd': self.pKd_head(shared_features).squeeze(-1),   # (B,)
             'Y_pKi': self.pKi_head(shared_features).squeeze(-1),   # (B,)
             'Y_KIBA': self.KIBA_head(shared_features).squeeze(-1)  # (B,)
-        }
-
-    def loss(
-            self, 
-            predictions: Dict[str, torch.Tensor], 
-            targets: Dict[str, torch.Tensor],
-            masks: Dict[str, torch.Tensor]
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-        """
-        Computation of DTI losses
-
-        Args:
-            predictions, targets, masks: Dict with predictions, targets, and masks
-            for each DTI score (Y, Y_pKd, Y_pKi, Y_KIBA)
-        
-        Returns:
-            total_loss: Total loss (scalar)
-            losses: Dict with losses for each DTI score (Y, Y_pKd, Y_pKi, Y_KIBA)
-        """
-        binary_loss = self.dti_weights["Y"] * F.binary_cross_entropy_with_logits(predictions["Y"], targets["Y"])
-        real_losses = {}
-
-        for key in ["Y_pKd", "Y_pKi", "Y_KIBA"]:
-            if masks[key].any():
-                valid_mask = masks[key]
-                pred = predictions[key][valid_mask]
-                true = targets[key][valid_mask]
-                real_losses[key] = self.dti_weights[key] * F.mse_loss(pred, true)
-            else:
-                real_losses[key] = torch.tensor(0.0)
-
-        total_loss = binary_loss + sum(real_losses.values())
-        
-        return total_loss, {
-            "Y": binary_loss,
-            **real_losses
         }
 
 

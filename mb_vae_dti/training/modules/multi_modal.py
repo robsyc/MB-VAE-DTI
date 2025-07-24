@@ -1,22 +1,18 @@
-"""
-Multi-modal DTI PyTorch Lightning module with
-- Two branches with multiple encoders (ResidualEncoder or TransformerEncoder)
-- Intra-branch aggregation module (concatenation, attentive or cross-attention)
-- Dot-product prediction of single DTI interaction score
-"""
-
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import pytorch_lightning as pl
 from typing import Dict, List, Optional, Any, Tuple, Literal
 import logging
 
+from .utils import *
 from mb_vae_dti.training.models import (
     ResidualEncoder, TransformerEncoder,
     ConcatAggregator, AttentiveAggregator
 )
-from mb_vae_dti.training.metrics import RealDTIMetrics
-from .utils import AbstractDTIModel
+from mb_vae_dti.training.data_containers import (
+    BatchData, EmbeddingData, PredictionData, LossData
+)
 
 
 logger = logging.getLogger(__name__)
@@ -36,171 +32,167 @@ class MultiModalDTIModel(AbstractDTIModel):
     """
     def __init__(
         self,
-        # Architecture parameters
-        embedding_dim: int,
-        drug_features: Dict[str, int],
-        target_features: Dict[str, int],
-        encoder_type: Literal["resnet", "transformer"],
-        encoder_kwargs: Optional[Dict],
 
-        aggregator_type: Literal["concat", "attentive"],
-        aggregator_kwargs: Optional[Dict],
-        
+        phase: Literal["finetune"], # baseline model only supports finetune phase
+        finetune_score: Literal["Y_pKd", "Y_KIBA"], # required for finetune phase
+
         learning_rate: float,
         weight_decay: float,
         scheduler: Optional[Literal["const", "step", "one_cycle", "cosine"]],
+
+        drug_features: Dict[
+            Literal["FP-Morgan", "EMB-BioMedGraph", "EMB-BioMedImg", "EMB-BioMedText"], 
+            int],  # dict mapping feature name to input dimension
+        target_features: Dict[
+            Literal["FP-ESM", "FP-NT", "FP-ESP"], 
+            int
+        ],
+
+        embedding_dim: int,
+        hidden_dim: int,
+        factor: int,
+        n_layers: int,
+        activation: Union[str, nn.Module],
+        dropout: float,
+        bias: bool,
         
-        finetune_score: Literal["Y_pKd", "Y_KIBA"],
+        encoder_type: Literal["resnet", "transformer"],
+        aggregator_type: Literal["concat", "attentive"],
     ):
         super().__init__()
         self.save_hyperparameters()
+        self.model_dtype = torch.float32
+        self.phase = phase
+        self.finetune_score = finetune_score
+        activation = self.parse_activation(activation)
+        self.aggregator_type = aggregator_type
+
+        # Check that the model is configured correctly
+        assert phase == "finetune" and finetune_score in ["Y_pKd", "Y_KIBA"], \
+            "Multi-modal model only supports finetune phase with Y_pKd or Y_KIBA score"
+        if len(drug_features) < 2 and len(target_features) < 2:
+            logger.warning("Multi-modal model supports multiple drug and/or target features, but only one feature was provided")
         
+        logger.info(f"Multi-modal model with:
+        - Drug branch: {drug_features.keys()} (dims: {drug_features.values()})
+        - Target branch: {target_features.keys()} (dims: {target_features.values()})
+        - Phase: {phase} (finetune_score: {finetune_score})")
+
         encoder_type = ResidualEncoder if encoder_type == "resnet" else TransformerEncoder
 
         self.drug_encoders = nn.ModuleDict()
         for feat_name in drug_features:
             self.drug_encoders[feat_name] = encoder_type(
                 input_dim=drug_features[feat_name],
-                output_dim=encoder_kwargs["hidden_dim"],
-                **encoder_kwargs
+                hidden_dim=hidden_dim,
+                output_dim=hidden_dim if len(drug_features) > 1 else embedding_dim, # individual view encoders project to hidden_dim
+                n_layers=n_layers,
+                factor=factor,
+                activation=activation,
+                dropout=dropout,
+                bias=bias
             )
         
         self.target_encoders = nn.ModuleDict()
         for feat_name in target_features:
             self.target_encoders[feat_name] = encoder_type(
                 input_dim=target_features[feat_name],
-                output_dim=encoder_kwargs["hidden_dim"],
-                **encoder_kwargs
+                hidden_dim=hidden_dim,
+                output_dim=hidden_dim if len(target_features) > 1 else embedding_dim,
+                n_layers=n_layers,
+                factor=factor,
+                activation=activation,
+                dropout=dropout,
+                bias=bias
             )
         
-        aggregator_class_map = {
-            "concat": ConcatAggregator,
-            "attentive": AttentiveAggregator
-        }
-        aggregator_class = aggregator_class_map[aggregator_type]
+        aggregator_type = ConcatAggregator if aggregator_type == "concat" else AttentiveAggregator
         
         if len(drug_features) > 1:
-            self.drug_aggregator = aggregator_class(
-                input_dim=encoder_kwargs["hidden_dim"],
+            self.drug_aggregator = aggregator_type(
+                input_dim=hidden_dim,
                 n_features=len(drug_features),
-                output_dim=embedding_dim,
-                **aggregator_kwargs
+                output_dim=embedding_dim, # but together they are aggregated to embedding_dim
             )
         else:
-            self.drug_aggregator = None  # No aggregation needed for single feature
+            self.drug_aggregator = torch.nn.Identity()  # No aggregation needed for single feature
         
         if len(target_features) > 1:
-            self.target_aggregator = aggregator_class(
-                input_dim=encoder_kwargs["hidden_dim"],
+            self.target_aggregator = aggregator_type(
+                input_dim=hidden_dim,
                 n_features=len(target_features),
                 output_dim=embedding_dim,
-                **aggregator_kwargs
             )
         else:
-            self.target_aggregator = None  # No aggregation needed for single feature
+            self.target_aggregator = torch.nn.Identity()  # No aggregation needed for single feature
             
-        # Loss functions (only MSE on DTI interaction score)
-        self.mse_loss = nn.MSELoss()
-        
-        # Metrics - using RealDTIMetrics for single score prediction
-        self.train_metrics = RealDTIMetrics(prefix="train/")
-        self.val_metrics = RealDTIMetrics(prefix="val/")
-        self.test_metrics = RealDTIMetrics(prefix="test/")
-        
-        # Store aggregator type for handling different return formats
-        self.aggregator_type = aggregator_type
+        # Setup metrics using AbstractDTIModel's method
+        self.setup_metrics(phase=phase, finetune_score=finetune_score)
     
+
+    def _create_batch_data( 
+            self, 
+            batch: Dict[str, Any]
+        ) -> BatchData:
+        """Create structured batch data using basic utilities & custom logic."""
+        batch_data = BatchData(raw_batch=batch)
+        batch_data.drug_features, batch_data.target_features = self._get_features_from_batch(batch)
+        batch_data.dti_target, batch_data.dti_mask = self._get_target_mask_from_batch(batch)
+        return batch_data
+
+
     def forward(
         self, 
         drug_features: List[torch.Tensor], 
         target_features: List[torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Tuple[EmbeddingData, PredictionData]:
         """
         Forward pass through the multi-modal two-tower model.
         
         Args:
-            drug_features: List of drug feature tensors
-            target_features: List of target feature tensors
+            drug_features: Drug feature tensor [batch_size, drug_input_dim]
+            target_features: Target feature tensor [batch_size, target_input_dim]
             
         Returns:
-            Dictionary containing predictions and embeddings
+            embedding_data: Structured drug & target embeddings (and attention weights if using attentive aggregator)
+            prediction_data: Structured predictions with single-score dot-product prediction
         """
-        # Encode drug features
-        drug_embeddings = []
-        for feat_name, feat in zip(self.hparams.drug_features, drug_features):
-            encoded = self.drug_encoders[feat_name](feat)
-            drug_embeddings.append(encoded)
+        embedding_data = EmbeddingData()
+
+        # Encode drug & target features
+        drug_embeddings = [
+            self.drug_encoders[feat_name](feat)
+            for feat_name, feat in zip(self.hparams.drug_features, drug_features)
+        ]
+        target_embeddings = [
+            self.target_encoders[feat_name](feat)
+            for feat_name, feat in zip(self.hparams.target_features, target_features)
+        ]
         
-        # Aggregate drug embeddings
-        if self.drug_aggregator is not None:
-            if self.aggregator_type == "attentive":
-                drug_embedding, drug_attention = self.drug_aggregator(drug_embeddings)
-            else:
-                drug_embedding = self.drug_aggregator(drug_embeddings)
+        # Aggregate into embedding_dim
+        if self.drug_aggregator is not None and self.aggregator_type == "attentive":
+            embedding_data.drug_embedding, embedding_data.drug_attention = self.drug_aggregator(drug_embeddings)
         else:
-            drug_embedding = drug_embeddings[0]  # Single feature, no aggregation needed
-        
-        # Encode target features
-        target_embeddings = []
-        for feat_name, feat in zip(self.hparams.target_features, target_features):
-            encoded = self.target_encoders[feat_name](feat)
-            target_embeddings.append(encoded)
-        
-        # Aggregate target embeddings
-        if self.target_aggregator is not None:
-            if self.aggregator_type == "attentive":
-                target_embedding, target_attention = self.target_aggregator(target_embeddings)
-            else:
-                target_embedding = self.target_aggregator(target_embeddings)
+            embedding_data.drug_embedding = self.drug_aggregator(drug_embeddings) # identity if no aggregation needed
+        if self.target_aggregator is not None and self.aggregator_type == "attentive":
+            embedding_data.target_embedding, embedding_data.target_attention = self.target_aggregator(target_embeddings)
         else:
-            target_embedding = target_embeddings[0]  # Single feature, no aggregation needed
+            embedding_data.target_embedding = self.target_aggregator(target_embeddings) # identity if no aggregation needed
         
         # Predict DTI score w/ dot product
-        score_pred = torch.sum(drug_embedding * target_embedding, dim=-1) # (batch_size)
+        prediction_data = PredictionData(
+            score_pred=torch.sum(
+                embedding_data.drug_embedding * embedding_data.target_embedding, 
+                dim=-1).squeeze(-1) # (batch_size)
+        )
         
-        outputs = {
-            "score_pred": score_pred,
-            "drug_embedding": drug_embedding,
-            "target_embedding": target_embedding,
-        }
+        return embedding_data, prediction_data
         
-        # Add attention weights if using attentive aggregator
-        if self.aggregator_type == "attentive":
-            if self.drug_aggregator is not None:
-                outputs["drug_attention"] = drug_attention
-            if self.target_aggregator is not None:
-                outputs["target_attention"] = target_attention
-        
-        return outputs
-        
-    def _get_features_from_batch(
-        self, 
-        batch: Dict[str, Any]
-    ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-        """Extract and prepare features from batch."""
-        drug_feats = []
-        target_feats = []
-        
-        # Extract drug features
-        for feat_name in self.hparams.drug_features:
-            if feat_name in batch["drug"]["features"]:
-                drug_feats.append(batch["drug"]["features"][feat_name])
-            else:
-                raise ValueError(f"Missing drug feature '{feat_name}' in batch")
-        
-        # Extract target features
-        for feat_name in self.hparams.target_features:
-            if feat_name in batch["target"]["features"]:
-                target_feats.append(batch["target"]["features"][feat_name])
-            else:
-                raise ValueError(f"Missing target feature '{feat_name}' in batch")
-        
-        return drug_feats, target_feats
-        
+
     def _common_step(
         self, 
         batch: Dict[str, Any]
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[BatchData, EmbeddingData, PredictionData, LossData]:
         """
         Common step logic shared across train/val/test.
         
@@ -208,88 +200,74 @@ class MultiModalDTIModel(AbstractDTIModel):
             batch: Batch data
             
         Returns:
-            Tuple of (predictions, targets, loss) for valid samples only
+            batch_data: Sturctured batch data incl. targets and masks
+            prediction_data: Structured predictions (already masked for valid samples)
+            embedding_data: Structured embeddings
+            loss_data: MSE accuracy loss computed on valid samples
         """
-        # Get features
-        drug_features, target_features = self._get_features_from_batch(batch)
+        # Create structured batch data
+        batch_data = self._create_batch_data(batch)
         
         # Forward pass
-        outputs = self(drug_features, target_features)
+        embedding_data, prediction_data = self.forward(batch_data.drug_features, batch_data.target_features)
         
-        # Get target score
-        target_score_value = batch["y"][self.hparams.finetune_score]
-        
-        # Filter out samples without target score using mask from collate function
-        valid_mask = batch["y"][f"{self.hparams.finetune_score}_mask"]
-        if not valid_mask.any():
-            return None, None, None
+        # Apply mask and compute loss
+        if not batch_data.dti_mask.any(): # no valid samples
+            return batch_data, embedding_data, prediction_data, LossData(accuracy=torch.tensor(0.0, device=self.device))
             
-        # Get valid predictions and targets
-        valid_predictions = outputs["score_pred"][valid_mask]
-        valid_targets = target_score_value[valid_mask]
+        prediction_data.score_pred = prediction_data.score_pred[batch_data.dti_mask]
+        batch_data.dti_target = batch_data.dti_target[batch_data.dti_mask]
+        loss_data = LossData(
+            accuracy=F.mse_loss(
+                prediction_data.score_pred,
+                batch_data.dti_target
+            )
+        )
+
+        return batch_data, embedding_data, prediction_data, loss_data
         
-        # Compute regression loss
-        score_loss = self.mse_loss(valid_predictions, valid_targets)
-        
-        return valid_predictions, valid_targets, score_loss
-        
+
     def training_step(self, batch: Dict[str, Any], batch_idx: int):
-        """Training step."""
-        valid_predictions, valid_targets, score_loss = self._common_step(batch)
-        if valid_predictions is None:  # No valid samples
-            return None
-            
-        # Update metrics
-        self.train_metrics.update(valid_predictions, valid_targets)
+        """Training step using structured data containers."""
+        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
         
-        # Logging
-        self.log(f"train/loss", score_loss)
+        # Update RealDTIMetrics if we have valid predictions
+        if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
+            self.train_metrics.update(
+                prediction_data.score_pred,
+                batch_data.dti_targets
+            )
         
-        return score_loss
+        # Log MSE accuracy loss & return to trainer
+        self.log("train/loss", loss_data.accuracy)
+        return loss_data.accuracy
         
     def validation_step(self, batch: Dict[str, Any], batch_idx: int):
-        """Validation step."""
-        valid_predictions, valid_targets, score_loss = self._common_step(batch)
-        if valid_predictions is None:  # No valid samples
-            return None
-            
-        # Update metrics
-        self.val_metrics.update(valid_predictions, valid_targets)
-            
-        # Logging
-        self.log("val/loss", score_loss)
+        """Validation step using structured data containers."""
+        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
         
-        return score_loss
+        # Update RealDTIMetrics if we have valid predictions
+        if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
+            self.val_metrics.update(
+                prediction_data.score_pred,
+                batch_data.dti_targets
+            )
+        
+        # Log MSE accuracy loss & return to trainer
+        self.log("val/loss", loss_data.accuracy)
+        return loss_data.accuracy
             
     def test_step(self, batch: Dict[str, Any], batch_idx: int):
-        """Test step - similar to validation."""
-        valid_predictions, valid_targets, score_loss = self._common_step(batch)
-        if valid_predictions is None:  # No valid samples
-            return None
+        """Test step using structured data containers."""
+        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
         
-        # Update metrics
-        self.test_metrics.update(valid_predictions, valid_targets)
+        # Update RealDTIMetrics if we have valid predictions
+        if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
+            self.test_metrics.update(
+                prediction_data.score_pred,
+                batch_data.dti_targets
+            )
         
-        # Logging
-        self.log("test/loss", score_loss)
-        
-    def on_train_epoch_end(self):
-        """Compute and log training metrics."""
-        train_metrics = self.train_metrics.compute()
-        for name, value in train_metrics.items():
-            self.log(name, value)
-        self.train_metrics.reset()
-    
-    def on_validation_epoch_end(self):
-        """Compute and log validation metrics."""
-        val_metrics = self.val_metrics.compute()
-        for name, value in val_metrics.items():
-            self.log(name, value)
-        self.val_metrics.reset()
-    
-    def on_test_epoch_end(self):
-        """Compute and log test metrics."""
-        test_metrics = self.test_metrics.compute()
-        for name, value in test_metrics.items():
-            self.log(name, value)
-        self.test_metrics.reset() 
+        # Log MSE accuracy loss & return to trainer
+        self.log("test/loss", loss_data.accuracy)
+        return loss_data.accuracy

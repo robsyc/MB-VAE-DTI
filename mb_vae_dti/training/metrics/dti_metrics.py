@@ -27,7 +27,7 @@ from torchmetrics.classification import BinaryAccuracy, BinaryConfusionMatrix, B
 from torcheval.metrics import BinaryAUPRC as _BinaryAUPRC
 from lifelines.utils import concordance_index
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal
 import logging
 
 logger = logging.getLogger(__name__)
@@ -234,6 +234,7 @@ class RealDTIMetrics(MetricCollection):
         
         return results
 
+
 class MultiScoreRealDTIMetrics(torch.nn.Module):
     """
     Multi-score real-valued DTI metrics that can handle multiple DTI scores
@@ -368,31 +369,33 @@ class DTIMetricsCollection(torch.nn.Module):
                 score_names=real_score_names, 
                 prefix=f"{prefix}real_"
             )
-    
     def update(
         self, 
-        binary_preds: Optional[Tensor] = None,
-        binary_targets: Optional[Tensor] = None,
-        real_preds: Optional[Dict[str, Tensor]] = None,
-        real_targets: Optional[Dict[str, Tensor]] = None,
-        real_masks: Optional[Dict[str, Tensor]] = None
+        predictions: Dict[Literal["Y", "Y_pKi", "Y_pKd", "Y_KIBA"], Tensor],
+        targets: Dict[Literal["Y", "Y_pKi", "Y_pKd", "Y_KIBA"], Tensor],
+        masks: Dict[Literal["Y", "Y_pKi", "Y_pKd", "Y_KIBA"], Tensor]
     ) -> None:
         """
         Update all metrics.
         
         Args:
-            binary_preds: Binary predictions [batch_size]
-            binary_targets: Binary targets [batch_size]
-            real_preds: Dict of real-valued predictions
-            real_targets: Dict of real-valued targets
-            real_masks: Dict of validity masks for real values
+            predictions: Dict containing all predictions (Y, Y_pKi, Y_pKd, Y_KIBA)
+            targets: Dict containing all targets (Y, Y_pKi, Y_pKd, Y_KIBA)
+            masks: Dict containing validity masks for each score type
         """
-        if self.include_binary and binary_preds is not None and binary_targets is not None:
-            self.binary_metrics.update(binary_preds, binary_targets)
+        # Update binary metrics with Y key
+        if self.include_binary and "Y" in predictions and "Y" in targets:
+            self.binary_metrics.update(predictions["Y"], targets["Y"])
         
-        if self.include_real and real_preds is not None and real_targets is not None and real_masks is not None:
-            self.real_metrics.update(real_preds, real_targets, real_masks)
-    
+        # Update real metrics with Y_pKi, Y_pKd, Y_KIBA keys
+        if self.include_real:
+            real_pred_dict = {k: v for k, v in predictions.items() if k.startswith("Y_")}
+            real_target_dict = {k: v for k, v in targets.items() if k.startswith("Y_")}
+            real_mask_dict = {k: v for k, v in masks.items() if k.startswith("Y_")}
+            
+            if real_pred_dict and real_target_dict and real_mask_dict:
+                self.real_metrics.update(real_pred_dict, real_target_dict, real_mask_dict)
+                
     def compute(self) -> Dict[str, Tensor]:
         """Compute all metrics."""
         results = {}

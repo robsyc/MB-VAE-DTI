@@ -63,27 +63,16 @@ class TimingCallback(Callback):
 
 class BestMetricsCallback(Callback):
     """
-    Callback to track best validation metrics during training for gridsearch.
-    
-    This callback monitors validation loss and stores all validation metrics
-    from the epoch where validation loss was minimum. This is essential for
-    gridsearch experiments where we need to collect the best performance
-    without saving full model checkpoints.
-    
-    Also optionally stores the best model's state dict in memory for testing
-    without writing to disk.
+    Callback to track best validation loss and keep copy of best model's val/test metrics.
     """
-    
-    def __init__(self, monitor: str = "val/loss", mode: str = "min", store_best_model: bool = True):
+    def __init__(self, monitor: str = "val/loss", mode: str = "min"):
         super().__init__()
         self.monitor = monitor
         self.mode = mode
-        self.store_best_model = store_best_model
         self.best_epoch = 0
         self.best_val_metrics = {}
         self.test_metrics = {}
         self.best_loss = float('inf') if mode == "min" else float('-inf')
-        self.best_model_state_dict = None
         
         # Comparison function
         self.compare = torch.less if mode == "min" else torch.greater
@@ -109,11 +98,6 @@ class BestMetricsCallback(Callback):
                 for key, value in current_metrics.items()
                 if key.startswith('val/')
             }
-            
-            # Store the best model's state dict in memory if requested
-            if self.store_best_model:
-                import copy
-                self.best_model_state_dict = copy.deepcopy(pl_module.state_dict())
                 
             logger.debug(f"New best validation loss `{self.monitor}`: {self.best_loss:.6f} at epoch {self.best_epoch}")
 
@@ -125,15 +109,6 @@ class BestMetricsCallback(Callback):
             if key.startswith('test/')
         }
         logger.debug(f"Test metrics: {self.test_metrics}")
-
-    def load_best_model(self, pl_module):
-        """Load the best model state dict into the provided module."""
-        if self.best_model_state_dict is None:
-            logger.warning("No best model state dict stored. Make sure store_best_model=True and training has completed.")
-            return
-        
-        pl_module.load_state_dict(self.best_model_state_dict)
-        logger.info(f"Loaded best model from epoch {self.best_epoch} (loss: {self.best_loss:.6f})")
 
     def get_best_results(self) -> Dict[str, Any]:
         """Get the best validation results."""
@@ -148,7 +123,7 @@ class BestMetricsCallback(Callback):
 def setup_callbacks(
         config: DictConfig,
         save_dir: Path,
-        save_checkpoint: bool = False,
+        monitor: str = "val/loss",
     ) -> list:
     """
     Setup training callbacks.
@@ -156,35 +131,30 @@ def setup_callbacks(
     Args:
         config: Configuration object
         save_dir: Directory to save checkpoints
-        save_checkpoint: Whether to save the final model to disk
+        monitor: Metric to monitor (default: "val/loss")
     """
-    callbacks = [
+    return [
         ModelSummary(max_depth=2),
         LearningRateMonitor(logging_interval='step'),
         TimingCallback(),
         EarlyStopping(
-            monitor="val/loss",
+            monitor=monitor,
             patience=config.training.early_stopping_patience,
             mode="min",
             verbose=True
         ),
         BestMetricsCallback(
-            monitor="val/loss",
-            mode="min",
-            store_best_model=not save_checkpoint  # Store in memory when not saving to disk
+            monitor=monitor,
+            mode="min"
         ),
+        ModelCheckpoint(
+        dirpath=save_dir / "checkpoints",
+        filename="best_model",
+        monitor=monitor,
+        mode="min",
+        save_top_k=1,
+        save_last=False,
+        save_weights_only=True,  # Save only model weights, not optimizer states
+        verbose=True
+        )
     ]
-
-    # Only add ModelCheckpoint if we actually want to save checkpoints
-    if save_checkpoint:
-        callbacks.append(ModelCheckpoint(
-            dirpath=save_dir / "checkpoints",
-            filename="best_model",
-            monitor="val/loss",
-            mode="min",
-            save_top_k=1,
-            save_last=False,
-            verbose=True
-        ))
-    
-    return callbacks
