@@ -69,12 +69,10 @@ class InfoNCEHead(nn.Module):
             proj_dim: int,
             dropout: float,
             bias: bool,
-            activation: nn.Module,
-            contrastive_temp: float
+            activation: nn.Module
     ):
         super().__init__()
         self.activation = activation
-        self.contrastive_temp = contrastive_temp
         self.projection = nn.Sequential(
             nn.LayerNorm(input_dim),
             nn.Linear(input_dim, proj_dim, bias=bias),

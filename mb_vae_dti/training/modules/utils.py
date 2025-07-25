@@ -404,7 +404,7 @@ class AbstractDTIModel(pl.LightningModule):
         
         # Convert to dense representation
         if pyg_batch is not None:
-            dense_data, node_mask = to_dense(
+            dense_data, node_mask = to_dense( # TODO: do we want to omit it returning y ?
                 pyg_batch.x, 
                 pyg_batch.edge_index, 
                 pyg_batch.edge_attr, 

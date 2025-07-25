@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
 from typing import Dict, Optional, Any, Tuple, Literal, List, Union
 import logging
 
@@ -45,6 +44,10 @@ class MultiHybridDTIModel(AbstractDTIModel):
         weight_decay: float,
         scheduler: Optional[Literal["const", "step", "one_cycle", "cosine"]],
 
+        weights: List[float], # accuracy, complexity, contrastive, reconstruction
+        dti_weights: Optional[List[float]], # Y, pKd, pKi, KIBA weights
+        contrastive_temp: Optional[float],
+
         drug_features: Dict[
             Literal["FP-Morgan", "EMB-BioMedGraph", "EMB-BioMedImg", "EMB-BioMedText"], 
             int],  # dict mapping feature name to input dimension
@@ -63,9 +66,6 @@ class MultiHybridDTIModel(AbstractDTIModel):
         
         encoder_type: Literal["resnet", "transformer"],
         aggregator_type: Literal["concat", "attentive"],
-        weights: Optional[List[float]] = None, # accuracy, complexity, contrastive, reconstruction
-        dti_weights: Optional[List[float]] = None, # Y, pKd, pKi, KIBA weights
-        contrastive_temp: Optional[float] = None
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -73,7 +73,7 @@ class MultiHybridDTIModel(AbstractDTIModel):
         self.phase = phase
         self.finetune_score = finetune_score
         activation = self.parse_activation(activation)
-        self.aggregator_type = aggregator_type
+        self.attentive = aggregator_type == "attentive"
 
         self.weights = weights
         self.dti_weights = dti_weights
@@ -82,8 +82,13 @@ class MultiHybridDTIModel(AbstractDTIModel):
         # Check that the model is configured correctly
         if phase == "finetune":
             assert finetune_score is not None, "finetune_score must be specified for finetune phase"
+            assert dti_weights is None, "dti_weights must be None for finetune phase"
+            assert contrastive_temp is None, "contrastive_temp must be None for finetune phase"
         elif phase == "train":
             assert dti_weights is not None, "dti_weights must be specified for general DTI training"
+            assert contrastive_temp is not None, "contrastive_temp must be specified for general DTI training"
+        elif phase in ["pretrain_drug", "pretrain_target"]:
+            assert contrastive_temp is not None, "contrastive_temp must be specified for pretrain phases"
         else:
             raise ValueError(f"Invalid phase: {phase}")
 
@@ -227,7 +232,7 @@ class MultiHybridDTIModel(AbstractDTIModel):
                 self.drug_encoders[feat_name](feat)
                 for feat_name, feat in zip(self.hparams.drug_features, drug_features)
             ]
-            if self.aggregator_type == "attentive":
+            if self.attentive:
                 embedding_data.drug_embedding, embedding_data.drug_attention = self.drug_aggregator(drug_embeddings)
             else:
                 embedding_data.drug_embedding = self.drug_aggregator(drug_embeddings)
@@ -237,7 +242,7 @@ class MultiHybridDTIModel(AbstractDTIModel):
                 self.target_encoders[feat_name](feat)
                 for feat_name, feat in zip(self.hparams.target_features, target_features)
             ]
-            if self.aggregator_type == "attentive":
+            if self.attentive:
                 embedding_data.target_embedding, embedding_data.target_attention = self.target_aggregator(target_embeddings)
             else:
                 embedding_data.target_embedding = self.target_aggregator(target_embeddings)
@@ -289,13 +294,13 @@ class MultiHybridDTIModel(AbstractDTIModel):
             x = embedding_data.drug_embedding,
             fingerprints = batch_data.drug_fp,
             temperature = self.contrastive_temp
-        ) if self.phase != "pretrain_target" else torch.tensor(0.0, device=self.device)
+        ) if self.phase not in ["pretrain_target", "finetune"] else torch.tensor(0.0, device=self.device)
 
         target_contrastive_loss = self.target_contrastive_head(
             x = embedding_data.target_embedding,
             fingerprints = batch_data.target_fp,
             temperature = self.contrastive_temp
-        ) if self.phase != "pretrain_drug" else torch.tensor(0.0, device=self.device)
+        ) if self.phase not in ["pretrain_drug", "finetune"] else torch.tensor(0.0, device=self.device)
         
         loss_data.contrastive = drug_contrastive_loss + target_contrastive_loss
         loss_data.components = {
@@ -367,7 +372,7 @@ class MultiHybridDTIModel(AbstractDTIModel):
         
         # Log finetune/DTI training loss and return to trainer
         self.log("train/loss_contrastive", loss_data.contrastive)
-        self.log("train/loss_accuracy", loss_data.accuracy) # may be None in case of pretrain_target/pretrain_drug
+        self.log("train/loss_accuracy", loss_data.accuracy) if loss_data.accuracy is not None else None
         self.log("train/loss", loss)
         return loss
     
@@ -388,7 +393,7 @@ class MultiHybridDTIModel(AbstractDTIModel):
         
         # Log finetune/DTI validation loss and return to trainer
         self.log("val/loss_contrastive", loss_data.contrastive)
-        self.log("val/loss_accuracy", loss_data.accuracy) # may be None in case of pretrain_target/pretrain_drug
+        self.log("val/loss_accuracy", loss_data.accuracy) if loss_data.accuracy is not None else None
         self.log("val/loss", loss)
         return loss
     
@@ -409,6 +414,6 @@ class MultiHybridDTIModel(AbstractDTIModel):
 
         # Log finetune/DTI test loss and return to trainer
         self.log("test/loss_contrastive", loss_data.contrastive)
-        self.log("test/loss_accuracy", loss_data.accuracy) # may be None in case of pretrain_target/pretrain_drug
+        self.log("test/loss_accuracy", loss_data.accuracy) if loss_data.accuracy is not None else None
         self.log("test/loss", loss)
         return loss

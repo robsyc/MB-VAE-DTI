@@ -65,7 +65,7 @@ class MultiModalDTIModel(AbstractDTIModel):
         self.phase = phase
         self.finetune_score = finetune_score
         activation = self.parse_activation(activation)
-        self.aggregator_type = aggregator_type
+        self.attentive = aggregator_type == "attentive"
 
         # Check that the model is configured correctly
         assert phase == "finetune" and finetune_score in ["Y_pKd", "Y_KIBA"], \
@@ -171,11 +171,11 @@ class MultiModalDTIModel(AbstractDTIModel):
         ]
         
         # Aggregate into embedding_dim
-        if self.drug_aggregator is not None and self.aggregator_type == "attentive":
+        if self.drug_aggregator is not None and self.attentive:
             embedding_data.drug_embedding, embedding_data.drug_attention = self.drug_aggregator(drug_embeddings)
         else:
             embedding_data.drug_embedding = self.drug_aggregator(drug_embeddings) # identity if no aggregation needed
-        if self.target_aggregator is not None and self.aggregator_type == "attentive":
+        if self.target_aggregator is not None and self.attentive:
             embedding_data.target_embedding, embedding_data.target_attention = self.target_aggregator(target_embeddings)
         else:
             embedding_data.target_embedding = self.target_aggregator(target_embeddings) # identity if no aggregation needed

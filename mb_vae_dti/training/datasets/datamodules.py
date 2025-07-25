@@ -487,7 +487,6 @@ class PretrainDataModule(pl.LightningDataModule):
         # Use custom collate function with PyG converter if needed
         collate_fn = None
         if self.return_pyg:
-            from functools import partial
             collate_fn = partial(pretrain_collate_fn, smiles_to_pyg_converter=self.smiles_to_pyg)
         else:
             collate_fn = partial(pretrain_collate_fn, smiles_to_pyg_converter=None)
@@ -508,7 +507,6 @@ class PretrainDataModule(pl.LightningDataModule):
         # Use custom collate function with PyG converter if needed
         collate_fn = None
         if self.return_pyg:
-            from functools import partial
             collate_fn = partial(pretrain_collate_fn, smiles_to_pyg_converter=self.smiles_to_pyg)
         else:
             collate_fn = partial(pretrain_collate_fn, smiles_to_pyg_converter=None)

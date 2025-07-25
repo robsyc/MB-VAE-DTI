@@ -1,36 +1,26 @@
-"""
-Multi-hybrid DTI PyTorch Lightning module with
-- Multi-modal input (multiple drug/target features with aggregation)
-- Multi-output prediction (DTI head for multiple simultaneous DTI score prediction)
-- Contrastive pretraining support (InfoNCE loss for individual branch pretraining)
-- Support for all training phases: pretrain_drug, pretrain_target, train, finetune
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.data import Batch
-import rdkit.Chem as Chem
 from typing import Dict, List, Optional, Any, Tuple, Literal
 import logging
-import wandb
-from tqdm import tqdm
 
-from .utils import AbstractDTIModel
-
+from .utils import *
 from mb_vae_dti.training.models import (
     ResidualEncoder, TransformerEncoder,
     ConcatAggregator, AttentiveAggregator,
-    CrossAttentionFusion
+    CrossAttentionFusion, DTIHead, InfoNCEHead, KLVariationalHead, ReconstructionHead
 )
-from mb_vae_dti.training.models.heads import DTIHead, InfoNCEHead, KLVariationalHead, ReconstructionHead
-from mb_vae_dti.training.metrics import DTIMetricsCollection, RealDTIMetrics
+from mb_vae_dti.training.data_containers import (
+    BatchData, EmbeddingData, PredictionData, LossData
+)
 
-from mb_vae_dti.training.diffusion.utils import *
+# TODO: we want to make a nice metrics collection for our graphs, just like we have DTI metrics collection
+# Items: NLL (validation loss), MolValidity (simple RDKit validation), TanimotoSimilarity (for comparing conditioned G_hat to true G)
+from mb_vae_dti.training.metrics.graph_metrics import *
 from mb_vae_dti.training.diffusion.augmentation import Augmentation
 from mb_vae_dti.training.diffusion.discrete_noise import PredefinedNoiseScheduleDiscrete, MarginalUniformTransition
 from mb_vae_dti.training.models.graph_transformer import GraphTransformer
-from mb_vae_dti.training.metrics.validation_metrics import *
+from mb_vae_dti.training.diffusion.utils import * # TODO: perhaps improve structure of this one-and-all utils file
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +32,14 @@ class FullDTIModel(AbstractDTIModel):
     Architecture:
     - Drug branch: Multiple features → Encoders → Aggregation → VAE → z → InfoNCE/DTI/Decoder
     - Target branch: Multiple features → Encoders → Aggregation → InfoNCE/DTI  
-    - Diffusion decoder: z → Graph transformer → Reconstructed molecular graph
+    - Diffusion decoder: z → Graph transformer → Reconstructed molecular graph G_hat
     - DTI prediction: Drug/Target embeddings → Fusion → DTI head → Multiple DTI scores
     
     Training phases:
     - pretrain_drug: Drug branch pretraining with InfoNCE + KL + reconstruction losses
     - pretrain_target: Target branch pretraining with InfoNCE loss
     - train: General DTI training (multi-score prediction on combined dataset)
-    - finetune: Fine-tuning on benchmark datasets (single-score prediction)
+    - finetune: Fine-tuning on benchmark datasets (single-score prediction & graph reconstruction)
     """
     def __init__(
         self,
@@ -61,10 +51,10 @@ class FullDTIModel(AbstractDTIModel):
         weight_decay: float,
         scheduler: Optional[Literal["const", "step", "one_cycle", "cosine"]],
 
-        weights: List[float],      # [accuracy, complexity, contrastive, reconstruction]
-        dti_weights: List[float],  # [Y, Y_pKd, Y_pKi, Y_KIBA]
-        diff_weights: List[int],   # [X, E]
-        contrastive_temp: float,
+        weights: List[float], # accuracy, complexity, contrastive, reconstruction
+        dti_weights: Optional[List[float]], # Y, pKd, pKi, KIBA weights
+        diff_weights: Optional[List[int]],   # [X, E]
+        contrastive_temp: Optional[float],
 
         drug_features: Dict[
             Literal["FP-Morgan", "EMB-BioMedGraph", "EMB-BioMedImg", "EMB-BioMedText"], 
@@ -116,6 +106,7 @@ class FullDTIModel(AbstractDTIModel):
         self.model_dtype = torch.float32
         self.phase = phase
         self.finetune_score = finetune_score
+        activation = self.parse_activation(activation)
         self.attentive = aggregator_type == "attentive"
 
         self.weights = weights
@@ -123,163 +114,209 @@ class FullDTIModel(AbstractDTIModel):
         self.diff_weights = diff_weights
         self.contrastive_temp = contrastive_temp
         
-        # Create encoders for processing features
-        encoder_type = ResidualEncoder if encoder_type == "resnet" else TransformerEncoder
-        self.drug_encoders = nn.ModuleDict()
-        for feat_name in drug_features:
-            self.drug_encoders[feat_name] = encoder_type(
-                input_dim=drug_features[feat_name],
-                hidden_dim=hidden_dim,
-                output_dim=hidden_dim if len(drug_features) > 1 else embedding_dim,
-                n_layers=n_layers,
-                factor=factor,
-                dropout=dropout,
-                bias=bias,
-                activation=activation
-            )
-        self.target_encoders = nn.ModuleDict()
-        for feat_name in target_features:
-            self.target_encoders[feat_name] = encoder_type(
-                input_dim=target_features[feat_name],
-                hidden_dim=hidden_dim,
-                output_dim=hidden_dim if len(target_features) > 1 else embedding_dim,
-                n_layers=n_layers,
-                factor=factor,
-                dropout=dropout,
-                bias=bias,
-                activation=activation
-            )
-        
-        # Intra-branch aggregators for merging features
-        aggregator_type = AttentiveAggregator if self.attentive else ConcatAggregator
-        self.drug_aggregator = aggregator_type(
-                input_dim=hidden_dim,
-                output_dim=embedding_dim,
-                n_features=len(drug_features),
-                dropout=dropout,
-                activation=activation
-            ) if len(drug_features) > 1 else nn.Identity()
-        self.target_aggregator = aggregator_type(
-                input_dim=hidden_dim,
-                output_dim=embedding_dim,
-                n_features=len(target_features),
-            ) if len(target_features) > 1 else nn.Identity()
-        
-        # Heads & fusion for DTI prediction
-        self.drug_kl_head = KLVariationalHead(
-            input_dim=embedding_dim,
-            proj_dim=embedding_dim,
-        )
-        self.drug_infonce_head = InfoNCEHead(
-            input_dim=embedding_dim,
-            proj_dim=hidden_dim / 2,
-            dropout=dropout,
-            bias=bias,
-            activation=activation,
-            contrastive_temp=contrastive_temp
-        )
-        self.target_infonce_head = InfoNCEHead(
-            input_dim=embedding_dim,
-            proj_dim=hidden_dim / 2,
-            dropout=dropout,
-            bias=bias,
-            activation=activation,
-            contrastive_temp=contrastive_temp
-        )
-        self.fusion = CrossAttentionFusion(
-            input_dim=embedding_dim,
-            output_dim=hidden_dim,
-            n_layers=n_layers,
-            factor=factor,
-            dropout=dropout,
-            bias=bias,
-            activation=activation
-        )
-        self.dti_head = DTIHead(
-            input_dim=hidden_dim,
-            proj_dim=hidden_dim / 2,
-            dropout=dropout,
-            bias=bias,
-            activation=activation,
-            dti_weights=dti_weights
-        )
-        self.drug_reconstruction_head = ReconstructionHead(diff_weights=diff_weights)
-
-        # Diffusion decoder
-        self.T = diffusion_steps
-        self.visualization_tools = MolecularVisualization(dataset_infos["general"]["atom_types"])
-        self.graph_converter = SmilesToPyG() # default atom and bond encodings used here bcs lazy
-        self.nodes_dist = DistributionNodes(dataset_infos["dataset"]["node_count_distribution"])
-        self.limit_dist = PlaceHolder(
-            X=torch.tensor(dataset_infos["dataset"]["node_marginals"]).to(self.device), 
-            E=torch.tensor(dataset_infos["dataset"]["edge_marginals"]).to(self.device), 
-            y=torch.ones(graph_transformer_kwargs["output_dims"]["y"]) / graph_transformer_kwargs["output_dims"]["y"]
-        )
-        self.noise_schedule = PredefinedNoiseScheduleDiscrete(timesteps=diffusion_steps)
-        self.transition_model = MarginalUniformTransition( # transition model for applying noise to clean graphs
-            x_marginals=torch.tensor(dataset_infos["dataset"]["node_marginals"]).to(self.device),
-            e_marginals=torch.tensor(dataset_infos["dataset"]["edge_marginals"]).to(self.device),
-            y_classes=graph_transformer_kwargs["output_dims"]["y"]
-        )
-        self.augmentation = Augmentation( # adds features to discretized noisy graphs
-            valencies=dataset_infos["general"]["atom_valencies"],
-            max_weight=dataset_infos["general"]["max_weight"],
-            atom_weights=dataset_infos["general"]["atom_weights"],
-            max_n_nodes=dataset_infos["general"]["max_n_nodes"]
-        )
-        self.Xdim_output = graph_transformer_kwargs['output_dims']['X']
-        self.Edim_output = graph_transformer_kwargs['output_dims']['E']
-        self.ydim_output = graph_transformer_kwargs['output_dims']['y']
-
-        assert self.ydim_output == embedding_dim
-
-        self.drug_decoder = GraphTransformer(
-            n_layers=graph_transformer_kwargs['n_layers'],
-            input_dims=graph_transformer_kwargs['input_dims'],
-            output_dims=graph_transformer_kwargs['output_dims'],
-            hidden_mlp_dims=graph_transformer_kwargs['hidden_mlp_dims'],
-            hidden_dims=graph_transformer_kwargs['hidden_dims'],
-            act_fn_in=nn.ReLU(),
-            act_fn_out=nn.ReLU()
-        )
-        
-        # Metrics based on phase
-        if phase in ["pretrain_drug", "pretrain_target"]:
-            # No specific metrics for pretraining - just log contrastive loss
-            self.train_metrics_dti = None
-            self.val_metrics_dti = None
-            self.test_metrics_dti = None
-            # TODO: need to add pretraining metrics?!
-            # TODO: need to add reconstruction metrics!!
+        # Check that the model is configured correctly
+        if phase == "finetune":
+            assert finetune_score is not None, "finetune_score must be specified for finetune phase"
+            assert dti_weights is None, "dti_weights must be None for finetune phase"
+            assert contrastive_temp is None, "contrastive_temp must be None for finetune phase"
         elif phase == "train":
-            # Multi-score metrics for general training
-            self.train_metrics_dti = DTIMetricsCollection(
-                include_binary=True,
-                include_real=True,
-                real_score_names=["pKd", "pKi", "KIBA"],
-                prefix="train/"
-            )
-            self.val_metrics_dti = DTIMetricsCollection(
-                include_binary=True,
-                include_real=True,
-                real_score_names=["pKd", "pKi", "KIBA"],
-                prefix="val/"
-            )
-            self.test_metrics_dti = DTIMetricsCollection(
-                include_binary=True,
-                include_real=True,
-                real_score_names=["pKd", "pKi", "KIBA"],
-                prefix="test/"
-            )
-        else:  # finetune
-            # Single-score metrics for fine-tuning
-            if self.finetune_score is None:
-                raise ValueError("finetune_score must be specified for finetune phase")
+            assert dti_weights is not None, "dti_weights must be specified for general DTI training"
+            assert contrastive_temp is not None, "contrastive_temp must be specified for general DTI training"
+        elif phase in ["pretrain_drug", "pretrain_target"]:
+            assert contrastive_temp is not None, "contrastive_temp must be specified for pretrain phases"
+        else:
+            raise ValueError(f"Invalid phase: {phase}")
+        
+        if phase != "pretrain_target":
+            assert diff_weights is not None, "diff_weights must be specified for instantiating the drug branch"
+            assert diffusion_steps is not None, "diffusion_steps must be specified for instantiating the drug branch"
+            assert num_samples_to_generate is not None, "num_samples_to_generate must be specified for instantiating the drug branch"
+            assert graph_transformer_kwargs is not None, "graph_transformer_kwargs must be specified for instantiating the drug branch"
+            assert dataset_infos is not None, "dataset_infos must be specified for instantiating the drug branch"
+            assert graph_transformer_kwargs["output_dims"]["y"] == embedding_dim, "embedding_dim must match y_dim of graph_transformer_kwargs"
+        
+        logger.info(f"""Full DTI model with:
+        - Drug branch: {drug_features.keys()} (dims: {drug_features.values()})
+        - Target branch: {target_features.keys()} (dims: {target_features.values()})
+        - Phase: {phase} (finetune_score: {finetune_score})
+        - Aggregator type: {aggregator_type}""")
 
-            self.train_metrics_dti = RealDTIMetrics(prefix="train/")
-            self.val_metrics_dti = RealDTIMetrics(prefix="val/")
-            self.test_metrics_dti = RealDTIMetrics(prefix="test/")
-    
+        encoder_type = ResidualEncoder if encoder_type == "resnet" else TransformerEncoder
+        aggregator_type = ConcatAggregator if aggregator_type == "concat" else AttentiveAggregator
+
+
+        # Drug branch
+        if self.phase != "pretrain_target":
+            self.drug_encoders = nn.ModuleDict()
+            for feat_name in drug_features:
+                self.drug_encoders[feat_name] = encoder_type(
+                    input_dim=drug_features[feat_name],
+                    hidden_dim=hidden_dim,
+                    output_dim=hidden_dim if len(drug_features) > 1 else embedding_dim, # individual view encoders project to hidden_dim
+                    n_layers=n_layers,
+                    factor=factor,
+                    activation=activation,
+                    dropout=dropout,
+                    bias=bias
+                )
+            if len(drug_features) > 1:
+                self.drug_aggregator = aggregator_type(
+                    input_dim=hidden_dim,
+                    n_features=len(drug_features),
+                    output_dim=embedding_dim, # but together they are aggregated to embedding_dim
+                )
+            else:
+                self.drug_aggregator = torch.nn.Identity()  # No aggregation needed for single feature
+        
+            self.drug_contrastive_head = InfoNCEHead(
+                input_dim=embedding_dim,
+                proj_dim=hidden_dim // 2,
+                dropout=dropout,
+                bias=bias,
+                activation=activation
+            )
+
+            self.drug_kl_head = KLVariationalHead(
+                input_dim=embedding_dim,
+                proj_dim=embedding_dim,
+            )
+
+            # DIFFUSION DECODER
+            self.T = diffusion_steps
+            self.visualization_tools = MolecularVisualization(dataset_infos["general"]["atom_types"])
+            self.nodes_dist = DistributionNodes(dataset_infos["dataset"]["node_count_distribution"])
+            self.limit_dist = PlaceHolder(
+                X=torch.tensor(dataset_infos["dataset"]["node_marginals"]).to(self.device), 
+                E=torch.tensor(dataset_infos["dataset"]["edge_marginals"]).to(self.device), 
+                y=torch.ones(graph_transformer_kwargs["output_dims"]["y"]) / graph_transformer_kwargs["output_dims"]["y"]
+            )
+            self.noise_schedule = PredefinedNoiseScheduleDiscrete(timesteps=diffusion_steps)
+            self.transition_model = MarginalUniformTransition( # transition model for applying noise to clean graphs
+                x_marginals=torch.tensor(dataset_infos["dataset"]["node_marginals"]).to(self.device),
+                e_marginals=torch.tensor(dataset_infos["dataset"]["edge_marginals"]).to(self.device),
+                y_classes=graph_transformer_kwargs["output_dims"]["y"]
+            )
+            self.augmentation = Augmentation( # adds features to discretized noisy graphs
+                valencies=dataset_infos["general"]["atom_valencies"],
+                max_weight=dataset_infos["general"]["max_weight"],
+                atom_weights=dataset_infos["general"]["atom_weights"],
+                max_n_nodes=dataset_infos["general"]["max_n_nodes"]
+            )
+            self.Xdim_output = graph_transformer_kwargs['output_dims']['X']
+            self.Edim_output = graph_transformer_kwargs['output_dims']['E']
+            self.ydim_output = graph_transformer_kwargs['output_dims']['y']
+
+            self.drug_decoder = GraphTransformer(
+                n_layers=graph_transformer_kwargs['n_layers'],
+                input_dims=graph_transformer_kwargs['input_dims'],
+                output_dims=graph_transformer_kwargs['output_dims'],
+                hidden_mlp_dims=graph_transformer_kwargs['hidden_mlp_dims'],
+                hidden_dims=graph_transformer_kwargs['hidden_dims'],
+                act_fn_in=nn.ReLU(),
+                act_fn_out=nn.ReLU()
+            )
+
+        # Target branch
+        if self.phase != "pretrain_drug":
+            self.target_encoders = nn.ModuleDict()
+            for feat_name in target_features:
+                self.target_encoders[feat_name] = encoder_type(
+                    input_dim=target_features[feat_name],
+                    hidden_dim=hidden_dim,
+                    output_dim=hidden_dim if len(target_features) > 1 else embedding_dim,
+                    n_layers=n_layers,
+                    factor=factor,
+                    activation=activation,
+                    dropout=dropout,
+                    bias=bias
+                )
+            if len(target_features) > 1:
+                self.target_aggregator = aggregator_type(
+                    input_dim=hidden_dim,
+                    n_features=len(target_features),
+                    output_dim=embedding_dim,
+                )
+            else:
+                self.target_aggregator = torch.nn.Identity()  # No aggregation needed for single feature
+            
+            self.target_contrastive_head = InfoNCEHead(
+                input_dim=embedding_dim,
+                proj_dim=hidden_dim // 2,
+                dropout=dropout,
+                bias=bias,
+                activation=activation
+            )
+
+        # DTI prediction
+        if phase in ["train", "finetune"]:
+            # Fusion module for aggregating drug and target embeddings
+            self.fusion = CrossAttentionFusion(
+                input_dim=embedding_dim,
+                output_dim=hidden_dim,
+                n_layers=n_layers,
+                factor=factor,
+                dropout=dropout,
+                bias=bias,
+                activation=activation
+            )
+            
+            # DTI prediction head
+            self.dti_head = DTIHead(
+                input_dim=hidden_dim,
+                proj_dim=hidden_dim // 2,
+                dropout=dropout,
+                bias=bias,
+                activation=activation
+            )
+        
+        # Setup metrics using AbstractDTIModel's method
+        self.setup_metrics(phase=phase, finetune_score=finetune_score)
+
+
+    def _create_batch_data( 
+            self, 
+            batch: Dict[str, Any]
+        ) -> BatchData:
+        """Create structured batch data using basic utilities & custom logic."""
+        batch_data = BatchData(raw_batch=batch)
+
+        # One will be None in pretrain_target/pretrain_drug case
+        batch_data.drug_features, batch_data.target_features = self._get_features_from_batch(batch)
+
+        # We want fingerprints for contrastive loss (one will be None in pretrain_target/pretrain_drug case)
+        batch_data.drug_fp, batch_data.target_fp = self._get_fingerprints_from_batch(batch)
+
+        # Only interested in targets during DTI train/finetune phase
+        if self.phase not in ["pretrain_drug", "pretrain_target"]:
+            batch_data.dti_targets, batch_data.dti_masks = self._get_targets_masks_from_batch(batch)
+        
+        # Only interested in graph data when decoder is in use
+        if self.phase != "pretrain_target":
+            batch_data.graph_data = self._extract_graph_data(batch)
+        
+        return batch_data
+
+# we can now fetch all data we need:
+# drug_features, target_features, drug_fp, target_fp
+# dti_targets, dti_masks
+# graph_data
+
+# Next steps:
+# - process graph with foward diffusion process, populating the GraphData object's G_t & noise_params
+# - encode drug and target features (incl info_nce & kl for drug) -> complexity & contrastive
+# - DTI prediction -> accuracy loss
+# - use the drug_embedding to populate the graph_data.y (conditional signal)
+# - augment features (populating GraphData G_augmented)
+# - pass to GraphTransformer decoder (populating GraphData.G_hat) -> reconstruction loss
+
+# Later steps:
+# - graph validation metrics (NLL)
+# - sampling process for conditional generation (MolValidity, TanimotoSimilarity)
+
+############################################################################
+############################################################################
+############################################################################
+
     def apply_noise(self, G, node_mask):
         """
         Apply noise to the drug graph

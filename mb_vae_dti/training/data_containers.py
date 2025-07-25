@@ -242,8 +242,7 @@ class LossData:
     
     def _get_device(self) -> torch.device:
         """Get device from first available tensor."""
-        for loss_component in [self.accuracy, self.complexity, self.contrastive, 
-                              self.reconstruction, self.nll]:
+        for loss_component in [self.accuracy, self.complexity, self.contrastive, self.reconstruction]:
             if loss_component is not None:
                 return loss_component.device
         return torch.device('cpu')

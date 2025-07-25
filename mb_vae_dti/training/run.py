@@ -322,7 +322,7 @@ def setup_model_multi_hybrid(
         model_phase = phase
     
     model = MultiHybridDTIModel(
-        phase=phase,
+        phase=model_phase,
         finetune_score=finetune_score,
 
         learning_rate=config.training.learning_rate,
@@ -343,8 +343,8 @@ def setup_model_multi_hybrid(
         encoder_type=config.model.encoder_type,
         aggregator_type=config.model.aggregator_type,
         weights=config.loss.weights,
-        dti_weights=config.loss.dti_weights if phase != "finetune" else None,
-        contrastive_temp=config.loss.contrastive_temp,
+        dti_weights=config.loss.dti_weights if phase == "train" else None,
+        contrastive_temp=config.loss.contrastive_temp if phase != "finetune" else None,
     )
     
     # Load pretrained weights if specified
@@ -380,36 +380,27 @@ def setup_model_full(
     phase: TrainingPhase = None,
     pretrain_target: PretrainTarget = None
 ):
-    """Setup full model with VAE drug branch and diffusion decoder."""
-    # Build feature dimension dictionaries
-    drug_features = {}
-    target_features = {}
-    
-    if config.data.drug_features is not None:
-        for feat_name in config.data.drug_features:
-            if feat_name in feature_dims['drug']:
-                drug_features[feat_name] = feature_dims['drug'][feat_name]
-            else:
-                raise ValueError(f"Drug feature '{feat_name}' not found in dataset")
-    
-    if config.data.target_features is not None:
-        for feat_name in config.data.target_features:
-            if feat_name in feature_dims['target']:
-                target_features[feat_name] = feature_dims['target'][feat_name]
-            else:
-                raise ValueError(f"Target feature '{feat_name}' not found in dataset")
-    
-    # Construct the correct phase value for pretrain
-    if phase == "pretrain":
-        model_phase = f"pretrain_{pretrain_target}"
-    else:
-        model_phase = phase
-    
     # Set finetune score based on phase & dataset
     if phase == "finetune":
         finetune_score = "Y_pKd" if dataset == "DAVIS" else "Y_KIBA"
     else:
         finetune_score = None
+    
+    drug_features = {name: dim for name, dim in feature_dims['drug'].items() if name in config.data.drug_features}
+    target_features = {name: dim for name, dim in feature_dims['target'].items() if name in config.data.target_features}
+
+    logger.info(f"Drug features: {drug_features}")
+    logger.info(f"Target features: {target_features}")
+    logger.info(f"Phase: {phase}")
+    logger.info(f"Finetune score: {finetune_score}")
+    
+    # Construct the correct phase value for pretrain
+    if phase == "pretrain":
+        if pretrain_target is None:
+            raise ValueError("pretrain_target must be specified for pretrain phase")
+        model_phase = f"pretrain_{pretrain_target}"
+    else:
+        model_phase = phase
     
     # Fetch dataset statistics
     if model_phase != "pretrain_target":
@@ -430,48 +421,58 @@ def setup_model_full(
         dataset_statistics = None
     
     model = FullDTIModel(
-        embedding_dim=config.model.embedding_dim,
-        drug_features=drug_features,
-        target_features=target_features,
-        encoder_type=config.model.encoder_type,
-        encoder_kwargs=OmegaConf.to_container(config.model.encoder_kwargs),
-        aggregator_type=config.model.aggregator_type,
-        aggregator_kwargs=OmegaConf.to_container(config.model.aggregator_kwargs),
-        fusion_kwargs=OmegaConf.to_container(config.model.get('fusion_kwargs', {})),
-        dti_head_kwargs=OmegaConf.to_container(config.model.get('dti_head_kwargs', {})),
-        infonce_head_kwargs=OmegaConf.to_container(config.model.get('infonce_head_kwargs', {})),
-        diffusion_steps=config.diffusion.diffusion_steps,
-        num_samples_to_generate=config.diffusion.num_samples_to_generate,
-        graph_transformer_kwargs=OmegaConf.to_container(config.model.get('graph_transformer_kwargs', {})),
-        dataset_infos=dataset_statistics,
+        phase=model_phase,
+        finetune_score=finetune_score,
+
         learning_rate=config.training.learning_rate,
         weight_decay=config.training.weight_decay,
         scheduler=config.training.scheduler,
-        phase=model_phase,
-        finetune_score=finetune_score,
-        contrastive_weight=config.model.get('contrastive_weight', 0.1),
-        complexity_weight=config.model.get('complexity_weight', 0.001),
-        accuracy_weight=config.model.get('accuracy_weight', 1.0),
-        reconstruction_weight=config.model.get('reconstruction_weight', 1.0),
-        lambda_train=config.model.get('lambda_train', [1, 5, 0]),
+
+        weights=config.loss.weights,
+        dti_weights=config.loss.dti_weights if phase == "train" else None,
+        diff_weights=config.loss.diff_weights if model_phase != "pretrain_target" else None,
+        contrastive_temp=config.loss.contrastive_temp if phase != "finetune" else None,
+
+        drug_features=drug_features,
+        target_features=target_features,
+
+        embedding_dim=config.model.embedding_dim,
+        hidden_dim=config.model.hidden_dim,
+        factor=config.model.factor,
+        n_layers=config.model.n_layers,
+        activation=config.model.activation,
+        dropout=config.model.dropout,
+        bias=config.model.bias,
+
+        encoder_type=config.model.encoder_type,
+        aggregator_type=config.model.aggregator_type,
+
+        diffusion_steps=config.diffusion.diffusion_steps if model_phase != "pretrain_target" else None,
+        num_samples_to_generate=config.diffusion.num_samples_to_generate,
+        graph_transformer_kwargs=OmegaConf.to_container(config.model.get('graph_transformer_kwargs', {})),
+        dataset_infos=dataset_statistics,
     )
     
     # Load pretrained weights if specified
+    if config.model.get('drug_checkpoint_path') is not None:
+        if os.path.exists(config.model.drug_checkpoint_path):
+            model.load_pretrained_weights(checkpoint_path=config.model.drug_checkpoint_path, prefix="drug_")
+        else:
+            logger.warning(f"Checkpoint file not found: {config.model.drug_checkpoint_path}")
+            logger.warning("Continuing without pretrained drug weights")
+    
+    if config.model.get('target_checkpoint_path') is not None:
+        if os.path.exists(config.model.target_checkpoint_path):
+            model.load_pretrained_weights(checkpoint_path=config.model.target_checkpoint_path, prefix="target_")
+        else:
+            logger.warning(f"Checkpoint file not found: {config.model.target_checkpoint_path}")
+            logger.warning("Continuing without pretrained target weights")
+    
     if config.model.get('checkpoint_path') is not None:
         if os.path.exists(config.model.checkpoint_path):
             model.load_pretrained_weights(checkpoint_path=config.model.checkpoint_path)
         else:
             logger.warning(f"Checkpoint file not found: {config.model.checkpoint_path}")
-            logger.warning("Continuing without pretrained weights")
-    elif config.model.get('drug_checkpoint_path') is not None and config.model.get('target_checkpoint_path') is not None:
-        if os.path.exists(config.model.drug_checkpoint_path) and os.path.exists(config.model.target_checkpoint_path):
-            model.load_pretrained_weights(
-                drug_checkpoint_path=config.model.drug_checkpoint_path,
-                target_checkpoint_path=config.model.target_checkpoint_path
-            )
-        else:
-            logger.warning(f"Checkpoint file not found: {config.model.drug_checkpoint_path}")
-            logger.warning(f"Checkpoint file not found: {config.model.target_checkpoint_path}")
             logger.warning("Continuing without pretrained weights")
     
     return model
