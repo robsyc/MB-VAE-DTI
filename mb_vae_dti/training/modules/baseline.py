@@ -68,10 +68,10 @@ class BaselineDTIModel(AbstractDTIModel):
         assert len(drug_features) == 1 and len(target_features) == 1, \
             "Baseline model only supports single feature for drug and target"
 
-        logger.info(f"Baseline model with:
+        logger.info(f"""Baseline model with:
         - Drug branch: {drug_features.keys()} (dims: {drug_features.values()})
         - Target branch: {target_features.keys()} (dims: {target_features.values()})
-        - Phase: {phase} (finetune_score: {finetune_score})")
+        - Phase: {phase} (finetune_score: {finetune_score})""")
 
         encoder_type = ResidualEncoder if encoder_type == "resnet" else TransformerEncoder
         
@@ -106,8 +106,8 @@ class BaselineDTIModel(AbstractDTIModel):
         ) -> BatchData:
         """Create structured batch data using basic utilities & custom logic."""
         batch_data = BatchData(raw_batch=batch)
-        batch_data.drug_feature, batch_data.target_feature = self._get_features_from_batch(batch)
-        batch_data.dti_target, batch_data.dti_mask = self._get_target_mask_from_batch(batch)
+        batch_data.drug_features, batch_data.target_features = self._get_features_from_batch(batch)
+        batch_data.dti_targets, batch_data.dti_masks = self._get_targets_masks_from_batch(batch)
         return batch_data
 
     def forward(
@@ -130,7 +130,7 @@ class BaselineDTIModel(AbstractDTIModel):
             target_embedding=self.target_encoder(target_features)
         )
         prediction_data = PredictionData(
-            score_pred=torch.sum(  # dot-product prediction of DTI score
+            dti_scores=torch.sum(  # dot-product prediction of DTI score
                 embedding_data.drug_embedding * embedding_data.target_embedding,
                 dim=-1).squeeze(-1) # (batch_size)
         )
@@ -154,20 +154,20 @@ class BaselineDTIModel(AbstractDTIModel):
         
         # Forward pass
         embedding_data, prediction_data = self.forward(
-            batch_data.drug_feature, 
-            batch_data.target_feature
+            batch_data.drug_features, 
+            batch_data.target_features
         )
         
         # Apply mask and compute loss
-        if not batch_data.dti_mask.any(): # no valid samples
+        if not batch_data.dti_masks.any(): # no valid samples
             return batch_data, embedding_data, prediction_data, LossData(accuracy=torch.tensor(0.0, device=self.device))
             
-        prediction_data.score_pred = prediction_data.score_pred[batch_data.dti_mask]
-        batch_data.dti_target = batch_data.dti_target[batch_data.dti_mask]
+        prediction_data.dti_scores = prediction_data.dti_scores[batch_data.dti_masks]
+        batch_data.dti_targets = batch_data.dti_targets[batch_data.dti_masks]
         loss_data = LossData(
             accuracy=F.mse_loss(
-                prediction_data.score_pred,
-                batch_data.dti_target
+                prediction_data.dti_scores,
+                batch_data.dti_targets
             )
         )
         
@@ -178,10 +178,10 @@ class BaselineDTIModel(AbstractDTIModel):
         batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
         
         # Update RealDTIMetrics if we have valid predictions
-        if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
+        if prediction_data.dti_scores is not None and len(prediction_data.dti_scores) > 0:
             self.train_metrics.update(
-                prediction_data.score_pred,
-                batch_data.dti_target
+                prediction_data.dti_scores,
+                batch_data.dti_targets
             )
         
         # Log MSE accuracy loss & return to trainer
@@ -193,10 +193,10 @@ class BaselineDTIModel(AbstractDTIModel):
         batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
         
         # Update RealDTIMetrics if we have valid predictions
-        if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
+        if prediction_data.dti_scores is not None and len(prediction_data.dti_scores) > 0:
             self.val_metrics.update(
-                prediction_data.score_pred,
-                batch_data.dti_target
+                prediction_data.dti_scores,
+                batch_data.dti_targets
             )
         
         # Log MSE accuracy loss & return to trainer
@@ -208,9 +208,9 @@ class BaselineDTIModel(AbstractDTIModel):
         batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
         
         # Update RealDTIMetrics if we have valid predictions
-        if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
+        if prediction_data.dti_scores is not None and len(prediction_data.dti_scores) > 0:
             self.test_metrics.update(
-                prediction_data.score_pred,
+                prediction_data.dti_scores,
                 batch_data.dti_targets
             )
         

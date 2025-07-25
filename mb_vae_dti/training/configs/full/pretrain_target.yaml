@@ -1,6 +1,69 @@
 training:
   learning_rate: 0.001
+  max_epochs: 100
+  early_stopping_patience: 12
+  gradient_clip_val: null      # Disabled - try without first (https://medium.com/@kaveh.kamali/a-beginners-guide-to-gradient-clipping-with-pytorch-lightning-c394d28e2b69)
+  weight_decay: 0.0001         # Increase if overfitting, decrease if underfitting
+  scheduler: "one_cycle"       # "const", "step", "one_cycle", or "cosine"
+
+loss:
+  weights: [0, 0.001, 1, 0] # for accuracy, complexity, contrastive, reconstruction
+  # dti_weights: [1.0, 0.903964, 0.282992, 0.755172] # for binary, pKd, pKi, KIBA (real values are weighted ~ representation in train)
+  # diff_weights: [1, 5] # for nodes X and edges E
+  contrastive_temp: 0.1
+
+data:
+  batch_size: 128
+  num_workers: 4               # increase for multi-GPU training ~ depends if bottleneck in data loading or processing
+  pin_memory: true             # Set to false for CPU training (true for GPU)
+  shuffle_train: true
+  drop_last: false             # no dropping of last batch when it is incomplete
+  load_in_memory: true
+  h5_path: "data/input/targets.h5torch" # also drugs.h5torch & targets.h5torch
+  drug_features: null # "FP-Morgan", "EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"
+  target_features: ["EMB-ESM", "EMB-NT"] # "FP-ESP", "EMB-ESM", "EMB-NT"
+
+logging:
+  project_name: "MB-VAE-DTI"
+  log_every_n_steps: 50
+  use_wandb: true
+  save_dir: "data/results/full/pretrain/target"
   
+hardware:
+  gpus: 1                      # run on cpu or set to 1 for gpu
+  precision: 32-true           # https://lightning.ai/docs/pytorch/stable/common/precision_basic.html
+  deterministic: true          # Set to False when on CPU
+  seed: 42
+
+model:
+  embedding_dim: 1024  # output representation of a drug/target encoding brach
+  hidden_dim: 512      # within-network dimensionality
+  factor: 4            # expansion / contraction factor in mlp and att blocks respectively
+  n_layers: 3          # number of residual layers in mlp and att blocks
+  activation: "relu"
+  dropout: 0.1
+  bias: true
+  # checkpoint_path: 
+  # drug_checkpoint_path: 
+  target_checkpoint_path: "data/results/full/pretrain/target/full_pretrain_target/checkpoints/best_model.ckpt"
+  drug_checkpoint_path: null
+  target_checkpoint_path: null
+
+  encoder_type: "transformer" # transformer or resnet
+  aggregator_type: "attentive" # attentive or concat
+
+  graph_transformer_kwargs:
+    n_layers: 5
+    input_dims: {'X': 16, 'E': 5, 'y': 1037} # after augmentation
+    output_dims: {'X': 8, 'E': 5, 'y': 1024} # y_output_dim == embedding_dim
+    hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 1024}
+    hidden_dims : {'dx': 256, 'de': 64, 'dy': 1024, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 1024}
+
+diffusion:
+  diffusion_steps: 500
+  num_samples_to_generate: 100 
+
+
 data:
   batch_size: 128                        # large bs for contrastive learning
   h5_path: "data/input/targets.h5torch"  # Use drug pretraining dataset
@@ -8,5 +71,4 @@ data:
   target_features: ["EMB-ESM", "EMB-NT"]
 
 logging:
-  experiment_name: "full_pretrain_target"
-  save_dir: "data/results/full/pretrain/target"
+  save_dir: 

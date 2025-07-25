@@ -206,30 +206,19 @@ class EmbeddingData:
 @dataclass
 class PredictionData:
     """Container for model predictions."""
-    # Single score prediction (for baseline/single-output models)
-    score_pred: Optional[torch.Tensor] = None
-    # Multi-score predictions (for multi-output models)
-    dti_scores: Optional[Dict[
-        Literal["Y", "Y_pKd", "Y_pKi", "Y_KIBA"], torch.Tensor
+    # DTI score predictions (single or multi-score)
+    dti_scores: Optional[Union[
+        Dict[Literal["Y", "Y_pKd", "Y_pKi", "Y_KIBA"], torch.Tensor],
+        torch.Tensor
     ]] = None
     
     # Graph predictions (for diffusion models)
     graph_reconstruction: Optional['PlaceHolder'] = None
     
-    def get_dti_score(self, kind: Literal["Y", "Y_pKd", "Y_pKi", "Y_KIBA"]) -> Optional[torch.Tensor]:
-        """Get specific DTI score prediction."""
-        if self.dti_scores is not None:
-            return self.dti_scores.get(kind)
-        elif kind in ["Y_pKd", "Y_pKi", "Y_KIBA"] and self.score_pred is not None:
-            return self.score_pred  # For baseline model
-        return None
-    
     def type_as(self, tensor: torch.Tensor) -> 'PredictionData':
         """Move all tensors to same device/dtype as reference tensor."""
         if self.dti_scores is not None:
             self.dti_scores = {k: v.type_as(tensor) for k, v in self.dti_scores.items()}
-        if self.score_pred is not None:
-            self.score_pred = self.score_pred.type_as(tensor)
         if self.graph_reconstruction is not None:
             self.graph_reconstruction = self.graph_reconstruction.type_as(tensor)
         return self
@@ -258,6 +247,20 @@ class LossData:
             if loss_component is not None:
                 return loss_component.device
         return torch.device('cpu')
+    
+    def compute_loss(self, weights: List[float]) -> torch.Tensor:
+        assert len(weights) == 4, "Weights must be a list of 4 elements (accuracy, complexity, contrastive, reconstruction)"
+        
+        device = self._get_device()
+        total_loss = torch.tensor(0.0, device=device)
+        
+        loss_components = [self.accuracy, self.complexity, self.contrastive, self.reconstruction]
+        
+        for weight, loss_component in zip(weights, loss_components):
+            if weight != 0 and loss_component is not None:
+                total_loss = total_loss + weight * loss_component
+        
+        return total_loss
 
 
 @dataclass
@@ -271,18 +274,27 @@ class BatchData:
     # Raw batch data
     raw_batch: Dict[str, Any]
     
-    # Processed components
-    drug_feature: Optional[torch.Tensor] = None
-    target_feature: Optional[torch.Tensor] = None
-    drug_features: Optional[List[torch.Tensor]] = None
-    target_features: Optional[List[torch.Tensor]] = None
+    # Extracted input features (single or multi-modal)
+    drug_features: Optional[Union[
+        torch.Tensor, 
+        List[torch.Tensor]
+    ]] = None
+    target_features: Optional[Union[
+        torch.Tensor, 
+        List[torch.Tensor]
+    ]] = None
+
     graph_data: Optional[GraphData] = None # graph data for full diffusion module
     
-    # Targets and masks
-    dti_target: Optional[torch.Tensor] = None
-    dti_mask: Optional[torch.Tensor] = None
-    dti_targets: Optional[Dict[str, torch.Tensor]] = None
-    dti_masks: Optional[Dict[str, torch.Tensor]] = None
+    # Targets and masks (single or multi-score)
+    dti_targets: Optional[Union[
+        torch.Tensor, 
+        Dict[Literal["Y", "Y_pKd", "Y_pKi", "Y_KIBA"], torch.Tensor]
+    ]] = None
+    dti_masks: Optional[Union[
+        torch.Tensor, 
+        Dict[Literal["Y_pKd", "Y_pKi", "Y_KIBA"], torch.Tensor]
+    ]] = None
     
     # Additional data
     drug_fp: Optional[torch.Tensor] = None

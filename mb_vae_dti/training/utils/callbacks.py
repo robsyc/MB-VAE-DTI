@@ -24,7 +24,7 @@ class TimingCallback(Callback):
         
     def on_train_start(self, trainer, pl_module):
         self.start_time = time.time()
-        logger.info(f"Training started at {self.start_time}")
+        logger.info(f"Training started at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.start_time))}")
         
     def on_train_epoch_start(self, trainer, pl_module):
         self.epoch_start_time = time.time()

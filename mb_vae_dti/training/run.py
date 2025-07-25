@@ -51,6 +51,7 @@ import json
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 MOLECULAR_STATISTICS_PATH = Path(__file__).parent.parent.parent / "data" / "processed" / "molecular_statistics.json"
+CONFIG_ROOT = Path(__file__).parent / "configs"
 
 from mb_vae_dti.training.datasets import DTIDataModule, PretrainDataModule
 
@@ -133,7 +134,8 @@ def get_config_path(
     phase: TrainingPhase,
     dataset: Optional[Dataset] = None,
     split: Optional[Split] = None,
-    pretrain_target: Optional[PretrainTarget] = None
+    pretrain_target: Optional[PretrainTarget] = None,
+    config_root: Optional[Path] = CONFIG_ROOT
 ) -> Path:
     """
     Get the config file path based on model type, phase, and other parameters.
@@ -149,11 +151,11 @@ def get_config_path(
         Config file path relative to training/configs/
     """
     if phase == "pretrain":
-        return f"{model}/pretrain_{pretrain_target}.yaml"
+        return config_root / f"{model}/pretrain_{pretrain_target}.yaml"
     elif phase == "train":
-        return f"{model}/pretrain_{split}.yaml"
+        return config_root / f"{model}/pretrain_{split}.yaml"
     elif phase == "finetune":
-        return f"{model}/{dataset}_{split}.yaml"
+        return config_root / f"{model}/{dataset}_{split}.yaml"
     else:
         raise ValueError(f"Unknown phase: {phase}")
 
@@ -280,16 +282,17 @@ def setup_model_multi_output(
 
     # Load pretrained weights if specified
     if config.model.get('checkpoint_path') is not None:
-        if os.path.exists(config.model.checkpoint_path):
+        try:
             model.load_pretrained_weights(checkpoint_path=config.model.checkpoint_path)
-        else:
-            logger.warning(f"Checkpoint file not found: {config.model.checkpoint_path}")
+        except Exception as e:
+            logger.warning(f"Error loading pretrained weights: {e}")
             logger.warning("Continuing without pretrained weights")
 
     return model
 
 
 def setup_model_multi_hybrid(
+        # TODO: UPDATE TO NEW MULTI-HYBRID MODEL & CONFIGS
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
     dataset: Dataset = None,
@@ -597,7 +600,7 @@ def train_single_config(
             gradient_clip_val=config.training.get('gradient_clip_val'),
             deterministic=config.hardware.get('deterministic', False),
             logger=setup_logging(config, save_dir, model_type, phase, dataset, split, pretrain_target),
-            callbacks=setup_callbacks(config, save_dir, cleanup_checkpoints=cleanup_checkpoints),
+            callbacks=setup_callbacks(config, save_dir, monitor="val/loss"),
             log_every_n_steps=config.logging.log_every_n_steps,
             enable_checkpointing=True,
             default_root_dir=str(save_dir),
@@ -618,12 +621,6 @@ def train_single_config(
             logger.info("Testing on best checkpoint...")
             trainer.test(model, data_module, ckpt_path="best")
             
-            # Save final model state dict if this is a regular run (not gridsearch/ensemble)
-            if not cleanup_checkpoints:
-                final_model_path = save_dir / "final_model.pt"
-                torch.save(model.state_dict(), final_model_path)
-                logger.info(f"Saved final model to {final_model_path}")
-            
             # Cleanup checkpoint files if requested (for gridsearch/ensemble)
             if cleanup_checkpoints:
                 checkpoint_dir = save_dir / "checkpoints"
@@ -634,7 +631,12 @@ def train_single_config(
                 if wandb_dir.exists():
                     shutil.rmtree(wandb_dir)
                     logger.info(f"Cleaned up wandb directory: {wandb_dir}")
-
+            else:
+                best_model_path = save_dir / "checkpoints" / "best_model.ckpt"
+                if best_model_path.exists():
+                    logger.info(f"Saved best model to {best_model_path}")
+                else:
+                    logger.warning("Best model not found")
 
         ###############################################################
         # Collect results
@@ -745,9 +747,9 @@ def main(args):
             
             # Ease computational load for local CPU testing
             config.logging.log_every_n_steps = 2
-            config.training.max_epochs = min(config.training.max_epochs, 2)
-            config.diffusion.diffusion_steps = min(config.diffusion.diffusion_steps, 5)
-            config.diffusion.num_samples_to_generate = min(config.diffusion.num_samples_to_generate, 2)
+            config.training.max_epochs = 2
+            config.model.diffusion_steps = 5
+            config.model.num_samples_to_generate = 2
             config.data.batch_size = min(config.data.batch_size, 8)
             config.data.pin_memory = False
             config.data.num_workers = 0

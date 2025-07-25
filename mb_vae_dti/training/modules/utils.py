@@ -273,14 +273,17 @@ class AbstractDTIModel(pl.LightningModule):
         logger.info(f"Loaded {len(pretrained_dict)} pretrained weights")
 
         # Optionally freeze encoder weights for fine-tuning
-        if hasattr(self, 'phase') and getattr(self, 'phase', None) == "finetune":
+        if self.hparams.phase == "finetune":
             self.freeze_encoders()
     
 
     def _get_features_from_batch(
         self, 
         batch: Dict[str, Any]
-    ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    ) -> Union[
+        Tuple[List[torch.Tensor], List[torch.Tensor]],
+        Tuple[torch.Tensor, torch.Tensor]
+    ]:
         """
         Extract and prepare drug and target features from batch.
         Returns Tuple of (drug_feats, target_feats) (child classes should handle list)
@@ -336,20 +339,16 @@ class AbstractDTIModel(pl.LightningModule):
             return batch["drug"]["features"]["FP-Morgan"], batch["target"]["features"]["FP-ESP"]
     
 
-    def _get_target_from_batch(self, batch: Dict[str, Any]) -> torch.Tensor:
-        """Get single target score from batch."""
-        return batch["y"][self.hparams.finetune_score].squeeze(-1)
-    
-    def _get_mask_from_batch(self, batch: Dict[str, Any]) -> torch.Tensor:
-        """Get mask from batch."""
-        return batch["y"][f"{self.hparams.finetune_score}_mask"].squeeze(-1)
-
-    def _get_target_mask_from_batch(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Get single target score and its mask from batch."""
-        return batch["y"][self.hparams.finetune_score].squeeze(-1), batch["y"][f"{self.hparams.finetune_score}_mask"].squeeze(-1)
-    
-    def _get_targets_from_batch(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
-        """Get all target scores from batch."""
+    def _get_targets_from_batch(
+            self, 
+            batch: Dict[str, Any]
+    ) -> Union[
+        torch.Tensor,
+        Dict[Literal["Y", "Y_pKd", "Y_pKi", "Y_KIBA"], torch.Tensor]
+    ]:
+        """Get target scores from batch (single or multi-score)."""
+        if self.hparams.phase == "finetune":
+            return batch["y"][self.hparams.finetune_score].squeeze(-1)
         return {
             "Y": batch["y"]["Y"].squeeze(-1),
             "Y_pKd": batch["y"]["Y_pKd"].squeeze(-1),
@@ -357,22 +356,32 @@ class AbstractDTIModel(pl.LightningModule):
             "Y_pKi": batch["y"]["Y_pKi"].squeeze(-1)
         }
     
-    def _get_masks_from_batch(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
-        """Get all target masks from batch."""
+    def _get_masks_from_batch(
+            self, 
+            batch: Dict[str, Any]
+    ) -> Dict[Literal["Y_pKd", "Y_pKi", "Y_KIBA"], torch.Tensor]:
+        """Get target masks from batch (single or multi-score)."""
+        if self.hparams.phase == "finetune":
+            return batch["y"][f"{self.hparams.finetune_score}_mask"].squeeze(-1)
         return {
-            "Y": batch["y"]["Y_mask"].squeeze(-1),
             "Y_pKd": batch["y"]["Y_pKd_mask"].squeeze(-1),
             "Y_KIBA": batch["y"]["Y_KIBA_mask"].squeeze(-1),
             "Y_pKi": batch["y"]["Y_pKi_mask"].squeeze(-1)
         }
 
-    def _get_targets_masks_from_batch(self, batch: Dict[str, Any]) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-        """Get all target scores and their masks from batch."""
+    def _get_targets_masks_from_batch(
+            self, 
+            batch: Dict[str, Any]
+    ) -> Union[
+        Tuple[torch.Tensor, torch.Tensor],
+        Tuple[Dict[Literal["Y", "Y_pKd", "Y_pKi", "Y_KIBA"], torch.Tensor], Dict[Literal["Y_pKd", "Y_pKi", "Y_KIBA"], torch.Tensor]]
+    ]:
+        """Get target scores and their masks from batch (single or multi-score)."""
         targets = self._get_targets_from_batch(batch)
         masks = self._get_masks_from_batch(batch)
         return targets, masks
     
-    
+
     def _extract_graph_data(self, batch: Dict[str, Any]) -> 'GraphData':
         """
         Extract graph data from batch and convert to dense representation.

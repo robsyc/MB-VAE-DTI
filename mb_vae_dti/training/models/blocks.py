@@ -283,17 +283,17 @@ class CrossAttentionFusion(nn.Module):
             # MLP blocks
             self.mlp_a.append(nn.Sequential(
                 nn.LayerNorm(input_dim, bias=bias),
-                nn.Linear(input_dim, input_dim * factor, bias=bias),
+                nn.Linear(input_dim, input_dim, bias=bias),
                 self.activation,
                 nn.Dropout(dropout),
-                nn.Linear(input_dim * factor, input_dim, bias=bias)
+                nn.Linear(input_dim, input_dim, bias=bias)
             ))
             self.mlp_b.append(nn.Sequential(
                 nn.LayerNorm(input_dim, bias=bias),
-                nn.Linear(input_dim, input_dim * factor, bias=bias),
+                nn.Linear(input_dim, input_dim, bias=bias),
                 self.activation,
                 nn.Dropout(dropout),
-                nn.Linear(input_dim * factor, input_dim, bias=bias)
+                nn.Linear(input_dim, input_dim, bias=bias)
             ))
 
         # Final aggregation

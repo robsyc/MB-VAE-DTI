@@ -20,18 +20,11 @@ class DTIHead(nn.Module):
             proj_dim: int,
             dropout: float,
             bias: bool,
-            activation: nn.Module,
-            dti_weights: List[float]
+            activation: nn.Module
     ):
         super().__init__()
         
         self.activation = activation
-        self.dti_weights = {
-            "Y": dti_weights[0],
-            "Y_pKd": dti_weights[1],
-            "Y_pKi": dti_weights[2],
-            "Y_KIBA": dti_weights[3]
-        }
 
         self.shared_layers = nn.Sequential(
             nn.LayerNorm(input_dim),

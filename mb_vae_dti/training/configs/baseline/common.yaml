@@ -1,9 +1,0 @@
-# Baseline Model Common Configuration
-#   These configurations are not tuned 
-#   They are shared across DAVIS/KIBA 
-#   & cold_split/random_split experiments
-
-data:
-  h5_path: "data/input/dti.h5torch"
-  drug_features: ["FP-Morgan"]
-  target_features: ["FP-ESP"]

@@ -164,7 +164,7 @@ class RealDTIMetrics(MetricCollection):
     Collection of metrics for real-valued DTI score prediction.
     
     This collection handles multiple DTI scores (pKd, pKi, KIBA) and can
-    compute metrics only for available ground truth values using masks.
+    compute metrics only for available ground truth values (update inputs should be pre-masked)
     """
     
     def __init__(self, prefix: str = ""):
@@ -202,6 +202,10 @@ class RealDTIMetrics(MetricCollection):
             preds = preds[valid_mask]
             target = target[valid_mask]
         
+        # Check if tensors are empty (equivalent to no valid samples after masking)
+        if preds.numel() == 0 or target.numel() == 0:
+            return  # No valid samples to update
+        
         # Update all metrics
         super().update(preds, target)
     
@@ -238,7 +242,7 @@ class RealDTIMetrics(MetricCollection):
 class MultiScoreRealDTIMetrics(torch.nn.Module):
     """
     Multi-score real-valued DTI metrics that can handle multiple DTI scores
-    (pKd, pKi, KIBA) simultaneously with individual masking.
+    (pKd, pKi, KIBA) simultaneously (update inputs should be pre-masked)
     """
     
     def __init__(self, score_names: List[str] = ["pKd", "pKi", "KIBA"], prefix: str = ""):
@@ -259,21 +263,19 @@ class MultiScoreRealDTIMetrics(torch.nn.Module):
             for score in score_names
         })
     
-    def update(self, preds: Dict[str, Tensor], targets: Dict[str, Tensor], masks: Dict[str, Tensor]) -> None:
+    def update(self, preds: Dict[str, Tensor], targets: Dict[str, Tensor]) -> None:
         """
         Update metrics for multiple scores.
         
         Args:
-            preds: Dict mapping score names to predicted tensors
-            targets: Dict mapping score names to target tensors  
-            masks: Dict mapping score names to validity masks
+            preds: Dict mapping score names to predicted tensors (pre-masked)
+            targets: Dict mapping score names to target tensors (pre-masked)
         """
         for score_name in self.score_names:
-            if score_name in preds and score_name in targets and score_name in masks:
+            if score_name in preds and score_name in targets:
                 self.metrics[score_name].update(
                     preds[score_name], 
-                    targets[score_name], 
-                    masks[score_name]
+                    targets[score_name]
                 )
     
     def compute(self) -> Dict[str, Tensor]:
@@ -372,8 +374,7 @@ class DTIMetricsCollection(torch.nn.Module):
     def update(
         self, 
         predictions: Dict[Literal["Y", "Y_pKi", "Y_pKd", "Y_KIBA"], Tensor],
-        targets: Dict[Literal["Y", "Y_pKi", "Y_pKd", "Y_KIBA"], Tensor],
-        masks: Dict[Literal["Y", "Y_pKi", "Y_pKd", "Y_KIBA"], Tensor]
+        targets: Dict[Literal["Y", "Y_pKi", "Y_pKd", "Y_KIBA"], Tensor]
     ) -> None:
         """
         Update all metrics.
@@ -381,7 +382,6 @@ class DTIMetricsCollection(torch.nn.Module):
         Args:
             predictions: Dict containing all predictions (Y, Y_pKi, Y_pKd, Y_KIBA)
             targets: Dict containing all targets (Y, Y_pKi, Y_pKd, Y_KIBA)
-            masks: Dict containing validity masks for each score type
         """
         # Update binary metrics with Y key
         if self.include_binary and "Y" in predictions and "Y" in targets:
@@ -391,10 +391,9 @@ class DTIMetricsCollection(torch.nn.Module):
         if self.include_real:
             real_pred_dict = {k: v for k, v in predictions.items() if k.startswith("Y_")}
             real_target_dict = {k: v for k, v in targets.items() if k.startswith("Y_")}
-            real_mask_dict = {k: v for k, v in masks.items() if k.startswith("Y_")}
             
-            if real_pred_dict and real_target_dict and real_mask_dict:
-                self.real_metrics.update(real_pred_dict, real_target_dict, real_mask_dict)
+            if real_pred_dict and real_target_dict:
+                self.real_metrics.update(real_pred_dict, real_target_dict)
                 
     def compute(self) -> Dict[str, Tensor]:
         """Compute all metrics."""

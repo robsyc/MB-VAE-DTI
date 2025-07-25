@@ -60,7 +60,7 @@ class MultiOutputDTIModel(AbstractDTIModel):
         bias: bool,
         
         encoder_type: Literal["resnet", "transformer"],
-        dti_weights: List[float] # Y, pKd, pKi, KIBA weights
+        dti_weights: Optional[List[float]] = None # Y, pKd, pKi, KIBA weights
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -72,14 +72,20 @@ class MultiOutputDTIModel(AbstractDTIModel):
 
         # Check that the model is configured correctly
         assert phase in ["finetune", "train"], "Multi-output model only supports finetune and train phases"
-        assert finetune_score is not None or phase == "train", "finetune_score must be specified for finetune phase"
+        if phase == "finetune":
+            assert finetune_score is not None, "finetune_score must be specified for finetune phase"
+        elif phase == "train":
+            assert dti_weights is not None, "dti_weights must be specified for general DTI training"
+        else:
+            raise ValueError(f"Invalid phase: {phase}")
+
         assert len(drug_features) == 1 and len(target_features) == 1, \
             "Multi-output model only supports single feature for drug and target"
 
-        logger.info(f"Multi-output model with:
+        logger.info(f"""Multi-output model with:
         - Drug branch: {drug_features.keys()} (dims: {drug_features.values()})
         - Target branch: {target_features.keys()} (dims: {target_features.values()})
-        - Phase: {phase} (finetune_score: {finetune_score})")
+        - Phase: {phase} (finetune_score: {finetune_score})""")
 
         encoder_type = ResidualEncoder if encoder_type == "resnet" else TransformerEncoder
 
@@ -134,11 +140,8 @@ class MultiOutputDTIModel(AbstractDTIModel):
         ) -> BatchData:
         """Create structured batch data using basic utilities & custom logic."""
         batch_data = BatchData(raw_batch=batch)
-        batch_data.drug_feature, batch_data.target_feature = self._get_features_from_batch(batch)
-        if self.phase == "finetune":
-            batch_data.dti_target, batch_data.dti_mask = self._get_target_mask_from_batch(batch)
-        else:
-            batch_data.dti_targets, batch_data.dti_masks = self._get_targets_masks_from_batch(batch)
+        batch_data.drug_features, batch_data.target_features = self._get_features_from_batch(batch)
+        batch_data.dti_targets, batch_data.dti_masks = self._get_targets_masks_from_batch(batch)
         return batch_data
     
     
@@ -163,15 +166,15 @@ class MultiOutputDTIModel(AbstractDTIModel):
             drug_embedding=self.drug_encoder(drug_features),
             target_embedding=self.target_encoder(target_features)
         )
-        # Aggregate features
-        embedding_data.fused_embedding = self.fusion(
+        # Aggregate features (ignore attention weights returned)
+        embedding_data.fused_embedding, _ = self.fusion(
             embedding_data.drug_embedding, 
             embedding_data.target_embedding
         )
-        # Get predictions
+        # Get predictions (extract only single score for finetune phase)
         dti_scores = self.dti_head(embedding_data.fused_embedding)
+        dti_scores = dti_scores[self.finetune_score] if self.phase == "finetune" else dti_scores
         prediction_data = PredictionData(
-            score_pred=dti_scores[self.finetune_score] if self.phase == "finetune" else None,
             dti_scores=dti_scores
         )
         return embedding_data, prediction_data
@@ -195,21 +198,24 @@ class MultiOutputDTIModel(AbstractDTIModel):
         
         # Forward pass
         embedding_data, prediction_data = self.forward(
-            batch_data.drug_feature, 
-            batch_data.target_feature
+            batch_data.drug_features, 
+            batch_data.target_features
         )
 
         # Apply mask(s) and compute loss(es)
         if self.phase == "finetune":
-            if not batch_data.dti_mask.any(): # no valid samples
-                return batch_data, embedding_data, prediction_data, LossData(accuracy=torch.tensor(0.0, device=self.device))
+            if not batch_data.dti_masks.any(): # no valid samples
+                return batch_data, embedding_data, prediction_data, LossData(
+                    accuracy=torch.tensor(0.0, device=self.device)
+                )
             
-            prediction_data.score_pred = prediction_data.score_pred[batch_data.dti_mask]
-            batch_data.dti_target = batch_data.dti_target[batch_data.dti_mask]
+            prediction_data.dti_scores = prediction_data.dti_scores[batch_data.dti_masks]
+            batch_data.dti_targets = batch_data.dti_targets[batch_data.dti_masks]
+
             loss_data = LossData(
                 accuracy=F.mse_loss(
-                    prediction_data.score_pred,
-                    batch_data.dti_target
+                    prediction_data.dti_scores,
+                    batch_data.dti_targets
                 )
             )
         else:
@@ -222,11 +228,13 @@ class MultiOutputDTIModel(AbstractDTIModel):
             
             # Continuous target losses (when data available)
             for score_name in ["Y_pKd", "Y_pKi", "Y_KIBA"]:
-                if batch_data.dti_masks[score_name].any():
-                    valid_mask = batch_data.dti_masks[score_name]
-                    pred = prediction_data.dti_scores[score_name][valid_mask]
-                    true = batch_data.dti_targets[score_name][valid_mask]
-                    components[score_name] = F.mse_loss(pred, true)
+                valid_mask = batch_data.dti_masks[score_name]
+                prediction_data.dti_scores[score_name] = prediction_data.dti_scores[score_name][valid_mask]
+                batch_data.dti_targets[score_name] = batch_data.dti_targets[score_name][valid_mask]
+                components[score_name] = F.mse_loss(
+                    prediction_data.dti_scores[score_name],
+                    batch_data.dti_targets[score_name]
+                ) if valid_mask.any() else torch.tensor(0.0, device=self.device)
             
             # Compute weighted total accuracy loss
             total_accuracy = sum(
@@ -248,17 +256,16 @@ class MultiOutputDTIModel(AbstractDTIModel):
         
         # Update metrics & log loss(es) based on phase
         if self.phase == "finetune":
-            if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
+            if prediction_data.dti_scores is not None and len(prediction_data.dti_scores) > 0:
                 self.train_metrics.update(
-                    prediction_data.score_pred, # were masked in _common_step
-                    batch_data.dti_target
+                    prediction_data.dti_scores, # were masked in _common_step
+                    batch_data.dti_targets
                 )
         else: # general DTI training with DTIMetricsCollection
             if prediction_data.dti_scores is not None:
                 self.train_metrics.update(
                     prediction_data.dti_scores,
-                    batch_data.dti_targets,
-                    batch_data.dti_masks
+                    batch_data.dti_targets
                 )
             for name, value in loss_data.components.items():
                 self.log(f"train/loss_{name}", value)
@@ -273,17 +280,16 @@ class MultiOutputDTIModel(AbstractDTIModel):
         
         # Update metrics based on phase
         if self.phase == "finetune":
-            if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
+            if prediction_data.dti_scores is not None and len(prediction_data.dti_scores) > 0:
                 self.val_metrics.update(
-                    prediction_data.score_pred, # were masked in _common_step
-                    batch_data.dti_target
+                    prediction_data.dti_scores, # were masked in _common_step
+                    batch_data.dti_targets
                 )
         else: # general DTI training with DTIMetricsCollection
             if prediction_data.dti_scores is not None:
                 self.val_metrics.update(
                     prediction_data.dti_scores,
-                    batch_data.dti_targets,
-                    batch_data.dti_masks
+                    batch_data.dti_targets
                 )
             for name, value in loss_data.components.items():
                 self.log(f"val/loss_{name}", value)
@@ -298,17 +304,16 @@ class MultiOutputDTIModel(AbstractDTIModel):
         
         # Update metrics based on phase
         if self.phase == "finetune":
-            if prediction_data.score_pred is not None and len(prediction_data.score_pred) > 0:
+            if prediction_data.dti_scores is not None and len(prediction_data.dti_scores) > 0:
                 self.test_metrics.update(
-                    prediction_data.score_pred, # were masked in _common_step
-                    batch_data.dti_target
+                    prediction_data.dti_scores, # were masked in _common_step
+                    batch_data.dti_targets
                 )
         else: # general DTI training with DTIMetricsCollection
             if prediction_data.dti_scores is not None:
                 self.test_metrics.update(
                     prediction_data.dti_scores,
-                    batch_data.dti_targets,
-                    batch_data.dti_masks
+                    batch_data.dti_targets
                 )
             for name, value in loss_data.components.items():
                 self.log(f"test/loss_{name}", value)
