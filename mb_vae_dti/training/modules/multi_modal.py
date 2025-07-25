@@ -76,7 +76,8 @@ class MultiModalDTIModel(AbstractDTIModel):
         logger.info(f"""Multi-modal model with:
         - Drug branch: {drug_features.keys()} (dims: {drug_features.values()})
         - Target branch: {target_features.keys()} (dims: {target_features.values()})
-        - Phase: {phase} (finetune_score: {finetune_score})""")
+        - Phase: {phase} (finetune_score: {finetune_score})
+        - Aggregator type: {aggregator_type}""")
 
         encoder_type = ResidualEncoder if encoder_type == "resnet" else TransformerEncoder
 
@@ -150,8 +151,8 @@ class MultiModalDTIModel(AbstractDTIModel):
         Forward pass through the multi-modal two-tower model.
         
         Args:
-            drug_features: Drug feature tensor [batch_size, drug_input_dim]
-            target_features: Target feature tensor [batch_size, target_input_dim]
+            drug_features: Drug feature tensors [batch_size, drug_input_dim]
+            target_features: Target feature tensors [batch_size, target_input_dim]
             
         Returns:
             embedding_data: Structured drug & target embeddings (and attention weights if using attentive aggregator)
@@ -209,7 +210,10 @@ class MultiModalDTIModel(AbstractDTIModel):
         batch_data = self._create_batch_data(batch)
         
         # Forward pass
-        embedding_data, prediction_data = self.forward(batch_data.drug_features, batch_data.target_features)
+        embedding_data, prediction_data = self.forward(
+            batch_data.drug_features, 
+            batch_data.target_features
+        )
         
         # Apply mask and compute loss
         if not batch_data.dti_masks.any(): # no valid samples

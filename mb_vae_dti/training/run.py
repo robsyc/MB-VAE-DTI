@@ -261,7 +261,7 @@ def setup_model_multi_output(
     model = MultiOutputDTIModel(
         phase=phase,
         finetune_score=finetune_score,
-        dti_weights=config.loss.dti_weights,
+        dti_weights=config.loss.dti_weights if phase != "finetune" else None,
 
         learning_rate=config.training.learning_rate,
         weight_decay=config.training.weight_decay,
