@@ -12,7 +12,7 @@ Organization:
 - dti_metrics.py: Drug-target interaction evaluation
 """
 
-from .validation_metrics import (
+from .graph_metrics import (
     NLL,
     SumExceptBatchKL,
     SumExceptBatchMetric
@@ -28,6 +28,7 @@ from .dti_metrics import (
 )
 
 # Simplified diffusion metrics collection
+# TODO: move this into graph_metrics.py
 class DiffusionMetrics:
     """Simplified collection of diffusion-related metrics."""
     
