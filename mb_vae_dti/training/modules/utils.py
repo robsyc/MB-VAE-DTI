@@ -17,10 +17,7 @@ from mb_vae_dti.training.data_containers import (
 )
 
 # Diffusion utilities - only imported when needed for complex models
-try:
-    from mb_vae_dti.training.diffusion.utils import PlaceHolder, to_dense
-except ImportError:
-    PlaceHolder = to_dense = None
+from mb_vae_dti.training.diffusion.utils import PlaceHolder, to_dense
 
 
 logger = logging.getLogger(__name__)
@@ -322,7 +319,7 @@ class AbstractDTIModel(pl.LightningModule):
         if self.hparams.phase == "pretrain_drug":
             return batch["representations"]["smiles"] # pretrain dataloader
         else:
-            return batch["drug"]["representations"]["SMILES"]
+            return batch["drug"]["representations"]["smiles"]
     
     def _get_fingerprints_from_batch(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -387,6 +384,8 @@ class AbstractDTIModel(pl.LightningModule):
         
         Handles both DTI batches (batch["drug"]["G"]) and pretrain batches (batch["G"]).
         Only available when diffusion modules are imported.
+
+        NOTE: graph data X & E are NOT masked, but the node_mask is returned
         """
         if to_dense is None:
             raise ImportError("Graph data extraction requires diffusion modules")
@@ -411,7 +410,7 @@ class AbstractDTIModel(pl.LightningModule):
             )
             graph_data.X = dense_data.X
             graph_data.E = dense_data.E
-            graph_data.y = dense_data.y  # Will be replaced with drug_embedding later
+            # graph_data.y = dense_data.y  # Will be replaced with drug_embedding later
             graph_data.node_mask = node_mask
         
         return graph_data
@@ -424,13 +423,6 @@ class AbstractDTIModel(pl.LightningModule):
             for name, value in train_metrics.items():
                 self.log(name, value)
             self.train_metrics.reset()
-            
-        # Handle diffusion metrics if present
-        if self.train_diffusion_metrics is not None:
-            train_diffusion_metrics = self.train_diffusion_metrics.compute()
-            for name, value in train_diffusion_metrics.items():
-                self.log(name, value)
-            self.train_diffusion_metrics.reset()
     
     def on_validation_epoch_end(self):
         """Compute and log validation metrics."""
@@ -439,13 +431,6 @@ class AbstractDTIModel(pl.LightningModule):
             for name, value in val_metrics.items():
                 self.log(name, value)
             self.val_metrics.reset()
-            
-        # Handle diffusion metrics if present
-        if self.val_diffusion_metrics is not None:
-            val_diffusion_metrics = self.val_diffusion_metrics.compute()
-            for name, value in val_diffusion_metrics.items():
-                self.log(name, value)
-            self.val_diffusion_metrics.reset()
     
     def on_test_epoch_end(self):
         """Compute and log test metrics."""
@@ -454,10 +439,3 @@ class AbstractDTIModel(pl.LightningModule):
             for name, value in test_metrics.items():
                 self.log(name, value)
             self.test_metrics.reset()
-            
-        # Handle diffusion metrics if present
-        if self.test_diffusion_metrics is not None:
-            test_diffusion_metrics = self.test_diffusion_metrics.compute()
-            for name, value in test_diffusion_metrics.items():
-                self.log(name, value)
-            self.test_diffusion_metrics.reset()

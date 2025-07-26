@@ -59,6 +59,7 @@ model:
     hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 1024}
     hidden_dims : {'dx': 256, 'de': 64, 'dy': 1024, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 1024}
 
-diffusion:
   diffusion_steps: 500
-  num_samples_to_generate: 100 
+  sample_every_val: 5
+  val_samples_per_embedding: 3
+  test_samples_per_embedding: 5

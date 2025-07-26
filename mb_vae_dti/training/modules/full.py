@@ -3,6 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, List, Optional, Any, Tuple, Literal
 import logging
+import wandb
+import rdkit.Chem as Chem
+from tqdm import tqdm
 
 from .utils import *
 from mb_vae_dti.training.models import (
@@ -14,7 +17,8 @@ from mb_vae_dti.training.data_containers import (
     BatchData, EmbeddingData, PredictionData, LossData
 )
 
-from mb_vae_dti.training.metrics.graph_metrics import *
+from mb_vae_dti.training.metrics.graph_metrics import NLL, SumExceptBatchKL, SumExceptBatchMetric
+from mb_vae_dti.training.metrics.molecular_metrics import TrainMolecularMetricsDiscrete, ValidationMolecularMetrics
 from mb_vae_dti.training.diffusion.augmentation import ExtraFeatures, ExtraMolecularFeatures
 from mb_vae_dti.training.diffusion.discrete_noise import PredefinedNoiseScheduleDiscrete, MarginalUniformTransition
 from mb_vae_dti.training.models.graph_transformer import GraphTransformer
@@ -75,7 +79,9 @@ class FullDTIModel(AbstractDTIModel):
         
         # Diffusion decoder parameters
         diffusion_steps: int,
-        num_samples_to_generate: int,
+        sample_every_val: int,
+        val_samples_per_embedding: int,
+        test_samples_per_embedding: int,
         graph_transformer_kwargs: Optional[Dict],
         dataset_infos: Dict[str, Any]
         # Shape of dataset_infos:
@@ -128,10 +134,12 @@ class FullDTIModel(AbstractDTIModel):
         if phase != "pretrain_target":
             assert diff_weights is not None, "diff_weights must be specified for instantiating the drug branch"
             assert diffusion_steps is not None, "diffusion_steps must be specified for instantiating the drug branch"
-            assert num_samples_to_generate is not None, "num_samples_to_generate must be specified for instantiating the drug branch"
             assert graph_transformer_kwargs is not None, "graph_transformer_kwargs must be specified for instantiating the drug branch"
             assert dataset_infos is not None, "dataset_infos must be specified for instantiating the drug branch"
             assert graph_transformer_kwargs["output_dims"]["y"] == embedding_dim, "embedding_dim must match y_dim of graph_transformer_kwargs"
+            assert sample_every_val is not None, "sample_every_val must be specified for instantiating the drug branch"
+            assert val_samples_per_embedding is not None, "val_samples_per_embedding must be specified for instantiating the drug branch"
+            assert test_samples_per_embedding is not None, "test_samples_per_embedding must be specified for instantiating the drug branch"
         
         logger.info(f"""Full DTI model with:
         - Drug branch: {drug_features.keys()} (dims: {drug_features.values()})
@@ -181,9 +189,9 @@ class FullDTIModel(AbstractDTIModel):
 
             # DIFFUSION DECODER
             self.T = diffusion_steps
-            self.sample_every_val = 5
-            self.val_samples_per_embedding = 3 # TODO: these are new!
-            self.test_samples_per_embedding = 1
+            self.sample_every_val = sample_every_val
+            self.val_samples_per_embedding = val_samples_per_embedding
+            self.test_samples_per_embedding = test_samples_per_embedding
             self.reconstruction_head = ReconstructionHead(diff_weights)
             self.visualization_tools = MolecularVisualization(dataset_infos["general"]["atom_types"])
             self.nodes_dist = DistributionNodes(dataset_infos["dataset"]["node_count_distribution"])
@@ -279,18 +287,40 @@ class FullDTIModel(AbstractDTIModel):
 
         # Diffusion specific metrics
         if phase != "pretrain_target":
-            # val_nll = ... # collection of NLL components & total NLL (log_pN, kl_prior, loss_all_t, loss_term_0)
-            # test_nll = ...
-            # train_mol_metrics = ... # cross-entropy terms over atom/bond types (gives insight into the actual train loss (which is just sum of these))
-            # val_mol_metrics = ... # collection of molecular metrics (validity, tanimoto, accuracy)
-            # test_mol_metrics = ...
-            pass
+            self.val_nll = NLL()
+            self.val_X_kl = SumExceptBatchKL()
+            self.val_E_kl = SumExceptBatchKL()
+            self.val_X_logp = SumExceptBatchMetric()
+            self.val_E_logp = SumExceptBatchMetric()
+
+            self.test_nll = NLL()
+            self.test_X_kl = SumExceptBatchKL()
+            self.test_E_kl = SumExceptBatchKL()
+            self.test_X_logp = SumExceptBatchMetric()
+            self.test_E_logp = SumExceptBatchMetric()
+            
+            # Molecular metrics following the pattern
+            self.train_mol = TrainMolecularMetricsDiscrete(
+                atom_types=dataset_infos["general"]["atom_types"]
+            )
+            self.val_mol = ValidationMolecularMetrics(prefix="val/")
+            self.test_mol = ValidationMolecularMetrics(prefix="test/")
         else:
             self.val_nll = None
+            self.val_X_kl = None
+            self.val_E_kl = None
+            self.val_X_logp = None
+            self.val_E_logp = None
+
             self.test_nll = None
-            self.train_mol_metrics = None
-            self.val_mol_metrics = None
-            self.test_mol_metrics = None
+            self.test_X_kl = None
+            self.test_E_kl = None
+            self.test_X_logp = None
+            self.test_E_logp = None
+
+            self.train_mol = None
+            self.val_mol = None
+            self.test_mol = None
 
 
     def _create_batch_data( 
@@ -381,7 +411,7 @@ class FullDTIModel(AbstractDTIModel):
 
     def apply_noise(self, X, E, node_mask):
         """
-        Apply noise to the drug graph
+        Samples random timestep t and applies noise to the drug graph
         Args:
             X: Node features
             E: Edge features
@@ -389,7 +419,9 @@ class FullDTIModel(AbstractDTIModel):
         Returns:
             X_t: Noisy node features
             E_t: Noisy edge features
-            noise_params: Noise parameters sampled from the noise schedule
+            noise_params: Noise parameters sampled from the noise schedule used to generate G_t
+        
+        NOTE: mask is applied to noisy G_t (not to original X or E)
         """
         # Sample timestep t (uniformly from [0, T])
         lowest_t = 0 if self.training else 1
@@ -496,139 +528,8 @@ class FullDTIModel(AbstractDTIModel):
         return G_hat # pre-masked PlaceHolder object
 
 
-    def _common_step(
-        self, 
-        batch: Dict[str, Any]
-    ) -> Tuple[BatchData, EmbeddingData, PredictionData, LossData]:
-        """
-        Common step logic shared across train/val/test.
-        
-        Returns:
-            batch_data: Structured batch data incl. targets, masks, and graph data
-            embedding_data: Structured embeddings (incl. variational components)
-            prediction_data: Structured predictions (DTI + graph reconstruction)
-            loss_data: All loss components (accuracy, complexity, contrastive, reconstruction)
-        """
-        # Create structured batch data (includes graph extraction if needed)
-        batch_data = self._create_batch_data(batch)
-        
-        # Apply forward diffusion process (add noise to clean graphs)
-        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
-            # Apply noise to clean graph G -> G_t (X_t, E_t)
-            batch_data.graph_data.X_t, \
-            batch_data.graph_data.E_t, \
-            batch_data.graph_data.noise_params = self.apply_noise(
-                batch_data.graph_data.X, 
-                batch_data.graph_data.E, 
-                batch_data.graph_data.node_mask
-            )
-            
-            # Augment noisy graph with extra features
-            batch_data.graph_data.X_extra, \
-            batch_data.graph_data.y_extra = self.get_extra_features(
-                batch_data.graph_data.X_t, 
-                batch_data.graph_data.E_t, 
-                batch_data.graph_data.noise_params, 
-                batch_data.graph_data.node_mask
-            )
 
 
-        # Forward pass (encoders + DTI prediction)
-        embedding_data, prediction_data = self.forward(
-            batch_data.drug_features, 
-            batch_data.target_features
-        )
-
-        # Graph reconstruction using diffusion decoder
-        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
-            prediction_data.graph_reconstruction = self.denoise_drug_graph(
-                embedding_data, 
-                batch_data
-            )
-
-        # Compute all loss components
-        loss_data = LossData()
-
-        # 1. Complexity loss (KL divergence for VAE) - only for the drug branch
-        if self.phase != "pretrain_target":
-            loss_data.complexity = self.drug_kl_head.kl_divergence(
-                embedding_data.drug_mu, 
-                embedding_data.drug_logvar
-            )
-        else:
-            loss_data.complexity = torch.tensor(0.0, device=self.device)
-
-        # 2. Contrastive losses - skipped when finetuning
-        drug_contrastive_loss = self.drug_contrastive_head(
-            x=embedding_data.drug_embedding,
-            fingerprints=batch_data.drug_fp,
-            temperature=self.contrastive_temp
-        ) if self.phase not in ["pretrain_target", "finetune"] else torch.tensor(0.0, device=self.device)
-
-        target_contrastive_loss = self.target_contrastive_head(
-            x=embedding_data.target_embedding,
-            fingerprints=batch_data.target_fp,
-            temperature=self.contrastive_temp
-        ) if self.phase not in ["pretrain_drug", "finetune"] else torch.tensor(0.0, device=self.device)
-        
-        loss_data.contrastive = drug_contrastive_loss + target_contrastive_loss
-        loss_data.components = {
-            "drug_contrastive": drug_contrastive_loss,
-            "target_contrastive": target_contrastive_loss
-        }
-
-        # 3. Reconstruction loss (diffusion decoder)
-        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
-            loss_data.reconstruction = self.reconstruction_head(
-                masked_pred_X=prediction_data.graph_reconstruction.X,
-                masked_pred_E=prediction_data.graph_reconstruction.E,
-                true_X=batch_data.graph_data.X,
-                true_E=batch_data.graph_data.E
-            )
-        else:
-            loss_data.reconstruction = torch.tensor(0.0, device=self.device)
-
-        # 4. Accuracy loss (DTI prediction)
-        if self.phase not in ["pretrain_drug", "pretrain_target"]:
-            if self.phase == "finetune":
-                # mask
-                prediction_data.dti_scores = prediction_data.dti_scores[batch_data.dti_masks]
-                batch_data.dti_targets = batch_data.dti_targets[batch_data.dti_masks]
-                if batch_data.dti_masks.any():
-                    # single score accuracy loss
-                    loss_data.accuracy = F.mse_loss(
-                        prediction_data.dti_scores,
-                        batch_data.dti_targets
-                    )
-                else:
-                    loss_data.accuracy = torch.tensor(0.0, device=self.device)
-            else:  # phase == "train"
-                # Multi-score accuracy loss
-                components = {
-                    "Y": F.binary_cross_entropy_with_logits(
-                        prediction_data.dti_scores["Y"],
-                        batch_data.dti_targets["Y"]
-                    )
-                }
-                
-                # Continuous target losses (when data available)
-                for score_name in ["Y_pKd", "Y_pKi", "Y_KIBA"]:
-                    valid_mask = batch_data.dti_masks[score_name]
-                    prediction_data.dti_scores[score_name] = prediction_data.dti_scores[score_name][valid_mask]
-                    batch_data.dti_targets[score_name] = batch_data.dti_targets[score_name][valid_mask]
-                    components[score_name] = F.mse_loss(
-                        prediction_data.dti_scores[score_name],
-                        batch_data.dti_targets[score_name]
-                    ) if valid_mask.any() else torch.tensor(0.0, device=self.device)
-                
-                # Compute weighted total accuracy loss
-                loss_data.accuracy = sum(
-                    self.dti_weights[i] * loss 
-                    for i, (score_name, loss) in enumerate(components.items())
-                )
-                loss_data.components.update(components)
-        
-        return batch_data, embedding_data, prediction_data, loss_data
 
 
     def kl_prior(self, batch_data: BatchData) -> torch.Tensor:
@@ -733,16 +634,9 @@ class FullDTIModel(AbstractDTIModel):
             node_mask=node_mask
         )
         
-        # Use metrics from the model for consistency
-        # TODO: integrate this better into the loss components?
-        # may again want to log these individually & return total logp?
-        if test:
-            # We'll need to add these metrics - for now use a simple KL calculation
-            kl_x = F.kl_div(torch.log(prob_pred_X + 1e-8), prob_true_X, reduction='sum')
-            kl_e = F.kl_div(torch.log(prob_pred_E + 1e-8), prob_true_E, reduction='sum')
-        else:
-            kl_x = F.kl_div(torch.log(prob_pred_X + 1e-8), prob_true_X, reduction='sum')
-            kl_e = F.kl_div(torch.log(prob_pred_E + 1e-8), prob_true_E, reduction='sum')
+        # Compute KL divergence between true and predicted posteriors
+        kl_x = (self.test_X_kl if test else self.val_X_kl)(prob_true.X, torch.log(prob_pred.X))
+        kl_e = (self.test_E_kl if test else self.val_E_kl)(prob_true.E, torch.log(prob_pred.E))
             
         return self.T * (kl_x + kl_e)
 
@@ -750,7 +644,8 @@ class FullDTIModel(AbstractDTIModel):
     def reconstruction_logp(
         self, 
         batch_data: BatchData, 
-        embedding_data: EmbeddingData
+        embedding_data: EmbeddingData,
+        test: bool = False
     ) -> torch.Tensor:
         """
         Compute reconstruction probability at t=0.
@@ -812,13 +707,7 @@ class FullDTIModel(AbstractDTIModel):
         diag_mask = diag_mask.unsqueeze(0).expand(probE0.size(0), -1, -1)
         probE0[diag_mask] = torch.ones(self.Edim_output).type_as(probE0)
 
-        # Compute log probabilities
-        X_logp = (X * probX0.log()).sum()
-        E_logp = (E * probE0.log()).sum()
-
-        # TODO: log these individually & return total logp?
-        
-        return X_logp + E_logp
+        return probX0, probE0
 
 
     def compute_val_loss(
@@ -850,18 +739,165 @@ class FullDTIModel(AbstractDTIModel):
         loss_all_t = self.compute_Lt(batch_data, prediction_data, test)
 
         # 4. Reconstruction loss at t=0
-        loss_term_0 = self.reconstruction_logp(batch_data, embedding_data)
+        probX0, probE0 = self.reconstruction_logp(batch_data, embedding_data, test)
+        loss_term_0 = self.val_X_logp(batch_data.graph_data.X * probX0.log()) + self.val_E_logp(batch_data.graph_data.E * probE0.log())
 
         # Combine terms
         nlls = -log_pN + kl_prior + loss_all_t - loss_term_0
         assert len(nlls.shape) == 1, f'{nlls.shape} has more than only batch dim.'
 
         # Return average NLL over batch
-        nll = nlls.mean()
+        nll = (self.test_nll if test else self.val_nll)(nlls)
 
-        # TODO: we want to log the NLL components here & return total nll
+        return nll, {
+            "kl prior": kl_prior.mean(),
+            "Estimator loss terms": loss_all_t.mean(),
+            "log_pn": log_pN.mean(),
+            "loss_term_0": loss_term_0,
+            'batch_test_nll' if test else 'val_nll': nll
+        }
+
+
+    def _common_step(
+        self, 
+        batch: Dict[str, Any],
+        step: Literal["train", "val", "test"]
+    ) -> Tuple[BatchData, EmbeddingData, PredictionData, LossData]:
+        """
+        Common step logic shared across train/val/test.
         
-        return nll
+        Returns:
+            batch_data: Structured batch data incl. targets, masks, and graph data
+            embedding_data: Structured embeddings (incl. variational components)
+            prediction_data: Structured predictions (DTI + graph reconstruction)
+            loss_data: All loss components (accuracy, complexity, contrastive, reconstruction)
+        """
+        # Create structured batch data (includes graph extraction if needed)
+        batch_data = self._create_batch_data(batch)
+        
+        # Apply forward diffusion process (add noise to clean graphs)
+        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
+            # Apply noise to clean graph G -> G_t (X_t, E_t)
+            batch_data.graph_data.X_t, \
+            batch_data.graph_data.E_t, \
+            batch_data.graph_data.noise_params = self.apply_noise(
+                batch_data.graph_data.X, 
+                batch_data.graph_data.E, 
+                batch_data.graph_data.node_mask
+            )
+            # Augment noisy graph with extra features
+            batch_data.graph_data.X_extra, \
+            batch_data.graph_data.y_extra = self.get_extra_features(
+                batch_data.graph_data.X_t, 
+                batch_data.graph_data.E_t, 
+                batch_data.graph_data.noise_params, 
+                batch_data.graph_data.node_mask
+            )
+
+
+        # Forward pass (encoders + DTI prediction)
+        embedding_data, prediction_data = self.forward(
+            batch_data.drug_features, 
+            batch_data.target_features
+        )
+        # Graph reconstruction using diffusion decoder
+        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
+            prediction_data.graph_reconstruction = self.denoise_drug_graph(
+                embedding_data, 
+                batch_data
+            )
+        # Compute all loss components
+        loss_data = LossData()
+
+        # 1. Complexity loss (KL divergence for VAE) - only for the drug branch
+        if self.phase != "pretrain_target":
+            loss_data.complexity = self.drug_kl_head.kl_divergence(
+                embedding_data.drug_mu, 
+                embedding_data.drug_logvar
+            )
+        else:
+            loss_data.complexity = torch.tensor(0.0, device=self.device)
+
+        # 2. Contrastive losses - skipped when finetuning
+        drug_contrastive_loss = self.drug_contrastive_head(
+            x=embedding_data.drug_embedding,
+            fingerprints=batch_data.drug_fp,
+            temperature=self.contrastive_temp
+        ) if self.phase not in ["pretrain_target", "finetune"] else torch.tensor(0.0, device=self.device)
+
+        target_contrastive_loss = self.target_contrastive_head(
+            x=embedding_data.target_embedding,
+            fingerprints=batch_data.target_fp,
+            temperature=self.contrastive_temp
+        ) if self.phase not in ["pretrain_drug", "finetune"] else torch.tensor(0.0, device=self.device)
+        
+        loss_data.contrastive = drug_contrastive_loss + target_contrastive_loss
+        loss_data.components = {
+            "drug_contrastive": drug_contrastive_loss,
+            "target_contrastive": target_contrastive_loss
+        }
+
+        # 3. Reconstruction loss (diffusion decoder)
+        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
+            if step == "train":
+                loss_data.reconstruction = self.reconstruction_head(
+                    masked_pred_X=prediction_data.graph_reconstruction.X,
+                    masked_pred_E=prediction_data.graph_reconstruction.E,
+                    true_X=batch_data.graph_data.X,
+                    true_E=batch_data.graph_data.E
+                )
+            else:
+                loss_data.reconstruction, nll_components = self.compute_val_loss(
+                    batch_data,
+                    embedding_data,
+                    prediction_data,
+                    test=step == "test"
+                )
+                loss_data.components.update(nll_components)
+        else:
+            loss_data.reconstruction = torch.tensor(0.0, device=self.device)
+                
+        # 4. Accuracy loss (DTI prediction)
+        if self.phase not in ["pretrain_drug", "pretrain_target"]:
+            if self.phase == "finetune":
+                # mask
+                prediction_data.dti_scores = prediction_data.dti_scores[batch_data.dti_masks]
+                batch_data.dti_targets = batch_data.dti_targets[batch_data.dti_masks]
+                if batch_data.dti_masks.any():
+                    # single score accuracy loss
+                    loss_data.accuracy = F.mse_loss(
+                        prediction_data.dti_scores,
+                        batch_data.dti_targets
+                    )
+                else:
+                    loss_data.accuracy = torch.tensor(0.0, device=self.device)
+            else:  # phase == "train"
+                # Multi-score accuracy loss
+                components = {
+                    "Y": F.binary_cross_entropy_with_logits(
+                        prediction_data.dti_scores["Y"],
+                        batch_data.dti_targets["Y"]
+                    )
+                }
+                
+                # Continuous target losses (when data available)
+                for score_name in ["Y_pKd", "Y_pKi", "Y_KIBA"]:
+                    valid_mask = batch_data.dti_masks[score_name]
+                    prediction_data.dti_scores[score_name] = prediction_data.dti_scores[score_name][valid_mask]
+                    batch_data.dti_targets[score_name] = batch_data.dti_targets[score_name][valid_mask]
+                    components[score_name] = F.mse_loss(
+                        prediction_data.dti_scores[score_name],
+                        batch_data.dti_targets[score_name]
+                    ) if valid_mask.any() else torch.tensor(0.0, device=self.device)
+                
+                # Compute weighted total accuracy loss
+                loss_data.accuracy = sum(
+                    self.dti_weights[i] * loss 
+                    for i, (score_name, loss) in enumerate(components.items())
+                )
+                loss_data.components.update(components)
+                
+        return batch_data, embedding_data, prediction_data, loss_data
 
 
     @torch.no_grad()
@@ -870,7 +906,7 @@ class FullDTIModel(AbstractDTIModel):
         drug_embeddings: torch.Tensor, 
         num_nodes: torch.Tensor = None,
         num_samples_per_embedding: int = 1
-    ) -> list:
+    ) -> List[List[Optional[Chem.Mol]]]:
         """
         Sample molecules by iteratively denoising from limit distribution, conditioned on drug embeddings.
         
@@ -880,16 +916,17 @@ class FullDTIModel(AbstractDTIModel):
             num_samples_per_embedding: Number of molecular samples to generate per drug embedding
             
         Returns:
-            List of RDKit molecule objects (or None for invalid molecules)
+            List of lists of RDKit molecule objects, grouped by original embedding
+            Shape: [original_batch_size][num_samples_per_embedding]
         """
         if self.phase == "pretrain_target":
             return []
             
-        batch_size = drug_embeddings.size(0)
+        original_batch_size = drug_embeddings.size(0)
         
         # Sample number of nodes if not provided
         if num_nodes is None:
-            n_nodes = self.nodes_dist.sample_n(batch_size, device=self.device)
+            n_nodes = self.nodes_dist.sample_n(original_batch_size, device=self.device)
         else:
             n_nodes = num_nodes.to(self.device)
         
@@ -897,14 +934,14 @@ class FullDTIModel(AbstractDTIModel):
         if num_samples_per_embedding > 1:
             drug_embeddings = drug_embeddings.repeat_interleave(num_samples_per_embedding, dim=0)
             n_nodes = n_nodes.repeat_interleave(num_samples_per_embedding)
-            batch_size = batch_size * num_samples_per_embedding
         
+        batch_size = original_batch_size * num_samples_per_embedding
         n_max = torch.max(n_nodes).item()
         
         # Build node masks
         arange = torch.arange(n_max, device=self.device).unsqueeze(0).expand(batch_size, -1)
         node_mask = arange < n_nodes.unsqueeze(1)
-        
+
         # Sample initial noise from limit distribution
         z_T = sample_discrete_feature_noise(limit_dist=self.limit_dist, node_mask=node_mask)
         X, E = z_T.X, z_T.E # we don't use sampled y but drug_embeddings
@@ -912,11 +949,17 @@ class FullDTIModel(AbstractDTIModel):
         assert (E == torch.transpose(E, 1, 2)).all()
         
         # Iteratively sample p(z_s | z_t) for t = T, T-1, ..., 1 with s = t - 1
-        for s_int in reversed(range(0, self.T)):
+        timesteps = list(reversed(range(0, self.T)))
+        progress_bar = tqdm(timesteps, desc="Denoising molecules", leave=False)
+        
+        for s_int in progress_bar:
             s_array = s_int * torch.ones((batch_size, 1), dtype=torch.float32, device=self.device)
             t_array = s_array + 1
             s_norm = s_array / self.T
             t_norm = t_array / self.T
+            
+            # Update progress bar description with current timestep
+            progress_bar.set_postfix({'timestep': f'{s_int+1}/{self.T}'})
             
             # Sample z_s given z_t
             sampled_s = self.sample_p_zs_given_zt(
@@ -931,7 +974,7 @@ class FullDTIModel(AbstractDTIModel):
         sampled_s = sampled_s.mask(node_mask, collapse=True)
         X, E = sampled_s.X, sampled_s.E
         
-        # Convert to RDKit molecules
+        # Convert to RDKit molecules (flat list first)
         molecules = []
         for i in range(batch_size):
             n = n_nodes[i]
@@ -945,7 +988,17 @@ class FullDTIModel(AbstractDTIModel):
                 # If molecule conversion fails, append None
                 molecules.append(None)
         
-        return molecules
+        # Group molecules by original embedding
+        # molecules = [mol1_1, mol1_2, mol2_1, mol2_2, mol3_1, mol3_2]
+        # grouped = [[mol1_1, mol1_2], [mol2_1, mol2_2], [mol3_1, mol3_2]]
+        grouped_molecules = []
+        for i in range(original_batch_size):
+            start_idx = i * num_samples_per_embedding
+            end_idx = start_idx + num_samples_per_embedding
+            group = molecules[start_idx:end_idx]
+            grouped_molecules.append(group)
+        
+        return grouped_molecules
 
 
     def sample_p_zs_given_zt(
@@ -960,6 +1013,10 @@ class FullDTIModel(AbstractDTIModel):
         """
         Sample from p(z_s | z_t) for one denoising step, conditioned on drug embeddings.
         Adapted from DiGress/DiffMS for our conditional setup.
+
+        Important technical note on diffusion: our model learns to map G_t to G_0,
+        to do this in a step-wise manner, we always add back noise the predicted G_o to get the new G_t
+        and then repeat the process. This is why we always G -> noise -> discretize -> augment -> G_t -> predict -> G -> ...
         
         Args:
             s: Normalized timestep s [batch_size, 1]
@@ -1062,7 +1119,7 @@ class FullDTIModel(AbstractDTIModel):
 
 
     def training_step(self, batch: Dict[str, Any], batch_idx: int):
-        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
+        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch, step="train")
         
         # Update metrics & log loss(es) based on phase
         if self.phase not in ["pretrain_drug", "pretrain_target"]:
@@ -1071,30 +1128,38 @@ class FullDTIModel(AbstractDTIModel):
                     prediction_data.dti_scores, # were masked in _common_step
                     batch_data.dti_targets
                 )
-            for name, value in loss_data.components.items():
-                self.log(f"train/loss_{name}", value)
         
-        # TODO: Add diffusion metrics here for molecular validity, etc.
-        # Update diffusion metrics if available
-        # if self.train_diffusion_metrics is not None:
-        #     self.train_diffusion_metrics.update(
-        #         prediction_data.graph_reconstruction, 
-        #         batch_data.graph_data
-        #     )
+        # Update molecular training metrics (cross-entropy over atom/bond types)
+        if self.phase != "pretrain_target" and batch_data.graph_data is not None and self.train_mol is not None:
+            self.train_mol.update(
+                masked_pred_X=prediction_data.graph_reconstruction.X,
+                masked_pred_E=prediction_data.graph_reconstruction.E,
+                true_X=batch_data.graph_data.X,
+                true_E=batch_data.graph_data.E
+            )
+
+        # Log all loss components
+        for name, value in loss_data.components.items():
+            self.log(f"train/loss_{name}", value)
 
         # Compute total loss and log individual components
         loss = loss_data.compute_loss(self.weights)
         
-        self.log("train/loss_accuracy", loss_data.accuracy) if loss_data.accuracy is not None else None
-        self.log("train/loss_complexity", loss_data.complexity) if loss_data.complexity is not None else None
-        self.log("train/loss_contrastive", loss_data.contrastive) if loss_data.contrastive is not None else None
-        self.log("train/loss_reconstruction", loss_data.reconstruction) if loss_data.reconstruction is not None else None
+        if loss_data.accuracy is not None:
+            self.log("train/loss_accuracy", loss_data.accuracy)
+        if loss_data.complexity is not None:
+            self.log("train/loss_complexity", loss_data.complexity)
+        if loss_data.contrastive is not None:
+            self.log("train/loss_contrastive", loss_data.contrastive)
+        if loss_data.reconstruction is not None:
+            self.log("train/loss_reconstruction", loss_data.reconstruction)
         self.log("train/loss", loss)
         
         return loss
     
+
     def validation_step(self, batch: Dict[str, Any], batch_idx: int):
-        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
+        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch, step="val")
         
         # Update metrics & log loss(es) based on phase
         if self.phase not in ["pretrain_drug", "pretrain_target"]:
@@ -1103,16 +1168,8 @@ class FullDTIModel(AbstractDTIModel):
                     prediction_data.dti_scores, # were masked in _common_step
                     batch_data.dti_targets
                 )
-            for name, value in loss_data.components.items():
-                self.log(f"val/loss_{name}", value)
         
-        # Compute NLL for diffusion validation (when graph data is available)
-        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
-            nll = self.compute_val_loss(
-                batch_data, embedding_data, 
-                prediction_data, test=False)
-            self.log("val/nll", nll)
-            
+        if self.phase != "pretrain_target" and batch_data.graph_data is not None:    
             # Sample molecules periodically for molecular metrics
             # This is expensive, so we only do it every few epochs
             # TODO: instead of every few epochs, perhaps (also) every n validation steps?
@@ -1122,32 +1179,35 @@ class FullDTIModel(AbstractDTIModel):
                     drug_embeddings=embedding_data.drug_embedding,
                     num_samples_per_embedding=self.val_samples_per_embedding
                 )
-                target_molecules = [
-                    Chem.MolFromSmiles(smiles) for smiles in batch_data.smiles
-                ]
-                # TODO: Look into these molecular metrics
-                # valid/invalid, tanimoto sim w/ ground truth, exact match w/ ground truth
-                # self.val_diffusion_metrics.update_all(generated_molecules, target_molecules)
+                if self.val_mol is not None:
+                    self.val_mol.update(
+                        generated_mols=generated_molecules,
+                        target_smiles=batch_data.smiles,
+                        target_fps=batch_data.drug_fp
+                    )
         
-        # if self.val_diffusion_metrics is not None:
-        #     self.val_diffusion_metrics.update(
-        #         prediction_data.graph_reconstruction, 
-        #         batch_data.graph_data
-        #     )
+        # Log all loss components
+        for name, value in loss_data.components.items():
+            self.log(f"val/loss_{name}", value)
 
         # Compute total loss and log individual components
         loss = loss_data.compute_loss(self.weights)
         
-        self.log("val/loss_accuracy", loss_data.accuracy) if loss_data.accuracy is not None else None
-        self.log("val/loss_complexity", loss_data.complexity) if loss_data.complexity is not None else None
-        self.log("val/loss_contrastive", loss_data.contrastive) if loss_data.contrastive is not None else None
-        self.log("val/loss_reconstruction", loss_data.reconstruction) if loss_data.reconstruction is not None else None
+        if loss_data.accuracy is not None:
+            self.log("val/loss_accuracy", loss_data.accuracy)
+        if loss_data.complexity is not None:
+            self.log("val/loss_complexity", loss_data.complexity)
+        if loss_data.contrastive is not None:
+            self.log("val/loss_contrastive", loss_data.contrastive)
+        if loss_data.reconstruction is not None:
+            self.log("val/loss_reconstruction", loss_data.reconstruction)
         self.log("val/loss", loss)
         
         return loss
     
+
     def test_step(self, batch: Dict[str, Any], batch_idx: int):
-        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
+        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch, step="test")
         
         # Update metrics & log loss(es) based on phase
         if self.phase not in ["pretrain_drug", "pretrain_target"]:
@@ -1156,41 +1216,91 @@ class FullDTIModel(AbstractDTIModel):
                     prediction_data.dti_scores, # were masked in _common_step
                     batch_data.dti_targets
                 )
-            for name, value in loss_data.components.items():
-                self.log(f"test/loss_{name}", value)
         
-        # Compute NLL for diffusion testing (when graph data is available)
         if self.phase != "pretrain_target" and batch_data.graph_data is not None:
-            nll = self.compute_val_loss(batch_data, embedding_data, prediction_data, test=True)
-            self.log("test/nll", nll)
-            
-            # Sample molecules for molecular metrics during testing
-            # We always sample during testing since it's less frequent than validation
+            # Sample molecules from limit distribution -> clean graph G
+            # Conditionally on drug embeddings
             generated_molecules = self.sample_batch(
                 drug_embeddings=embedding_data.drug_embedding,
                 num_samples_per_embedding=self.test_samples_per_embedding
             )
-            target_molecules = [
-                Chem.MolFromSmiles(smiles) for smiles in batch_data.smiles
-            ]
-            # TODO: we may need to repeat the target molecules because we generate test_samples_per_embedding per true molecule
-            # TODO: Look into these molecular metrics
-            # self.test_diffusion_metrics.update_all(generated_molecules, target_molecules)
-        
-        # Update diffusion metrics if available (already handled above)
-        # if self.test_diffusion_metrics is not None:
-        #     self.test_diffusion_metrics.update(
-        #         prediction_data.graph_reconstruction, 
-        #         batch_data.graph_data
-        #     )
+            if self.test_mol is not None:
+                self.test_mol.update(
+                    generated_mols=generated_molecules,
+                    target_smiles=batch_data.smiles,
+                    target_fps=batch_data.drug_fp
+                )
+
+        # Log all loss components
+        for name, value in loss_data.components.items():
+            self.log(f"test/loss_{name}", value)
 
         # Compute total loss and log individual components
         loss = loss_data.compute_loss(self.weights)
         
-        self.log("test/loss_accuracy", loss_data.accuracy)
-        self.log("test/loss_complexity", loss_data.complexity)
-        self.log("test/loss_contrastive", loss_data.contrastive)
-        self.log("test/loss_reconstruction", loss_data.reconstruction)
+        if loss_data.accuracy is not None:
+            self.log("test/loss_accuracy", loss_data.accuracy)
+        if loss_data.complexity is not None:
+            self.log("test/loss_complexity", loss_data.complexity)
+        if loss_data.contrastive is not None:
+            self.log("test/loss_contrastive", loss_data.contrastive)
+        if loss_data.reconstruction is not None:
+            self.log("test/loss_reconstruction", loss_data.reconstruction)
         self.log("test/loss", loss)
         
         return loss
+
+
+    def on_train_epoch_end(self):
+        """Override to add diffusion-specific epoch end logging."""
+        super().on_train_epoch_end()
+
+        if self.phase != "pretrain_target":
+            train_mol_metrics = self.train_mol.compute()
+            for key, value in train_mol_metrics.items():
+                self.log(key, value)
+            self.train_mol.reset()
+
+    def on_validation_epoch_end(self):
+        """Override to add diffusion-specific epoch end logging."""
+        super().on_validation_epoch_end()
+        
+        if self.phase != "pretrain_target":
+            val_mol_metrics = self.val_mol.compute()
+            for key, value in val_mol_metrics.items():
+                self.log(key, value)
+            
+            self.log("val/epoch_NLL", self.val_nll.compute())
+            self.log("val/X_kl", self.val_X_kl.compute() * self.T)
+            self.log("val/E_kl", self.val_E_kl.compute() * self.T)
+            self.log("val/X_logp", self.val_X_logp.compute())
+            self.log("val/E_logp", self.val_E_logp.compute())
+            
+            self.val_mol.reset()
+            self.val_nll.reset()
+            self.val_X_kl.reset()
+            self.val_E_kl.reset()
+            self.val_X_logp.reset()
+            self.val_E_logp.reset()
+
+    def on_test_epoch_end(self):
+        """Override to add diffusion-specific epoch end logging."""
+        super().on_test_epoch_end()
+        
+        if self.phase != "pretrain_target":
+            test_mol_metrics = self.test_mol.compute()
+            for key, value in test_mol_metrics.items():
+                self.log(key, value)
+
+            self.log("test/epoch_NLL", self.test_nll.compute())
+            self.log("test/X_kl", self.test_X_kl.compute() * self.T)
+            self.log("test/E_kl", self.test_E_kl.compute() * self.T)
+            self.log("test/X_logp", self.test_X_logp.compute())
+            self.log("test/E_logp", self.test_E_logp.compute())
+            
+            self.test_mol.reset()
+            self.test_nll.reset()
+            self.test_X_kl.reset()
+            self.test_E_kl.reset()
+            self.test_X_logp.reset()
+            self.test_E_logp.reset()

@@ -447,9 +447,11 @@ def setup_model_full(
         encoder_type=config.model.encoder_type,
         aggregator_type=config.model.aggregator_type,
 
-        diffusion_steps=config.diffusion.diffusion_steps if model_phase != "pretrain_target" else None,
-        num_samples_to_generate=config.diffusion.num_samples_to_generate,
-        graph_transformer_kwargs=OmegaConf.to_container(config.model.get('graph_transformer_kwargs', {})),
+        diffusion_steps=config.model.diffusion_steps if model_phase != "pretrain_target" else None,
+        sample_every_val=config.model.sample_every_val if model_phase != "pretrain_target" else None,
+        val_samples_per_embedding=config.model.val_samples_per_embedding if model_phase != "pretrain_target" else None,
+        test_samples_per_embedding=config.model.test_samples_per_embedding if model_phase != "pretrain_target" else None,
+        graph_transformer_kwargs=OmegaConf.to_container(config.model.get('graph_transformer_kwargs', {})) if model_phase != "pretrain_target" else None,
         dataset_infos=dataset_statistics,
     )
     
@@ -750,7 +752,9 @@ def main(args):
             config.logging.log_every_n_steps = 2
             config.training.max_epochs = 2
             config.model.diffusion_steps = 5
-            config.model.num_samples_to_generate = 2
+            config.model.sample_every_val = 5
+            config.model.val_samples_per_embedding = 1
+            config.model.test_samples_per_embedding = 2
             config.data.batch_size = min(config.data.batch_size, 8)
             config.data.pin_memory = False
             config.data.num_workers = 0

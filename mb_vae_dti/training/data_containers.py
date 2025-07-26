@@ -134,14 +134,10 @@ class PredictionData:
 class LossData:
     """Container for different loss components with phase-aware computation."""
     # Core loss components
-    accuracy: Optional[torch.Tensor] = None       # DTI prediction loss
+    accuracy: Optional[torch.Tensor] = None       # DTI prediction loss (or NLL for val/test)
     complexity: Optional[torch.Tensor] = None     # KL divergence (VAE)
     contrastive: Optional[torch.Tensor] = None    # InfoNCE loss
-    reconstruction: Optional[torch.Tensor] = None # Graph reconstruction loss
-    
-    # Validation-specific loss (NLL)
-    # TODO: this one is very tricky! We may still need to revise this
-    # nll: Optional[torch.Tensor] = None
+    reconstruction: Optional[torch.Tensor] = None # Graph reconstruction loss / NLL
     
     # Individual components for detailed logging
     components: Dict[str, torch.Tensor] = field(default_factory=dict)
@@ -177,7 +173,7 @@ class BatchData:
     regardless of the specific batch format (DTI vs pretrain).
     """
     # Raw batch data
-    raw_batch: Dict[str, Any]
+    raw_batch: Optional[Dict[str, Any]] = None
     
     # Extracted input features (single or multi-modal)
     drug_features: Optional[Union[
