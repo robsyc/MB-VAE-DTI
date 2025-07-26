@@ -314,15 +314,14 @@ class MultiHybridDTIModel(AbstractDTIModel):
                 # mask
                 prediction_data.dti_scores = prediction_data.dti_scores[batch_data.dti_masks]
                 batch_data.dti_targets = batch_data.dti_targets[batch_data.dti_masks]
-                # handle no valid samples
-                if not batch_data.dti_masks.any(): # no valid samples
-                    loss_data.accuracy = torch.tensor(0.0, device=self.device)
-                else:
+                if batch_data.dti_masks.any():
                     # single score accuracy loss
                     loss_data.accuracy = F.mse_loss(
                         prediction_data.dti_scores,
                         batch_data.dti_targets
                     )
+                else: # no valid samples
+                    loss_data.accuracy = torch.tensor(0.0, device=self.device)
             else: # phase == "train"
                 components = {
                     "Y": F.binary_cross_entropy_with_logits( # binary always present
@@ -342,12 +341,10 @@ class MultiHybridDTIModel(AbstractDTIModel):
                     ) if valid_mask.any() else torch.tensor(0.0, device=self.device)
                 
                 # Compute weighted total accuracy loss
-                total_accuracy = sum(
+                loss_data.accuracy = sum(
                     self.dti_weights[i] * loss 
                     for i, (score_name, loss) in enumerate(components.items())
                 )
-                
-                loss_data.accuracy = total_accuracy
                 loss_data.components.update(components)
         
         return batch_data, embedding_data, prediction_data, loss_data
@@ -371,7 +368,7 @@ class MultiHybridDTIModel(AbstractDTIModel):
         loss = loss_data.compute_loss(self.weights)
         
         # Log finetune/DTI training loss and return to trainer
-        self.log("train/loss_contrastive", loss_data.contrastive)
+        self.log("train/loss_contrastive", loss_data.contrastive) if loss_data.contrastive is not None else None
         self.log("train/loss_accuracy", loss_data.accuracy) if loss_data.accuracy is not None else None
         self.log("train/loss", loss)
         return loss

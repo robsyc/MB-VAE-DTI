@@ -10,35 +10,35 @@ import torch
 
 from .utils import PlaceHolder
 
-class Augmentation:
-    def __init__(
-            self,
-            valencies,
-            max_weight,
-            atom_weights,
-            max_n_nodes = 64
-    ):
-        self.extra_graph_features = ExtraFeatures(max_n_nodes=max_n_nodes)
-        self.extra_molecular_features = ExtraMolecularFeatures(
-            valencies=valencies,
-            max_weight=max_weight,
-            atom_weights=atom_weights
-        )
+# class Augmentation:
+#     def __init__(
+#             self,
+#             valencies,
+#             max_weight,
+#             atom_weights,
+#             max_n_nodes = 64
+#     ):
+#         self.extra_graph_features = ExtraFeatures(max_n_nodes=max_n_nodes)
+#         self.extra_molecular_features = ExtraMolecularFeatures(
+#             valencies=valencies,
+#             max_weight=max_weight,
+#             atom_weights=atom_weights
+#         )
     
-    def __call__(self, G_t, node_mask):
-        """
-        Compute both graph-structural features and molecular features,
-        then combine them into a single PlaceHolder.
-        """
-        graph_features = self.extra_graph_features(G_t.E, node_mask)
-        molecular_features = self.extra_molecular_features(G_t)
+#     def __call__(self, X_t, E_t, node_mask):
+#         """
+#         Compute both graph-structural features and molecular features,
+#         then combine them into a single PlaceHolder.
+#         """
+#         graph_features = self.extra_graph_features(E_t, node_mask)
+#         molecular_features = self.extra_molecular_features(X_t, E_t)
         
-        # Combine the features
-        combined_X = torch.cat((graph_features.X, molecular_features.X), dim=-1)
-        combined_E = torch.cat((graph_features.E, molecular_features.E), dim=-1)
-        combined_y = torch.cat((graph_features.y, molecular_features.y), dim=-1)
+#         # Combine the features
+#         combined_X = torch.cat((graph_features.X, molecular_features.X), dim=-1)
+#         combined_E = torch.cat((graph_features.E, molecular_features.E), dim=-1)
+#         combined_y = torch.cat((graph_features.y, molecular_features.y), dim=-1)
         
-        return PlaceHolder(X=combined_X, E=combined_E, y=combined_y)
+#         return PlaceHolder(X=combined_X, E=combined_E, y=combined_y)
 
 ##################################################################################
 # Descriptive graph features (cycles, spectral features)
@@ -50,18 +50,20 @@ class ExtraFeatures:
         self.eigenfeatures = EigenFeatures()
 
     def __call__(self, E_t, node_mask):
+
         n = node_mask.sum(dim=1).unsqueeze(1) / self.max_n_nodes
+
         x_cycles, y_cycles = self.ncycles(E_t, node_mask)       # (bs, n_cycles)
 
-        eigenfeatures = self.eigenfeatures(E_t, node_mask)
-        extra_edge_attr = torch.zeros((*E_t.shape[:-1], 0)).type_as(E_t)
-        n_components, batched_eigenvalues, nonlcc_indicator, k_lowest_eigvec = eigenfeatures
-        # (bs, 1), (bs, 10), (bs, n, 1), (bs, n, 2)
+        n_components, batched_eigenvalues, nonlcc_indicator, k_lowest_eigvec = self.eigenfeatures(
+            E_t, node_mask
+        ) # (bs, 1), (bs, 10), (bs, n, 1), (bs, n, 2)
 
-        return PlaceHolder(
-            X=torch.cat((x_cycles, nonlcc_indicator, k_lowest_eigvec), dim=-1),
-            E=extra_edge_attr,
-            y=torch.hstack((n, y_cycles, n_components, batched_eigenvalues)))
+        X_extra = torch.cat((x_cycles, nonlcc_indicator, k_lowest_eigvec), dim=-1) # (bs, n, 1 + 1 + 2)
+        y_extra = torch.hstack((n, y_cycles, n_components, batched_eigenvalues))
+        # E_extra = torch.zeros((*E_t.shape[:-1], 0)).type_as(E_t)
+
+        return X_extra, y_extra
 
 
 class NodeCycleFeatures:
@@ -292,41 +294,45 @@ class ExtraMolecularFeatures:
         self.valency = ValencyFeature()
         self.weight = WeightFeature(max_weight=max_weight, atom_weights=atom_weights)
 
-    def __call__(self, G_t):
-        charge = self.charge(G_t).unsqueeze(-1)      # (bs, n, 1)
-        valency = self.valency(G_t).unsqueeze(-1)    # (bs, n, 1)
-        weight = self.weight(G_t)                    # (bs, 1)
+    def __call__(self, X_t, E_t):
 
-        extra_edge_attr = torch.zeros((*G_t.E.shape[:-1], 0)).type_as(G_t.E)
+        X_extra = torch.cat((
+            self.charge(X_t, E_t).unsqueeze(-1),      # (bs, n, 1)
+            self.valency(X_t, E_t).unsqueeze(-1)      # (bs, n, 1)
+        ), dim=-1)
 
-        return PlaceHolder(X=torch.cat((charge, valency), dim=-1), E=extra_edge_attr, y=weight)
+        y_extra = self.weight(X_t, E_t)                    # (bs, 1)
+
+        # E_extra = torch.zeros((*E_t.shape[:-1], 0)).type_as(E_t)
+
+        return X_extra, y_extra
 
 
 class ChargeFeature:
     def __init__(self, valencies):
         self.valencies = valencies
 
-    def __call__(self, G_t):
-        bond_orders = torch.tensor([0, 1, 2, 3, 1.5], device=G_t.E.device).reshape(1, 1, 1, -1)
-        weighted_E = G_t.E * bond_orders      # (bs, n, n, de)
+    def __call__(self, X_t, E_t):
+        bond_orders = torch.tensor([0, 1, 2, 3, 1.5], device=E_t.device).reshape(1, 1, 1, -1)
+        weighted_E = E_t * bond_orders      # (bs, n, n, de)
         current_valencies = weighted_E.argmax(dim=-1).sum(dim=-1)   # (bs, n)
 
-        valencies = torch.tensor(self.valencies, device=G_t.X.device).reshape(1, 1, -1)
-        X = G_t.X * valencies  # (bs, n, dx)
+        valencies = torch.tensor(self.valencies, device=X_t.device).reshape(1, 1, -1)
+        X = X_t * valencies  # (bs, n, dx)
         normal_valencies = torch.argmax(X, dim=-1)               # (bs, n)
 
-        return (normal_valencies - current_valencies).type_as(G_t.X)
+        return (normal_valencies - current_valencies).type_as(X_t)
 
 
 class ValencyFeature:
     def __init__(self):
         pass
 
-    def __call__(self, G_t):
-        orders = torch.tensor([0, 1, 2, 3, 1.5], device=G_t.E.device).reshape(1, 1, 1, -1)
-        E = G_t.E * orders      # (bs, n, n, de)
+    def __call__(self, X_t, E_t):
+        orders = torch.tensor([0, 1, 2, 3, 1.5], device=E_t.device).reshape(1, 1, 1, -1)
+        E = E_t * orders      # (bs, n, n, de)
         valencies = E.argmax(dim=-1).sum(dim=-1)    # (bs, n)
-        return valencies.type_as(G_t.X)
+        return valencies.type_as(X_t)
 
 
 class WeightFeature:
@@ -334,7 +340,7 @@ class WeightFeature:
         self.max_weight = max_weight
         self.atom_weight_list = torch.tensor(atom_weights)
 
-    def __call__(self, G_t):
-        X = torch.argmax(G_t.X, dim=-1)         # (bs, n)
+    def __call__(self, X_t, E_t):
+        X = torch.argmax(X_t, dim=-1)         # (bs, n)
         X_weights = self.atom_weight_list.to(X.device)[X]   # (bs, n)
-        return X_weights.sum(dim=-1).unsqueeze(-1).type_as(G_t.X) / self.max_weight     # (bs, 1)
+        return X_weights.sum(dim=-1).unsqueeze(-1).type_as(X_t) / self.max_weight     # (bs, 1)

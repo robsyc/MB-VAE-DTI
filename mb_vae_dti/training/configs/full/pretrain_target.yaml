@@ -62,13 +62,3 @@ model:
 diffusion:
   diffusion_steps: 500
   num_samples_to_generate: 100 
-
-
-data:
-  batch_size: 128                        # large bs for contrastive learning
-  h5_path: "data/input/targets.h5torch"  # Use drug pretraining dataset
-  drug_features: null
-  target_features: ["EMB-ESM", "EMB-NT"]
-
-logging:
-  save_dir: 

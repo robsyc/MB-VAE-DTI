@@ -179,7 +179,6 @@ class AbstractDTIModel(pl.LightningModule):
             finetune_score: Score to fine-tune on (required for finetune phase)
         """
         from mb_vae_dti.training.metrics import DTIMetricsCollection, RealDTIMetrics
-        # TODO: add metrics for diffusion models -> validation NLL & molecular validity
         
         if phase in ["pretrain_drug", "pretrain_target"]:
             # No specific metrics for pretraining - just log contrastive loss

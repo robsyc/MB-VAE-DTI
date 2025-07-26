@@ -11,11 +11,12 @@ Especially the utils resources need to be refactored.
 """
 
 from .discrete_noise import PredefinedNoiseScheduleDiscrete, MarginalUniformTransition
-from .augmentation import Augmentation
+from .augmentation import ExtraFeatures, ExtraMolecularFeatures
 # from .utils import ...
 
 __all__ = [
     "PredefinedNoiseScheduleDiscrete",
     "MarginalUniformTransition",
-    "Augmentation",
+    "ExtraFeatures",
+    "ExtraMolecularFeatures",
 ] 

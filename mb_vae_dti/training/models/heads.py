@@ -246,21 +246,30 @@ class ReconstructionHead(nn.Module):
     """
     def __init__(self, diff_weights: List[int]):
         super().__init__()
+        assert len(diff_weights) == 2, "Reconstruction head expects 2 weights for X and E"
         self.diff_weights = diff_weights
 
-    def forward(self, pred: PlaceHolder, true: PlaceHolder) -> torch.Tensor:
+    def forward(
+            self, 
+            masked_pred_X: torch.Tensor, 
+            masked_pred_E: torch.Tensor, 
+            true_X: torch.Tensor, 
+            true_E: torch.Tensor, 
+        ) -> torch.Tensor:
         """
         Args:
-            pred: Predicted masked graph X, E
-            true: True graph X, E
+            masked_pred_X: Predicted masked graph X
+            masked_pred_E: Predicted masked graph E
+            true_X: True graph X
+            true_E: True graph E
         
         Returns:
             loss: Reconstruction loss (scalar) weighted by diff_weights
         """
-        true_X = torch.reshape(true.X, (-1, true.X.size(-1)))  # (bs * n, dx)
-        true_E = torch.reshape(true.E, (-1, true.E.size(-1)))  # (bs * n * n, de)
-        masked_pred_X = torch.reshape(pred.X, (-1, pred.X.size(-1)))  # (bs * n, dx)
-        masked_pred_E = torch.reshape(pred.E, (-1, pred.E.size(-1)))   # (bs * n * n, de)
+        true_X = torch.reshape(true_X, (-1, true_X.size(-1)))  # (bs * n, dx)
+        true_E = torch.reshape(true_E, (-1, true_E.size(-1)))  # (bs * n * n, de)
+        masked_pred_X = torch.reshape(masked_pred_X, (-1, masked_pred_X.size(-1)))  # (bs * n, dx)
+        masked_pred_E = torch.reshape(masked_pred_E, (-1, masked_pred_E.size(-1)))   # (bs * n * n, de)
 
         # Remove masked rows
         mask_X = (true_X != 0.).any(dim=-1)
