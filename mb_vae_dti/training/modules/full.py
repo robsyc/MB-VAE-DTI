@@ -385,139 +385,353 @@ class FullDTIModel(AbstractDTIModel):
     
     def forward(
         self, 
-        drug_features: List[torch.Tensor], 
-        target_features: List[torch.Tensor],
-        G_t: PlaceHolder,
-        node_mask: torch.Tensor
-    ) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        drug_features: Optional[List[torch.Tensor]], 
+        target_features: Optional[List[torch.Tensor]]
+    ) -> Tuple[EmbeddingData, PredictionData]:
         """
-        Forward pass through the multi-hybrid model.
+        Forward pass through the full model (encoder portion only).
         
         Args:
-            drug_features: List of drug feature tensors
-            target_features: List of target feature tensors
-            G_t: Discretized & augmented noisy graph (X, E, y) (y still lacks global drug embedding)
-            node_mask: Mask for nodes
-        Returns two dicts:
-            - predictions: dti and G_hat predictions
-            - outputs: intermediate embeddings & attention weights
+            drug_features: Drug feature tensors [batch_size, drug_input_dim] (optional in case of pretrain_target)
+            target_features: Target feature tensors [batch_size, target_input_dim] (optional in case of pretrain_drug)
+            
+        Returns:
+            embedding_data: Structured drug & target embeddings (and attention weights if using attentive aggregator)
+            prediction_data: Structured predictions with multi-score DTI prediction or single score for finetune
         """
-        # Encode drug features
-        drug_result = self._encode_drug_features(drug_features)
-        if self.attentive:
-            drug_embedding, drug_attention = drug_result
+        embedding_data = EmbeddingData()
+
+        # Encode & aggregate drug and/or target features
+        if self.phase != "pretrain_target":
+            drug_embeddings = [
+                self.drug_encoders[feat_name](feat)
+                for feat_name, feat in zip(self.hparams.drug_features, drug_features)
+            ]
+            if self.attentive:
+                drug_embedding_raw, embedding_data.drug_attention = self.drug_aggregator(drug_embeddings)
+            else:
+                drug_embedding_raw = self.drug_aggregator(drug_embeddings)
+            
+            # Apply variational encoding (KL head)
+            embedding_data.drug_embedding, embedding_data.drug_mu, embedding_data.drug_logvar = self.drug_kl_head(drug_embedding_raw)
+
+        if self.phase != "pretrain_drug":
+            target_embeddings = [
+                self.target_encoders[feat_name](feat)
+                for feat_name, feat in zip(self.hparams.target_features, target_features)
+            ]
+            if self.attentive:
+                embedding_data.target_embedding, embedding_data.target_attention = self.target_aggregator(target_embeddings)
+            else:
+                embedding_data.target_embedding = self.target_aggregator(target_embeddings)
+
+        # Fuse drug and target embeddings & get DTI predictions
+        if self.phase not in ["pretrain_drug", "pretrain_target"]:
+            embedding_data.fused_embedding, _ = self.fusion(
+                embedding_data.drug_embedding, 
+                embedding_data.target_embedding
+            )
+            # Get predictions (extract only single score for finetune phase)
+            dti_scores = self.dti_head(embedding_data.fused_embedding)
+            dti_scores = dti_scores[self.finetune_score] if self.phase == "finetune" else dti_scores
+            prediction_data = PredictionData(
+                dti_scores=dti_scores
+            )
         else:
-            drug_embedding, drug_attention = drug_result, None
-        
-        # Encode target features
-        target_result = self._encode_target_features(target_features)
-        if self.attentive:
-            target_embedding, target_attention = target_result
-        else:
-            target_embedding, target_attention = target_result, None
+            prediction_data = PredictionData()
 
-        # Variational encoding
-        drug_embedding, mu, logvar = self.drug_kl_head(drug_embedding)
-
-        # Fusion of both embeddings
-        fused_emb = self.fusion(drug_embedding, target_embedding)
-
-        # DTI predictions
-        dti_preds = self.dti_head(fused_emb)
-
-        # Graph predictions
-        G_t.y = torch.cat((drug_embedding, G_t.y), dim=1)
-        G_hat = self.drug_decoder(G_t.X, G_t.E, G_t.y, node_mask)
-
-        predictions = {
-            "dti_preds": dti_preds,
-            "G_hat": G_hat
-        }
-
-        outputs = {
-            "drug_embedding": drug_embedding,
-            "target_embedding": target_embedding,
-            "drug_mu": mu,
-            "drug_logvar": logvar,
-            "drug_att": drug_attention,
-            "target_att": target_attention,
-            "fused_emb": fused_emb,
-        }
-
-        return predictions, outputs
+        return embedding_data, prediction_data
     
+    def _decode_drug_graph(
+        self, 
+        embedding_data: EmbeddingData, 
+        batch_data: BatchData
+    ) -> PlaceHolder:
+        """
+        Apply diffusion decoder to reconstruct drug graphs.
+        
+        Args:
+            embedding_data: Contains drug_embedding to use as conditional signal
+            batch_data: Contains graph_data with noisy/augmented graph
+            
+        Returns:
+            G_hat: Reconstructed graph predictions
+        """
+        if self.phase == "pretrain_target":
+            return None
+            
+        # Use drug embedding as conditional signal y
+        G_t_conditioned = PlaceHolder(
+            X=batch_data.graph_data.X_augmented,
+            E=batch_data.graph_data.E_augmented, 
+            y=torch.cat([embedding_data.drug_embedding, batch_data.graph_data.y_augmented], dim=1)
+        )
+        
+        # Apply graph transformer decoder
+        G_hat = self.drug_decoder(
+            G_t_conditioned.X, 
+            G_t_conditioned.E, 
+            G_t_conditioned.y, 
+            batch_data.graph_data.node_mask
+        )
+        
+        return G_hat
+
     def _common_step(
         self, 
         batch: Dict[str, Any]
-    ):
+    ) -> Tuple[BatchData, EmbeddingData, PredictionData, LossData]:
         """
         Common step logic shared across train/val/test.
         
-        Args:
-            batch Dict[str, Any]: Batch data
-            
-        Returns three dicts:
-            - predictions: with keys dti_preds, G_hat
-            - targets: with keys dti_targets, G
-            - losses: with keys contrastive, complexity, reconstruction, accuracy
-            # TODO: possibly need to add more diffusion stuff like G_t, ...
+        Returns:
+            batch_data: Structured batch data incl. targets, masks, and graph data
+            embedding_data: Structured embeddings (incl. variational components)
+            prediction_data: Structured predictions (DTI + graph reconstruction)
+            loss_data: All loss components (accuracy, complexity, contrastive, reconstruction)
         """
-        # Get features and targets
-        drug_features, target_features = self._get_features_from_batch(batch)
-        smiles = self._get_smiles_from_batch(batch)
-        drug_fp, target_fp = self._get_fingerprints_from_batch(batch)
-        dti_targets = self._get_targets_from_batch(batch)
-        dti_masks = self._get_targets_masks_from_batch(batch)
-
-        # Get graph data
-        G = self.graph_converter.smiles_to_pyg_batch(smiles)
-        G, node_mask = to_dense(G.x, G.edge_index, G.edge_attr, G.batch)
-        G = G.mask(node_mask)
-
-        # Forward diffusion
-        G_t, noise_params = self.apply_noise(G, node_mask)
-        G_t = self.augment_graph(G_t, noise_params, node_mask)
-
-        # Forward pass
-        predictions, outputs = self.forward(drug_features, target_features, G_t, node_mask)
-
-        # Compute losses
-        accuracy_loss = self.dti_head.loss(
-            predictions=predictions["dti_preds"],
-            targets=dti_targets,
-            masks=dti_masks
-        )
-        complexity_loss = self.drug_kl_head.kl_divergence(
-            outputs["drug_mu"], outputs["drug_logvar"]
-        )
-        contrastive_loss = self.drug_infonce_head.forward(
-            outputs["drug_embedding"],
-            drug_fp
-        ) + self.target_infonce_head.forward(
-            outputs["target_embedding"],
-            target_fp
-        )
-        reconstruction_loss = self.drug_reconstruction_head.forward(
-            pred=predictions["G_hat"],
-            true=G_t
+        # Create structured batch data (includes graph extraction if needed)
+        batch_data = self._create_batch_data(batch)
+        
+        # Apply forward diffusion process (add noise to clean graphs)
+        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
+            # Extract clean graph and apply noise
+            G_clean = PlaceHolder(X=batch_data.graph_data.X, E=batch_data.graph_data.E)
+            G_t, noise_params = self.apply_noise(G_clean, batch_data.graph_data.node_mask)
+            
+            # Store noisy graph data
+            batch_data.graph_data.X_t = G_t.X
+            batch_data.graph_data.E_t = G_t.E  
+            batch_data.graph_data.noise_params = noise_params
+            
+            # Augment noisy graph with extra features
+            G_t_augmented = self.augment_graph(G_t, noise_params, batch_data.graph_data.node_mask)
+            batch_data.graph_data.X_augmented = G_t_augmented.X
+            batch_data.graph_data.E_augmented = G_t_augmented.E
+            batch_data.graph_data.y_augmented = G_t_augmented.y
+        
+        # Forward pass (encoders + DTI prediction)
+        embedding_data, prediction_data = self.forward(
+            batch_data.drug_features, 
+            batch_data.target_features
         )
 
-        total_loss = (
-            self.weights[0] * accuracy_loss +
-            self.weights[1] * complexity_loss +
-            self.weights[2] * contrastive_loss +
-            self.weights[3] * reconstruction_loss
-        )
+        # Graph reconstruction using diffusion decoder
+        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
+            G_hat = self._decode_drug_graph(embedding_data, batch_data)
+            prediction_data.graph_reconstruction = G_hat
 
-        targets = {
-            "dti_targets": dti_targets,
-            "G": G
+        # Compute all loss components
+        loss_data = LossData()
+
+        # 1. Complexity loss (KL divergence for VAE)
+        if self.phase != "pretrain_target":
+            loss_data.complexity = self.drug_kl_head.kl_divergence(
+                embedding_data.drug_mu, 
+                embedding_data.drug_logvar
+            )
+        else:
+            loss_data.complexity = torch.tensor(0.0, device=self.device)
+
+        # 2. Contrastive losses
+        drug_contrastive_loss = self.drug_contrastive_head(
+            x=embedding_data.drug_embedding,
+            fingerprints=batch_data.drug_fp,
+            temperature=self.contrastive_temp
+        ) if self.phase not in ["pretrain_target", "finetune"] else torch.tensor(0.0, device=self.device)
+
+        target_contrastive_loss = self.target_contrastive_head(
+            x=embedding_data.target_embedding,
+            fingerprints=batch_data.target_fp,
+            temperature=self.contrastive_temp
+        ) if self.phase not in ["pretrain_drug", "finetune"] else torch.tensor(0.0, device=self.device)
+        
+        loss_data.contrastive = drug_contrastive_loss + target_contrastive_loss
+        loss_data.components = {
+            "drug_contrastive": drug_contrastive_loss,
+            "target_contrastive": target_contrastive_loss
         }
-        losses = {
-            "total": total_loss,
-            "accuracy": accuracy_loss,
-            "complexity": complexity_loss,
-            "contrastive": contrastive_loss,
-            "reconstruction": reconstruction_loss
-        }
-        return predictions, targets, losses
+
+        # 3. Reconstruction loss (diffusion decoder)
+        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
+            # Create reconstruction head if not exists
+            if not hasattr(self, 'reconstruction_head'):
+                from mb_vae_dti.training.models.heads import ReconstructionHead
+                self.reconstruction_head = ReconstructionHead(self.diff_weights)
+            
+            G_true = PlaceHolder(X=batch_data.graph_data.X_t, E=batch_data.graph_data.E_t)
+            loss_data.reconstruction = self.reconstruction_head(
+                pred=prediction_data.graph_reconstruction,
+                true=G_true
+            )
+        else:
+            loss_data.reconstruction = torch.tensor(0.0, device=self.device)
+
+        # 4. Accuracy loss (DTI prediction)
+        if self.phase not in ["pretrain_drug", "pretrain_target"]:
+            if self.phase == "finetune":
+                # Single-score accuracy loss with masking
+                if batch_data.dti_masks.any():
+                    masked_preds = prediction_data.dti_scores[batch_data.dti_masks]
+                    masked_targets = batch_data.dti_targets[batch_data.dti_masks]
+                    loss_data.accuracy = F.mse_loss(masked_preds, masked_targets)
+                else:
+                    loss_data.accuracy = torch.tensor(0.0, device=self.device)
+            else:  # phase == "train"
+                # Multi-score accuracy loss
+                components = {
+                    "Y": F.binary_cross_entropy_with_logits(
+                        prediction_data.dti_scores["Y"],
+                        batch_data.dti_targets["Y"]
+                    )
+                }
+                
+                # Continuous target losses (when data available)
+                for score_name in ["Y_pKd", "Y_pKi", "Y_KIBA"]:
+                    valid_mask = batch_data.dti_masks[score_name]
+                    if valid_mask.any():
+                        masked_preds = prediction_data.dti_scores[score_name][valid_mask]
+                        masked_targets = batch_data.dti_targets[score_name][valid_mask]
+                        components[score_name] = F.mse_loss(masked_preds, masked_targets)
+                    else:
+                        components[score_name] = torch.tensor(0.0, device=self.device)
+                
+                # Compute weighted total accuracy loss
+                loss_data.accuracy = sum(
+                    self.dti_weights[i] * loss 
+                    for i, (score_name, loss) in enumerate(components.items())
+                )
+                loss_data.components.update(components)
+        else:
+            loss_data.accuracy = torch.tensor(0.0, device=self.device)
+        
+        return batch_data, embedding_data, prediction_data, loss_data
+
+    def training_step(self, batch: Dict[str, Any], batch_idx: int):
+        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
+        
+        # Update DTI metrics based on phase
+        if self.phase not in ["pretrain_drug", "pretrain_target"]:
+            if prediction_data.dti_scores is not None:
+                if self.phase == "finetune":
+                    # For finetune, only update with valid (masked) samples
+                    if batch_data.dti_masks.any():
+                        self.train_metrics.update(
+                            prediction_data.dti_scores[batch_data.dti_masks],
+                            batch_data.dti_targets[batch_data.dti_masks]
+                        )
+                else:
+                    # For train phase, metrics handle masking internally
+                    self.train_metrics.update(
+                        prediction_data.dti_scores,
+                        batch_data.dti_targets
+                    )
+            
+            # Log individual loss components
+            for name, value in loss_data.components.items():
+                self.log(f"train/loss_{name}", value)
+        
+        # TODO: Add diffusion metrics here for molecular validity, etc.
+        # Update diffusion metrics if available
+        # if self.train_diffusion_metrics is not None:
+        #     self.train_diffusion_metrics.update(
+        #         prediction_data.graph_reconstruction, 
+        #         batch_data.graph_data
+        #     )
+
+        # Compute total loss and log individual components
+        loss = loss_data.compute_loss(self.weights)
+        
+        self.log("train/loss_accuracy", loss_data.accuracy)
+        self.log("train/loss_complexity", loss_data.complexity)
+        self.log("train/loss_contrastive", loss_data.contrastive)
+        self.log("train/loss_reconstruction", loss_data.reconstruction)
+        self.log("train/loss", loss)
+        
+        return loss
+    
+    def validation_step(self, batch: Dict[str, Any], batch_idx: int):
+        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
+        
+        # Update DTI metrics based on phase
+        if self.phase not in ["pretrain_drug", "pretrain_target"]:
+            if prediction_data.dti_scores is not None:
+                if self.phase == "finetune":
+                    # For finetune, only update with valid (masked) samples
+                    if batch_data.dti_masks.any():
+                        self.val_metrics.update(
+                            prediction_data.dti_scores[batch_data.dti_masks],
+                            batch_data.dti_targets[batch_data.dti_masks]
+                        )
+                else:
+                    # For train phase, metrics handle masking internally
+                    self.val_metrics.update(
+                        prediction_data.dti_scores,
+                        batch_data.dti_targets
+                    )
+            
+            # Log individual loss components
+            for name, value in loss_data.components.items():
+                self.log(f"val/loss_{name}", value)
+        
+        # TODO: Add diffusion metrics here for NLL and molecular validity
+        # Update diffusion metrics if available
+        # if self.val_diffusion_metrics is not None:
+        #     self.val_diffusion_metrics.update(
+        #         prediction_data.graph_reconstruction, 
+        #         batch_data.graph_data
+        #     )
+
+        # Compute total loss and log individual components
+        loss = loss_data.compute_loss(self.weights)
+        
+        self.log("val/loss_accuracy", loss_data.accuracy)
+        self.log("val/loss_complexity", loss_data.complexity)
+        self.log("val/loss_contrastive", loss_data.contrastive)
+        self.log("val/loss_reconstruction", loss_data.reconstruction)
+        self.log("val/loss", loss)
+        
+        return loss
+    
+    def test_step(self, batch: Dict[str, Any], batch_idx: int):
+        batch_data, embedding_data, prediction_data, loss_data = self._common_step(batch)
+        
+        # Update DTI metrics based on phase
+        if self.phase not in ["pretrain_drug", "pretrain_target"]:
+            if prediction_data.dti_scores is not None:
+                if self.phase == "finetune":
+                    # For finetune, only update with valid (masked) samples
+                    if batch_data.dti_masks.any():
+                        self.test_metrics.update(
+                            prediction_data.dti_scores[batch_data.dti_masks],
+                            batch_data.dti_targets[batch_data.dti_masks]
+                        )
+                else:
+                    # For train phase, metrics handle masking internally
+                    self.test_metrics.update(
+                        prediction_data.dti_scores,
+                        batch_data.dti_targets
+                    )
+            
+            # Log individual loss components
+            for name, value in loss_data.components.items():
+                self.log(f"test/loss_{name}", value)
+        
+        # TODO: Add diffusion metrics here for NLL and molecular validity
+        # Update diffusion metrics if available
+        # if self.test_diffusion_metrics is not None:
+        #     self.test_diffusion_metrics.update(
+        #         prediction_data.graph_reconstruction, 
+        #         batch_data.graph_data
+        #     )
+
+        # Compute total loss and log individual components
+        loss = loss_data.compute_loss(self.weights)
+        
+        self.log("test/loss_accuracy", loss_data.accuracy)
+        self.log("test/loss_complexity", loss_data.complexity)
+        self.log("test/loss_contrastive", loss_data.contrastive)
+        self.log("test/loss_reconstruction", loss_data.reconstruction)
+        self.log("test/loss", loss)
+        
+        return loss
