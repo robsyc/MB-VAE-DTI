@@ -98,17 +98,20 @@ class BestMetricsCallback(Callback):
                 for key, value in current_metrics.items()
                 if key.startswith('val/')
             }
-                
             logger.debug(f"New best validation loss `{self.monitor}`: {self.best_loss:.6f} at epoch {self.best_epoch}")
 
     def on_test_epoch_end(self, trainer, pl_module):
         current_metrics = trainer.callback_metrics.copy()
+
+        logger.info(f"Test metrics: {current_metrics}")
+        
+        # Capture test metrics from callback_metrics
         self.test_metrics = {
             key: value.item() if hasattr(value, 'item') else value
             for key, value in current_metrics.items()
             if key.startswith('test/')
         }
-        logger.debug(f"Test metrics: {self.test_metrics}")
+        logger.info(f"Test metrics found: {self.test_metrics}")
 
     def get_best_results(self) -> Dict[str, Any]:
         """Get the best validation results."""
@@ -134,7 +137,7 @@ def setup_callbacks(
         monitor: Metric to monitor (default: "val/loss")
     """
     return [
-        ModelSummary(max_depth=2),
+        ModelSummary(max_depth=1),
         LearningRateMonitor(logging_interval='step'),
         TimingCallback(),
         EarlyStopping(

@@ -22,7 +22,7 @@ import torch.nn.functional as F
 
 from torchmetrics import Metric, MetricCollection
 from torchmetrics.regression import MeanSquaredError, PearsonCorrCoef, R2Score
-from torchmetrics.classification import BinaryAccuracy, BinaryConfusionMatrix, BinaryF1Score, BinaryAUROC
+from torchmetrics.classification import BinaryAccuracy, BinaryF1Score, BinaryAUROC
 
 from torcheval.metrics import BinaryAUPRC as _BinaryAUPRC
 from lifelines.utils import concordance_index
@@ -308,8 +308,7 @@ class BinaryDTIMetrics(MetricCollection):
             "accuracy": BinaryAccuracy(),
             "f1": BinaryF1Score(),
             "auroc": BinaryAUROC(),
-            "auprc": BinaryAUPRC(),
-            "confusion_matrix": BinaryConfusionMatrix(),
+            "auprc": BinaryAUPRC()
         }
         
         super().__init__(metrics, prefix=prefix)
@@ -325,11 +324,6 @@ class BinaryDTIMetrics(MetricCollection):
         
         for name, metric in self.items():
             value = metric.compute()
-            
-            # Skip non-scalar metrics (like confusion matrix) from logging
-            if name.endswith("confusion_matrix"):
-                continue
-                
             results[name] = value
         
         return results

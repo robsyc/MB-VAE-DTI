@@ -48,8 +48,18 @@ def collect_results(
     val_metrics = best_results["val_metrics"]
     test_metrics = best_results["test_metrics"]
     
-    # Get timing statistics
-    timing_stats = timing_callback.get_timing_stats()
+    # Get timing statistics with safe fallbacks
+    timing_stats = timing_callback.get_timing_stats() if timing_callback else {}
+    
+    # Safe extraction with None-to-0.0 conversion
+    def safe_float(value):
+        return 0.0 if value is None else value
+    
+    clean_timing_stats = {
+        'total_training_time': safe_float(timing_stats.get('total_training_time')),
+        'avg_time_per_epoch': safe_float(timing_stats.get('avg_time_per_epoch')),
+        'total_epochs': timing_stats.get('total_epochs', 0)
+    }
 
     # Get model information
     trainable_params = count_trainable_parameters(trainer.model)
@@ -64,7 +74,7 @@ def collect_results(
         "best_epoch": best_epoch,
         "val_metrics": val_metrics,
         "test_metrics": test_metrics,
-        "timing": timing_stats,
+        "timing": clean_timing_stats,
         "trainable_params": trainable_params,
         "config": config_summary,
     }
@@ -73,8 +83,8 @@ def collect_results(
                 f"best_val_loss={best_val_loss:.6f} at epoch {best_epoch}")
     
     logger.info(
-        f"Training took {timing_stats.get('total_training_time', 0):.2f}s "
-        f"({timing_stats.get('avg_time_per_epoch', 0):.2f}s per epoch over {timing_stats.get('total_epochs', 0)} epochs)")
+        f"Training took {clean_timing_stats['total_training_time']:.2f}s "
+        f"({clean_timing_stats['avg_time_per_epoch']:.2f}s per epoch over {clean_timing_stats['total_epochs']} epochs)")
     
     return results
 

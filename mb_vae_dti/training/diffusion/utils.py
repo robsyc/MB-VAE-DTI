@@ -218,10 +218,23 @@ def mask_distributions(true_X, true_E, pred_X, pred_E, node_mask):
     row_E[0] = 1.
 
     diag_mask = ~torch.eye(node_mask.size(1), device=node_mask.device, dtype=torch.bool).unsqueeze(0)
-    true_X[~node_mask] = row_X
+    true_X[~node_mask] = row_X # RuntimeError ?
     pred_X[~node_mask] = row_X
     true_E[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :] = row_E
     pred_E[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :] = row_E
+    # Fix for GPU indexing issue - explicitly handle broadcasting
+    # node_mask_expanded = ~node_mask
+    # if node_mask_expanded.any():
+    #     num_masked_nodes = node_mask_expanded.sum()
+    #     true_X[node_mask_expanded] = row_X.unsqueeze(0).expand(num_masked_nodes, -1)
+    #     pred_X[node_mask_expanded] = row_X.unsqueeze(0).expand(num_masked_nodes, -1)
+    
+    # edge_mask = ~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask)
+    # if edge_mask.any():
+    #     num_masked_edges = edge_mask.sum()
+    #     true_E[edge_mask] = row_E.unsqueeze(0).expand(num_masked_edges, -1)
+    #     pred_E[edge_mask] = row_E.unsqueeze(0).expand(num_masked_edges, -1)
+    # END OF FIX
 
     true_X = true_X + 1e-7
     pred_X = pred_X + 1e-7

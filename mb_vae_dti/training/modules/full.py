@@ -702,10 +702,25 @@ class FullDTIModel(AbstractDTIModel):
         # Set masked rows to arbitrary values that don't contribute to loss
         probX0[~node_mask] = torch.ones(self.Xdim_output).type_as(probX0)
         probE0[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2))] = torch.ones(self.Edim_output).type_as(probE0)
+        # Fix for GPU indexing issue - explicitly handle broadcasting
+        # node_mask_inv = ~node_mask
+        # if node_mask_inv.any():
+        #     num_masked_nodes = node_mask_inv.sum()
+        #     probX0[node_mask_inv] = torch.ones(self.Xdim_output).type_as(probX0).unsqueeze(0).expand(num_masked_nodes, -1)
+        
+        # edge_mask = ~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2))
+        # if edge_mask.any():
+        #     num_masked_edges = edge_mask.sum()
+        #     probE0[edge_mask] = torch.ones(self.Edim_output).type_as(probE0).unsqueeze(0).expand(num_masked_edges, -1)
+        # END OF FIX
 
         diag_mask = torch.eye(probE0.size(1)).type_as(probE0).bool()
         diag_mask = diag_mask.unsqueeze(0).expand(probE0.size(0), -1, -1)
         probE0[diag_mask] = torch.ones(self.Edim_output).type_as(probE0)
+        # if diag_mask.any():
+        #     num_diag_elements = diag_mask.sum()
+        #     probE0[diag_mask] = torch.ones(self.Edim_output).type_as(probE0).unsqueeze(0).expand(num_diag_elements, -1)
+        # END OF FIX
 
         return probX0, probE0
 
@@ -1081,6 +1096,11 @@ class FullDTIModel(AbstractDTIModel):
         unnormalized_prob_X = weighted_X.sum(dim=2)              # [bs, n, d_t-1]
         unnormalized_prob_X[torch.sum(
             unnormalized_prob_X, dim=-1) == 0] = 1e-5
+        # Fix for GPU indexing issue
+        # zero_mask_X = torch.sum(unnormalized_prob_X, dim=-1) == 0
+        # if zero_mask_X.any():
+        #     unnormalized_prob_X[zero_mask_X] = 1e-5
+        # END OF FIX
         prob_X = unnormalized_prob_X / torch.sum(
             unnormalized_prob_X, dim=-1, keepdim=True)            # [bs, n, d_t-1]
         
@@ -1089,6 +1109,10 @@ class FullDTIModel(AbstractDTIModel):
         weighted_E = pred_E.unsqueeze(-1) * p_s_and_t_given_0_E    # [bs, N, d0, d_t-1]
         unnormalized_prob_E = weighted_E.sum(dim=-2)
         unnormalized_prob_E[torch.sum(unnormalized_prob_E, dim=-1) == 0] = 1e-5
+        # zero_mask_E = torch.sum(unnormalized_prob_E, dim=-1) == 0
+        # if zero_mask_E.any():
+        #     unnormalized_prob_E[zero_mask_E] = 1e-5
+        # END OF FIX
         prob_E = unnormalized_prob_E / torch.sum(unnormalized_prob_E, dim=-1, keepdim=True)
         prob_E = prob_E.reshape(bs, n, n, pred_E.shape[-1])
         
