@@ -20,7 +20,7 @@ data:
   drop_last: false             # no dropping of last batch when it is incomplete
   load_in_memory: false
   h5_path: "data/input/drugs.h5torch" # also drugs.h5torch & targets.h5torch
-  drug_features: ["FP-Morgan", "EMB-BiomedGraph", "EMB-BiomedImg"] # "FP-Morgan", "EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"
+  drug_features: ["EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"] # "FP-Morgan", "EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"
   target_features: null # "FP-ESP", "EMB-ESM", "EMB-NT"
 
 logging:
