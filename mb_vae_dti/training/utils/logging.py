@@ -73,7 +73,7 @@ def setup_logging(
     # WandB logger
     if config.logging.get('use_wandb', True):
         try:
-            tags = [model, phase]
+            tags = ["droplet", model, phase]
             if dataset is not None:
                 tags.append(dataset)
             if split is not None:
