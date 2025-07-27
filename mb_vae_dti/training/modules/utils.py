@@ -49,6 +49,21 @@ class AbstractDTIModel(pl.LightningModule):
         self.val_diffusion_metrics = None    # nll & validity
         self.test_diffusion_metrics = None   # nll & validity
 
+    def count_trainable_parameters(self) -> int:
+        """Count the number of trainable parameters in the model."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def on_train_start(self):
+        """Log model parameters at the start of training."""
+        super().on_train_start()
+        
+        # Count trainable parameters
+        num_params = self.count_trainable_parameters()
+        
+        # Log using PyTorch Lightning (automatically forwards to wandb)
+        self.log("model/trainable_parameters", float(num_params), on_step=False, on_epoch=False)
+        logger.info(f"Model has {num_params:,} trainable parameters")
+
     @staticmethod
     def parse_activation(activation: Union[str, nn.Module]) -> nn.Module:
         """
