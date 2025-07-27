@@ -301,7 +301,8 @@ class FullDTIModel(AbstractDTIModel):
             
             # Molecular metrics following the pattern
             self.train_mol = TrainMolecularMetricsDiscrete(
-                atom_types=dataset_infos["general"]["atom_types"]
+                atom_types=dataset_infos["general"]["atom_types"],
+                prefix="train/"
             )
             self.val_mol = ValidationMolecularMetrics(prefix="val/")
             self.test_mol = ValidationMolecularMetrics(prefix="test/")

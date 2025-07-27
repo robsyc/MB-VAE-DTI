@@ -29,6 +29,7 @@ from lifelines.utils import concordance_index
 
 from typing import Dict, List, Optional, Literal
 import logging
+import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +263,9 @@ class MultiScoreRealDTIMetrics(torch.nn.Module):
             score: RealDTIMetrics(prefix=f"{prefix}{score}_")
             for score in score_names
         })
+        
+        # Track sample counts for debugging sparsity
+        self.sample_counts = {score: 0 for score in score_names}
     
     def update(self, preds: Dict[str, Tensor], targets: Dict[str, Tensor]) -> None:
         """
@@ -272,24 +276,38 @@ class MultiScoreRealDTIMetrics(torch.nn.Module):
             targets: Dict mapping score names to target tensors (pre-masked)
         """
         for score_name in self.score_names:
-            if score_name in preds and score_name in targets:
+            # Handle both "Y_<score>" and "<score>" key formats
+            pred_key = f"Y_{score_name}" if f"Y_{score_name}" in preds else score_name
+            target_key = f"Y_{score_name}" if f"Y_{score_name}" in targets else score_name
+            
+            if pred_key in preds and target_key in targets:
+                # Count samples for this score
+                self.sample_counts[score_name] += preds[pred_key].numel()
+                
                 self.metrics[score_name].update(
-                    preds[score_name], 
-                    targets[score_name]
+                    preds[pred_key], 
+                    targets[target_key]
                 )
     
     def compute(self) -> Dict[str, Tensor]:
-        """Compute all metrics."""
+        """Compute all metrics and log sample counts."""
         results = {}
         for score_name in self.score_names:
             score_results = self.metrics[score_name].compute()
             results.update(score_results)
+            
+            # Log sample count for debugging
+            count = self.sample_counts[score_name]
+            logger.info(f"Score {score_name}: {count} samples accumulated for metrics computation")
+            
         return results
     
     def reset(self) -> None:
-        """Reset all metrics."""
+        """Reset all metrics and sample counts."""
         for metric in self.metrics.values():
             metric.reset()
+        # Reset sample counts
+        self.sample_counts = {score: 0 for score in self.score_names}
 
 
 class BinaryDTIMetrics(MetricCollection):
@@ -302,7 +320,7 @@ class BinaryDTIMetrics(MetricCollection):
         Initialize binary DTI metrics.
         
         Args:
-            prefix: Prefix for metric names (e.g., "val_" or "test_")
+            prefix: Prefix for metric names (e.g., "val/" or "test/")
         """
         metrics = {
             "accuracy": BinaryAccuracy(),
@@ -313,9 +331,32 @@ class BinaryDTIMetrics(MetricCollection):
         
         super().__init__(metrics, prefix=prefix)
     
+    @contextlib.contextmanager
+    def _temporarily_disable_deterministic_algorithms(self):
+        """
+        Context manager to temporarily disable deterministic algorithms.
+        This is needed because some TorchMetrics operations (like AUROC) 
+        use non-deterministic CUDA operations.
+        """
+        # Check if deterministic algorithms are currently enabled
+        try:
+            is_deterministic = torch.are_deterministic_algorithms_enabled()
+        except AttributeError:
+            # Older PyTorch versions don't have this function
+            is_deterministic = False
+            
+        if is_deterministic:
+            try:
+                torch.use_deterministic_algorithms(False)
+                yield
+            finally:
+                torch.use_deterministic_algorithms(True)
+        else:
+            yield
+    
     def compute(self) -> Dict[str, Tensor]:
         """
-        Compute all metrics, handling non-scalar metrics appropriately.
+        Compute all metrics, handling deterministic algorithm restrictions.
         
         Returns:
             Dict of computed metrics (excluding non-scalar ones like confusion matrix)
@@ -323,8 +364,31 @@ class BinaryDTIMetrics(MetricCollection):
         results = {}
         
         for name, metric in self.items():
-            value = metric.compute()
-            results[name] = value
+            try:
+                # For metrics that might use non-deterministic operations (AUROC, AUPRC),
+                # temporarily disable deterministic algorithms
+                # Check base metric name without prefix (e.g., "auroc" from "test/binary_auroc")
+                base_name = name.split('/')[-1].replace('binary_', '') if '/' in name else name
+                if base_name in ["auroc", "auprc"]:
+                    with self._temporarily_disable_deterministic_algorithms():
+                        value = metric.compute()
+                else:
+                    value = metric.compute()
+                    
+                results[name] = value
+                
+            except RuntimeError as e:
+                # Handle deterministic algorithm errors specifically
+                if "deterministic" in str(e).lower():
+                    logger.warning(f"Skipping metric '{name}' due to deterministic algorithm restriction: {e}")
+                    # Return NaN for metrics that can't be computed
+                    results[name] = torch.tensor(float('nan'))
+                else:
+                    # Re-raise other RuntimeErrors
+                    raise e
+            except Exception as e:
+                logger.warning(f"Error computing metric '{name}': {e}")
+                results[name] = torch.tensor(float('nan'))
         
         return results
 

@@ -383,9 +383,9 @@ class ValidationMolecularMetrics(nn.Module):
     def compute(self) -> Dict[str, torch.Tensor]:
         """Compute all metrics."""
         return {
-            f"{self.prefix}validity": self.validity.compute(),
-            f"{self.prefix}accuracy": self.accuracy.compute(),
-            f"{self.prefix}tanimoto_similarity": self.tanimoto_similarity.compute(),
+            f"{self.prefix}mol_validity": self.validity.compute(),
+            f"{self.prefix}mol_accuracy": self.accuracy.compute(),
+            f"{self.prefix}mol_tanimoto_sim": self.tanimoto_similarity.compute(),
         }
 
     def reset(self):

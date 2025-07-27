@@ -77,7 +77,8 @@ class BestMetricsCallback(Callback):
         # Comparison function
         self.compare = torch.less if mode == "min" else torch.greater
         
-    def on_validation_epoch_end(self, trainer, pl_module):
+    def on_validation_end(self, trainer, pl_module):
+        """Capture validation metrics after model's on_validation_epoch_end has computed them."""
         # Get all metrics available to callbacks e.g.
         # def training_step(self, batch, batch_idx):
         #       self.log("a_val", 2.0) # this will be in current_metrics
@@ -91,16 +92,20 @@ class BestMetricsCallback(Callback):
         if self.compare(torch.tensor(current_loss), torch.tensor(self.best_loss)):
             self.best_loss = current_loss
             self.best_epoch = trainer.current_epoch
-            
+            logger.debug(f"New best validation loss `{self.monitor}`: {self.best_loss:.6f} at epoch {self.best_epoch}")
+        
+        # Always update validation metrics from the current epoch if it matches the best epoch
+        # This ensures we capture complete metrics from the best epoch, even if computed later
+        if trainer.current_epoch == self.best_epoch:
             # Store all validation metrics from this epoch
             self.best_val_metrics = {
                 key: value.item() if hasattr(value, 'item') else value
                 for key, value in current_metrics.items()
                 if key.startswith('val/')
             }
-            logger.debug(f"New best validation loss `{self.monitor}`: {self.best_loss:.6f} at epoch {self.best_epoch}")
 
-    def on_test_epoch_end(self, trainer, pl_module):
+    def on_test_end(self, trainer, pl_module):
+        """Capture test metrics after model's on_test_epoch_end has computed them."""
         current_metrics = trainer.callback_metrics.copy()
 
         logger.info(f"Test metrics: {current_metrics}")
