@@ -43,11 +43,6 @@ class AbstractDTIModel(pl.LightningModule):
         self.train_metrics = None
         self.val_metrics = None
         self.test_metrics = None
-        
-        # Additional metrics for diffusion models (set by subclass if needed)
-        self.train_diffusion_metrics = None  # BCEs & validity
-        self.val_diffusion_metrics = None    # nll & validity
-        self.test_diffusion_metrics = None   # nll & validity
 
     def count_trainable_parameters(self) -> int:
         """Count the number of trainable parameters in the model."""
