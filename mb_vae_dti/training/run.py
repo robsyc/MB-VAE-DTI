@@ -794,7 +794,8 @@ def main(args):
         config_index = i if (args.gridsearch or args.ensemble) else None
 
         config.logging.experiment_name = generate_experiment_name(
-            model_type, phase, args.dataset, args.split, args.pretrain_target, config_index, args.batch_index, args.ensemble
+            model_type, phase, args.dataset, args.split, args.pretrain_target, 
+            args.batch_index, config_index, args.ensemble
         )
         
         logger.info(f"\n{'='*50}")
