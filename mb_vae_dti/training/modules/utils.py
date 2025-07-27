@@ -56,7 +56,7 @@ class AbstractDTIModel(pl.LightningModule):
         num_params = self.count_trainable_parameters()
         
         # Log using PyTorch Lightning (automatically forwards to wandb)
-        self.log("model/trainable_parameters", float(num_params), on_step=False, on_epoch=False)
+        self.log("model/trainable_parameters", float(num_params), on_step=False, on_epoch=True)
         logger.info(f"Model has {num_params:,} trainable parameters")
 
     @staticmethod
