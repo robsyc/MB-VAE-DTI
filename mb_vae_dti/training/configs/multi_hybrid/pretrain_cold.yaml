@@ -44,8 +44,9 @@ model:
   dropout: 0.1
   bias: true
   # checkpoint_path: "data/results/multi_hybrid/pretrain/cold/multi_hybrid_train_cold/checkpoints/best_model.ckpt"
-  drug_checkpoint_path: "data/results/multi_hybrid/pretrain/drug/multi_hybrid_pretrain_drug/checkpoints/best_model.ckpt"
-  target_checkpoint_path: "data/results/multi_hybrid/pretrain/target/multi_hybrid_pretrain_target/checkpoints/best_model.ckpt"
+  # drug_checkpoint_path: "data/results/multi_hybrid/pretrain/drug/multi_hybrid_pretrain_drug/checkpoints/best_model.ckpt"
+  # target_checkpoint_path: "data/results/multi_hybrid/pretrain/target/multi_hybrid_pretrain_target/checkpoints/best_model.ckpt"
+  checkpoint_path: null
   drug_checkpoint_path: null
   target_checkpoint_path: null
 

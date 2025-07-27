@@ -10,7 +10,6 @@ This module contains TorchMetrics-compatible DTI evaluation metrics:
         - ConcordanceIndex (https://lifelines.readthedocs.io/en/latest/lifelines.utils.html#lifelines.utils.concordance_index & https://raw.githubusercontent.com/CamDavidsonPilon/lifelines/refs/heads/master/lifelines/utils/concordance.py)
     - BinaryDTIMetrics: Collection of metrics for binary DTI score prediction
         - BinaryAccuracy (https://lightning.ai/docs/torchmetrics/stable/classification/accuracy.html#binaryaccuracy)
-        - BinaryConfusionMatrix (https://lightning.ai/docs/torchmetrics/stable/classification/confusion_matrix.html#torchmetrics.classification.BinaryConfusionMatrix)
         - BinaryF1Score (https://lightning.ai/docs/torchmetrics/stable/classification/f1_score.html)
         - BinaryAUPRC (https://docs.pytorch.org/torcheval/main/generated/torcheval.metrics.BinaryAUPRC.html)
         - BinaryAUROC (https://lightning.ai/docs/torchmetrics/stable/classification/auroc.html#binaryauroc)
