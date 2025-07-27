@@ -107,9 +107,6 @@ class BestMetricsCallback(Callback):
     def on_test_end(self, trainer, pl_module):
         """Capture test metrics after model's on_test_epoch_end has computed them."""
         current_metrics = trainer.callback_metrics.copy()
-
-        logger.info(f"Test metrics: {current_metrics}")
-        
         # Capture test metrics from callback_metrics
         self.test_metrics = {
             key: value.item() if hasattr(value, 'item') else value

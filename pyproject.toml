@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mb_vae_dti"
+version = "1.0.0"
+description = "Multi-branch VAE for Drug-target Interaction Prediction and Target-conditioned de novo Drug Design"
+authors = [
+    {name = "Robbe Claeys", email = "robbe.claeys@ugent.be"},
+]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    # PyTorch ecosystem (torch installed via environment.yml with CUDA)
+    "pytorch-lightning==2.0.4",
+    "torchmetrics==0.11.4", 
+    "torch_geometric==2.3.1",
+    
+    # Core scientific computing
+    "numpy>=1.26.4",
+    "pandas>=2.2.3", 
+    "matplotlib==3.7.1",
+    "seaborn",
+    "h5py",
+    
+    # DiffMS dependencies
+    "hydra-core==1.3.2",
+    "omegaconf==2.3.0", 
+    "overrides==7.3.1",
+    "setuptools<81",  # Fix pkg_resources deprecation warning
+    "wandb",
+    "myopic-mces",
+    "tqdm-joblib",
+    "tqdm",
+    
+    # MB-VAE-DTI specific
+    "PyTDC>=1.0.0",
+    "h5torch>=0.2.14",
+    "biopython>=1.85",
+    "UpSetPlot>=0.9.0",
+    "tabulate>=0.9.0",
+    "ipykernel>=6.29.5",
+    "torcheval==0.0.7",
+    "lifelines==0.30.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mb_vae_dti*"]
+exclude = ["external*"] 

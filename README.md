@@ -73,8 +73,8 @@ MB-VAE-DTI/
 │   ├── training/
 │   └── molecular_statistics.py # Molecular properties, marginal distributions, ...
 |
-├── setup.py                    # Package installation script (may be in conflict with some external repo dependencies)
-├── environment.yml             # Conda environment specification
+├── environment.yml             # Minimal conda setup (Python + RDKit + PyTorch CUDA)
+├── pyproject.toml              # All other dependencies (DiffMS + MB-VAE-DTI)
 └── README.md                   # This file :)
 ```
 
@@ -82,31 +82,17 @@ MB-VAE-DTI/
 
 ### Prerequisites
 
-- Python 3.9 or higher
+- [Conda](https://docs.conda.io/en/latest/miniconda.html) package manager
 - CUDA-compatible GPU (recommended)
-- Conda package manager
 
 ### Setup
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/robsyc/MB-VAE-DTI.git
-   cd MB-VAE-DTI
-   ```
-
-2. **Run the setup script**
-   ```bash
-   ./setup_env.sh
-   ```
-   This script will:
-   - Create a conda environment with the necessary CUDA dependencies
-   - Install all required Python packages
-   - Set up the package in development mode
-
-3. **Activate the environment**
-   ```bash
-   conda activate mb-vae-dti
-   ```
+```bash
+git clone https://github.com/robsyc/MB-VAE-DTI.git
+cd MB-VAE-DTI
+conda env create -f environment.yml
+conda activate mb-vae-dti
+```
 
 ## Quick Start
 

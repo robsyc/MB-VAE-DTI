@@ -1,13 +1,10 @@
 name: mb-vae-dti
 channels:
-  - pytorch
-  - nvidia
   - conda-forge
-  - defaults
 dependencies:
   - python=3.9
+  - rdkit>=2023.9.6
   - pip
-  - pytorch=2.1.2
-  - pytorch-cuda=12.1
   - pip:
+    - torch==2.1.2 --index-url https://download.pytorch.org/whl/cu121
     - -e . 
