@@ -1,5 +1,5 @@
 training:
-  learning_rate: 0.001
+  learning_rate: 0.0005
   max_epochs: 100
   early_stopping_patience: 12
   gradient_clip_val: null      # Disabled - try without first (https://medium.com/@kaveh.kamali/a-beginners-guide-to-gradient-clipping-with-pytorch-lightning-c394d28e2b69)
@@ -13,7 +13,7 @@ loss:
   # contrastive_temp: 0.1
 
 data:
-  batch_size: 32
+  batch_size: 16
   num_workers: 4               # increase for multi-GPU training ~ depends if bottleneck in data loading or processing
   pin_memory: true             # Set to false for CPU training (true for GPU)
   shuffle_train: true
@@ -37,10 +37,10 @@ hardware:
   seed: 42
 
 model:
-  embedding_dim: 768  # output representation of a drug/target encoding brach
+  embedding_dim: 1024  # output representation of a drug/target encoding brach
   hidden_dim: 256      # within-network dimensionality
   factor: 4            # expansion / contraction factor in mlp and att blocks respectively
-  n_layers: 2          # number of residual layers in mlp and att blocks
+  n_layers: 3          # number of residual layers in mlp and att blocks
   activation: "relu"
   dropout: 0.1
   bias: true
@@ -75,41 +75,41 @@ gridsearch:
 ensemble:
   configs:
     - training.learning_rate: 0.0005
-      data.batch_size: 32
-      model.hidden_dim: 128
+      data.batch_size: 16
+      model.hidden_dim: 256
       model.n_layers: 3
-      model.embedding_dim: 768
+      model.embedding_dim: 1024
       model.encoder_type: "resnet"
-      model.aggregator_type: "attentive"
+      model.aggregator_type: "concat"
+    
+    - training.learning_rate: 0.0010
+      data.batch_size: 32
+      model.hidden_dim: 512
+      model.n_layers: 1
+      model.embedding_dim: 1024
+      model.encoder_type: "resnet"
+      model.aggregator_type: "concat"
     
     - training.learning_rate: 0.0010
       data.batch_size: 16
-      model.hidden_dim: 128
-      model.n_layers: 2
-      model.embedding_dim: 512
+      model.hidden_dim: 256
+      model.n_layers: 3
+      model.embedding_dim: 1024
       model.encoder_type: "resnet"
       model.aggregator_type: "concat"
     
     - training.learning_rate: 0.0020
       data.batch_size: 16
-      model.hidden_dim: 128
-      model.n_layers: 3
-      model.embedding_dim: 512
+      model.hidden_dim: 256
+      model.n_layers: 1
+      model.embedding_dim: 1024
       model.encoder_type: "resnet"
-      model.aggregator_type: "attentive"
+      model.aggregator_type: "concat"
     
     - training.learning_rate: 0.0005
-      data.batch_size: 16
-      model.hidden_dim: 128
-      model.n_layers: 2
-      model.embedding_dim: 512
-      model.encoder_type: "resnet"
-      model.aggregator_type: "attentive"
-    
-    - training.learning_rate: 0.0010
       data.batch_size: 32
-      model.hidden_dim: 128
-      model.n_layers: 3
+      model.hidden_dim: 256
+      model.n_layers: 2
       model.embedding_dim: 768
       model.encoder_type: "resnet"
-      model.aggregator_type: "attentive"
+      model.aggregator_type: "concat"
