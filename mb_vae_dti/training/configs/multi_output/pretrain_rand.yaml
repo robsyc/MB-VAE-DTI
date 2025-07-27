@@ -59,3 +59,9 @@ model:
 
   # diffusion_steps: 500
   # num_samples_to_generate: 100
+
+gridsearch:
+  training.learning_rate: [0.0001, 0.0005, 0.001]
+  data.batch_size: [16, 32, 64]
+  model.dropout: [0.1, 0.25, 0.5]
+  model.encoder_type: ["resnet", "transformer"]
