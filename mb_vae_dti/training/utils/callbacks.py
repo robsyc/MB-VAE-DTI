@@ -28,7 +28,10 @@ class TimingCallback(Callback):
         
     def on_train_epoch_start(self, trainer, pl_module):
         self.epoch_start_time = time.time()
-        logger.info(f"Epoch {trainer.current_epoch} started at T+ {self.epoch_start_time - self.start_time:.2f}s")
+        elapsed_seconds = self.epoch_start_time - self.start_time
+        hours, remainder = divmod(elapsed_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        logger.info(f"Epoch {trainer.current_epoch} started at T+ {int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}")
         
     def on_train_epoch_end(self, trainer, pl_module):
         if self.epoch_start_time is not None:

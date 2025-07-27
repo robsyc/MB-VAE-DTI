@@ -297,7 +297,7 @@ class MultiScoreRealDTIMetrics(torch.nn.Module):
             
             # Log sample count for debugging
             count = self.sample_counts[score_name]
-            logger.info(f"Score {score_name}: {count} samples accumulated for metrics computation")
+            logger.debug(f"Score {score_name}: {count} samples accumulated for metrics computation")
             
         return results
     
