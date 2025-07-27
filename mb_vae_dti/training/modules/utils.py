@@ -149,7 +149,7 @@ class AbstractDTIModel(pl.LightningModule):
             scheduler_obj = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
                 T_max=T_max,
-                eta_min=1e-6  # Small minimum to avoid complete stagnation
+                eta_min=float(self.hparams.learning_rate) * 0.01  # 1% of initial LR as minimum
             )
             
         else:

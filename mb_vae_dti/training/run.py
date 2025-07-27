@@ -623,23 +623,6 @@ def train_single_config(
         if phase != "pretrain":
             logger.info("Testing on best checkpoint...")
             trainer.test(model, data_module, ckpt_path="best")
-            
-            # Cleanup checkpoint files if requested (for gridsearch/ensemble)
-            if cleanup_checkpoints:
-                checkpoint_dir = save_dir / "checkpoints"
-                if checkpoint_dir.exists():
-                    shutil.rmtree(checkpoint_dir)
-                    logger.info(f"Cleaned up checkpoint directory: {checkpoint_dir}")
-                wandb_dir = save_dir / "wandb"
-                if wandb_dir.exists():
-                    shutil.rmtree(wandb_dir)
-                    logger.info(f"Cleaned up wandb directory: {wandb_dir}")
-            else:
-                best_model_path = save_dir / "checkpoints" / "best_model.ckpt"
-                if best_model_path.exists():
-                    logger.info(f"Saved best model to {best_model_path}")
-                else:
-                    logger.warning("Best model not found")
 
         ###############################################################
         # Collect results
@@ -652,13 +635,41 @@ def train_single_config(
 
         logger.info("Training completed!")
         
+        try:
+            wandb.finish()
+            logger.info("Finished WandB logging")
+        except Exception as e:
+            logger.warning(f"Failed to close wandb run: {e}")
+        
     except Exception as e:
         logger.error(f"Training failed: {e}")
+        # Close wandb run even if training failed
+        try:
+            wandb.finish()
+        except Exception as wandb_e:
+            logger.warning(f"Failed to close wandb run after training failure: {wandb_e}")
         raise
 
     finally:
         # Comprehensive cleanup - this is critical for gridsearch
         logger.info("Starting cleanup...")
+
+        # Cleanup checkpoint files if requested (for gridsearch/ensemble)
+        if cleanup_checkpoints:
+            checkpoint_dir = save_dir / "checkpoints"
+            if checkpoint_dir.exists():
+                shutil.rmtree(checkpoint_dir)
+                logger.info(f"Cleaned up checkpoint directory: {checkpoint_dir}")
+            wandb_dir = save_dir / "wandb"
+            if wandb_dir.exists():
+                shutil.rmtree(wandb_dir)
+                logger.info(f"Cleaned up wandb directory: {wandb_dir}")
+        else:
+            best_model_path = save_dir / "checkpoints" / "best_model.ckpt"
+            if best_model_path.exists():
+                logger.info(f"Saved best model to {best_model_path}")
+            else:
+                logger.warning("Best model not found")
         
         # Print system memory info before cleanup
         if torch.cuda.is_available():
@@ -678,13 +689,6 @@ def train_single_config(
             torch.cuda.empty_cache()
             logger.info(f"After cleanup - CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
             logger.info(f"After cleanup - CUDA memory reserved: {torch.cuda.memory_reserved() / 1024**3:.2f} GB")
-        
-        # Close wandb run if it was initialized
-        try:
-            wandb.finish()
-        except Exception as e:
-            logger.warning(f"Failed to close wandb run: {e}")
-        
 
 def main(args):
     """Main training function."""
