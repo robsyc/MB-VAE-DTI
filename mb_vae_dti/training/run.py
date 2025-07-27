@@ -646,7 +646,9 @@ def train_single_config(
         ###############################################################
         logger.info("Collecting results...")
         results = collect_results(config, trainer)
-        save_results(results, save_dir)
+        results_dir = save_dir.parent / "a_results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        save_results(results, results_dir)
 
         logger.info("Training completed!")
         
