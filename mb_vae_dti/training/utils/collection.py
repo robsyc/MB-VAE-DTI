@@ -91,7 +91,6 @@ def collect_results(
 
 def save_results(
     results: Dict[str, Any],
-    experiment_name: str,
     save_dir: Path,
 ) -> None:
     """
