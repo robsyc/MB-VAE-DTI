@@ -4,7 +4,7 @@ training:
   early_stopping_patience: 12
   gradient_clip_val: null      # Disabled - try without first (https://medium.com/@kaveh.kamali/a-beginners-guide-to-gradient-clipping-with-pytorch-lightning-c394d28e2b69)
   weight_decay: 0.0001         # Increase if overfitting, decrease if underfitting
-  scheduler: "cosine"       # "const", "step", "one_cycle", or "cosine"
+  scheduler: "one_cycle"       # "const", "step", "one_cycle", or "cosine"
 
 loss:
   weights: [1, 0, 0, 0] # for accuracy, complexity, contrastive, reconstruction
