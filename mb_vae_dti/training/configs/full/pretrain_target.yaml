@@ -1,5 +1,5 @@
 training:
-  learning_rate: 0.001
+  learning_rate: 0.0005
   max_epochs: 100
   early_stopping_patience: 12
   gradient_clip_val: null      # Disabled - try without first (https://medium.com/@kaveh.kamali/a-beginners-guide-to-gradient-clipping-with-pytorch-lightning-c394d28e2b69)
@@ -41,11 +41,11 @@ model:
   factor: 4            # expansion / contraction factor in mlp and att blocks respectively
   n_layers: 3          # number of residual layers in mlp and att blocks
   activation: "relu"
-  dropout: 0.1
+  dropout: 0.2
   bias: true
   # checkpoint_path: 
   # drug_checkpoint_path: 
-  target_checkpoint_path: "data/results/full/pretrain/target/full_pretrain_target/checkpoints/best_model.ckpt"
+  # target_checkpoint_path: "data/results/full/pretrain/target/full_pretrain_target/checkpoints/best_model.ckpt"
   drug_checkpoint_path: null
   target_checkpoint_path: null
 
