@@ -61,8 +61,8 @@ model:
 
   diffusion_steps: 500
   sample_every_val: 5
-  val_samples_per_embedding: 5
-  test_samples_per_embedding: 10
+  val_samples_per_embedding: 3
+  test_samples_per_embedding: 5
 
 gridsearch:
   training.learning_rate: [0.0005, 0.001]
