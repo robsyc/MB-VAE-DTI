@@ -6,6 +6,8 @@ external/biomed-multi-view/bmfm_sm/predictive/tests/test-data/finetune/
 *.hdf5
 *.h5torch
 
+wandb/
+
 # ignore all folders called `archive` and their contents no matter where they are
 archive/
 **/archive/*
