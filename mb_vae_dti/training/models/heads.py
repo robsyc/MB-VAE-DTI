@@ -281,8 +281,18 @@ class ReconstructionHead(nn.Module):
         flat_true_E = torch.argmax(true_E[mask_E, :], dim=-1)
         flat_pred_E = masked_pred_E[mask_E, :]
 
-        loss_X = F.cross_entropy(flat_pred_X, flat_true_X, reduction='sum') if true_X.numel() > 0 else 0.0
-        loss_E = F.cross_entropy(flat_pred_E, flat_true_E, reduction='sum') if true_E.numel() > 0 else 0.0
+        # Use sum reduction but normalize by number of samples (following DiffMS pattern)
+        if flat_pred_X.numel() > 0:
+            loss_X_raw = F.cross_entropy(flat_pred_X, flat_true_X, reduction='sum')
+            loss_X = loss_X_raw / flat_pred_X.size(0)  # Normalize by number of samples
+        else:
+            loss_X = 0.0
+            
+        if flat_pred_E.numel() > 0:
+            loss_E_raw = F.cross_entropy(flat_pred_E, flat_true_E, reduction='sum') 
+            loss_E = loss_E_raw / flat_pred_E.size(0)  # Normalize by number of samples
+        else:
+            loss_E = 0.0
 
         return loss_X * self.diff_weights[0] + \
                loss_E * self.diff_weights[1]

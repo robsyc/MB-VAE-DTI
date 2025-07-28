@@ -26,6 +26,9 @@ from mb_vae_dti.training.diffusion.utils import * # TODO: perhaps improve struct
 
 logger = logging.getLogger(__name__)
 
+# Set Tensor Cores precision for performance optimization
+torch.set_float32_matmul_precision('medium')
+
 
 class FullDTIModel(AbstractDTIModel):
     """
@@ -1194,22 +1197,18 @@ class FullDTIModel(AbstractDTIModel):
                     batch_data.dti_targets
                 )
         
-        if self.phase != "pretrain_target" and batch_data.graph_data is not None:    
-            # Sample molecules periodically for molecular metrics
-            # This is expensive, so we only do it every few epochs
-            # TODO: instead of every few epochs, perhaps (also) every n validation steps?
-            # that way we don't do this for every batch in the validation set
-            if hasattr(self, 'current_epoch') and self.current_epoch % self.sample_every_val == 0:
-                generated_molecules = self.sample_batch(
-                    drug_embeddings=embedding_data.drug_embedding,
-                    num_samples_per_embedding=self.val_samples_per_embedding
-                )
-                if self.val_mol is not None:
-                    self.val_mol.update(
-                        generated_mols=generated_molecules,
-                        target_smiles=batch_data.smiles,
-                        target_fps=batch_data.drug_fp
-                    )
+        # Store validation data for sampling at epoch end (performance optimization)
+        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
+            if not hasattr(self, '_val_embeddings_buffer'):
+                self._val_embeddings_buffer = []
+                self._val_smiles_buffer = []
+                self._val_fps_buffer = []
+            
+            # Store a subset of data for epoch-end sampling (limit memory usage)
+            if len(self._val_embeddings_buffer) < 5:  # Only store first 5 batches worth of data
+                self._val_embeddings_buffer.append(embedding_data.drug_embedding.detach())
+                self._val_smiles_buffer.extend(batch_data.smiles)
+                self._val_fps_buffer.append(batch_data.drug_fp.detach())
         
         # Log all loss components
         for name, value in loss_data.components.items():
@@ -1242,19 +1241,18 @@ class FullDTIModel(AbstractDTIModel):
                     batch_data.dti_targets
                 )
         
+        # Store test data for sampling at epoch end (performance optimization)
         if self.phase != "pretrain_target" and batch_data.graph_data is not None:
-            # Sample molecules from limit distribution -> clean graph G
-            # Conditionally on drug embeddings
-            generated_molecules = self.sample_batch(
-                drug_embeddings=embedding_data.drug_embedding,
-                num_samples_per_embedding=self.test_samples_per_embedding
-            )
-            if self.test_mol is not None:
-                self.test_mol.update(
-                    generated_mols=generated_molecules,
-                    target_smiles=batch_data.smiles,
-                    target_fps=batch_data.drug_fp
-                )
+            if not hasattr(self, '_test_embeddings_buffer'):
+                self._test_embeddings_buffer = []
+                self._test_smiles_buffer = []
+                self._test_fps_buffer = []
+            
+            # Store a subset of data for epoch-end sampling (limit memory usage) 
+            if len(self._test_embeddings_buffer) < 10:  # Store more test data than validation
+                self._test_embeddings_buffer.append(embedding_data.drug_embedding.detach())
+                self._test_smiles_buffer.extend(batch_data.smiles)
+                self._test_fps_buffer.append(batch_data.drug_fp.detach())
 
         # Log all loss components
         for name, value in loss_data.components.items():
@@ -1291,6 +1289,39 @@ class FullDTIModel(AbstractDTIModel):
         super().on_validation_epoch_end()
         
         if self.phase != "pretrain_target":
+            # Perform conditional sampling at epoch end for efficiency (following DiGress pattern)
+            if (hasattr(self, 'current_epoch') and 
+                self.current_epoch % self.sample_every_val == 0 and 
+                hasattr(self, '_val_embeddings_buffer') and 
+                len(self._val_embeddings_buffer) > 0):
+                
+                logger.info(f"Performing validation sampling at epoch {self.current_epoch}")
+                
+                # Sample from stored validation embeddings
+                for i, (drug_embeddings, drug_fps) in enumerate(zip(self._val_embeddings_buffer, self._val_fps_buffer)):
+                    generated_molecules = self.sample_batch(
+                        drug_embeddings=drug_embeddings,
+                        num_samples_per_embedding=self.val_samples_per_embedding
+                    )
+                    if self.val_mol is not None:
+                        # Get corresponding smiles for this batch
+                        batch_size = drug_embeddings.size(0)
+                        start_idx = i * batch_size
+                        end_idx = start_idx + batch_size
+                        batch_smiles = self._val_smiles_buffer[start_idx:end_idx]
+                        
+                        self.val_mol.update(
+                            generated_mols=generated_molecules,
+                            target_smiles=batch_smiles,
+                            target_fps=drug_fps
+                        )
+                
+                # Clear buffers after sampling
+                if hasattr(self, '_val_embeddings_buffer'):
+                    del self._val_embeddings_buffer
+                    del self._val_smiles_buffer  
+                    del self._val_fps_buffer
+            
             val_mol_metrics = self.val_mol.compute()
             for key, value in val_mol_metrics.items():
                 self.log(key, value)
@@ -1313,6 +1344,37 @@ class FullDTIModel(AbstractDTIModel):
         super().on_test_epoch_end()
         
         if self.phase != "pretrain_target":
+            # Perform conditional sampling at test epoch end for efficiency (following DiGress pattern)
+            if (hasattr(self, '_test_embeddings_buffer') and 
+                len(self._test_embeddings_buffer) > 0):
+                
+                logger.info("Performing test sampling at epoch end")
+                
+                # Sample from stored test embeddings
+                for i, (drug_embeddings, drug_fps) in enumerate(zip(self._test_embeddings_buffer, self._test_fps_buffer)):
+                    generated_molecules = self.sample_batch(
+                        drug_embeddings=drug_embeddings,
+                        num_samples_per_embedding=self.test_samples_per_embedding
+                    )
+                    if self.test_mol is not None:
+                        # Get corresponding smiles for this batch
+                        batch_size = drug_embeddings.size(0)
+                        start_idx = i * batch_size
+                        end_idx = start_idx + batch_size
+                        batch_smiles = self._test_smiles_buffer[start_idx:end_idx]
+                        
+                        self.test_mol.update(
+                            generated_mols=generated_molecules,
+                            target_smiles=batch_smiles,
+                            target_fps=drug_fps
+                        )
+                
+                # Clear buffers after sampling
+                if hasattr(self, '_test_embeddings_buffer'):
+                    del self._test_embeddings_buffer
+                    del self._test_smiles_buffer
+                    del self._test_fps_buffer
+            
             test_mol_metrics = self.test_mol.compute()
             for key, value in test_mol_metrics.items():
                 self.log(key, value)
