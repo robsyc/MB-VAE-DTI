@@ -41,7 +41,7 @@ model:
   factor: 4            # expansion / contraction factor in mlp and att blocks respectively
   n_layers: 3          # number of residual layers in mlp and att blocks
   activation: "relu"
-  dropout: 0.1
+  dropout: 0.2
   bias: true
   # checkpoint_path: "data/results/full/DAVIS/rand/full_finetune_DAVIS_rand/checkpoints/best_model.ckpt"
   checkpoint_path: "data/results/full/pretrain/rand/full_train_rand/checkpoints/best_model.ckpt"

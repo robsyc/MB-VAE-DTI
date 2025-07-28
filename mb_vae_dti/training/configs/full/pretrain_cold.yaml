@@ -41,7 +41,7 @@ model:
   factor: 4            # expansion / contraction factor in mlp and att blocks respectively
   n_layers: 3          # number of residual layers in mlp and att blocks
   activation: "relu"
-  dropout: 0.1
+  dropout: 0.2
   bias: true
   # checkpoint_path: "data/results/full/pretrain/cold/full_train_cold/checkpoints/best_model.ckpt"
   drug_checkpoint_path: "data/results/full/pretrain/drug/full_pretrain_drug/checkpoints/best_model.ckpt"
