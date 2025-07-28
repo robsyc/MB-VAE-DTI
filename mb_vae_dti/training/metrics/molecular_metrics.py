@@ -309,15 +309,23 @@ class TanimotoSimilarity(Metric):
     def update(
         self, 
         generated_mols: List[List[Optional[Chem.Mol]]], 
-        target_fps: List[torch.Tensor],
+        target_smiles: List[str],
     ):
         """Update with generated and target molecules.
         
         Args:
             generated_mols: List of lists, where each inner list contains generated molecules for one target
-            target_fps: List of pre-computed target fingerprints (from batch_data.drug_fp)
+            target_smiles: List of target SMILES strings
         """
-        for target_fp, gen_mols in zip(target_fps, generated_mols):
+        for target_smi, gen_mols in zip(target_smiles, generated_mols):
+            # Convert target SMILES to molecule and then to fingerprint
+            target_mol = Chem.MolFromSmiles(target_smi)
+            target_fp = mol2fp(target_mol, self.radius, self.nBits) if target_mol is not None else None
+            
+            if target_fp is None:
+                # Skip this group if target fingerprint computation failed
+                continue
+                
             best_similarity = 0.0
             for gen_mol in gen_mols:
                 if gen_mol is not None:
@@ -362,23 +370,21 @@ class ValidationMolecularMetrics(nn.Module):
         self, 
         generated_mols: List[List[Optional[Chem.Mol]]], 
         target_smiles: List[str],
-        target_fps: List[torch.Tensor],
     ):
         """Update all metrics with grouped data structure.
         
         Args:
-            generated_mols_groups: List of lists, where each inner list contains generated molecules for one target
+            generated_mols: List of lists, where each inner list contains generated molecules for one target
             target_smiles: List of target SMILES strings (from batch_data.smiles)
-            target_fps: List of pre-computed target fingerprints (from batch_data.drug_fp)
         """
-        assert len(generated_mols) == len(target_smiles) == len(target_fps), "Number of generated molecules must match number of targets"
+        assert len(generated_mols) == len(target_smiles), "Number of generated molecules must match number of targets"
 
         # Flatten generated molecules for validity metric
         self.validity.update([mol for group in generated_mols for mol in group])
         
         # Use grouped update for accuracy and similarity
         self.accuracy.update(generated_mols, target_smiles)
-        self.tanimoto_similarity.update(generated_mols, target_fps)
+        self.tanimoto_similarity.update(generated_mols, target_smiles)
 
     def compute(self) -> Dict[str, torch.Tensor]:
         """Compute all metrics."""

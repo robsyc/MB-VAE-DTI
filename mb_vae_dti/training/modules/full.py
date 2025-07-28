@@ -1202,13 +1202,11 @@ class FullDTIModel(AbstractDTIModel):
             if not hasattr(self, '_val_embeddings_buffer'):
                 self._val_embeddings_buffer = []
                 self._val_smiles_buffer = []
-                self._val_fps_buffer = []
             
             # Store a subset of data for epoch-end sampling (limit memory usage)
             if len(self._val_embeddings_buffer) < 5:  # Only store first 5 batches worth of data
                 self._val_embeddings_buffer.append(embedding_data.drug_embedding.detach())
                 self._val_smiles_buffer.extend(batch_data.smiles)
-                self._val_fps_buffer.append(batch_data.drug_fp.detach())
         
         # Log all loss components
         for name, value in loss_data.components.items():
@@ -1246,13 +1244,11 @@ class FullDTIModel(AbstractDTIModel):
             if not hasattr(self, '_test_embeddings_buffer'):
                 self._test_embeddings_buffer = []
                 self._test_smiles_buffer = []
-                self._test_fps_buffer = []
             
             # Store a subset of data for epoch-end sampling (limit memory usage) 
             if len(self._test_embeddings_buffer) < 10:  # Store more test data than validation
                 self._test_embeddings_buffer.append(embedding_data.drug_embedding.detach())
                 self._test_smiles_buffer.extend(batch_data.smiles)
-                self._test_fps_buffer.append(batch_data.drug_fp.detach())
 
         # Log all loss components
         for name, value in loss_data.components.items():
@@ -1298,7 +1294,7 @@ class FullDTIModel(AbstractDTIModel):
                 logger.info(f"Performing validation sampling at epoch {self.current_epoch}")
                 
                 # Sample from stored validation embeddings
-                for i, (drug_embeddings, drug_fps) in enumerate(zip(self._val_embeddings_buffer, self._val_fps_buffer)):
+                for i, drug_embeddings in enumerate(self._val_embeddings_buffer):
                     generated_molecules = self.sample_batch(
                         drug_embeddings=drug_embeddings,
                         num_samples_per_embedding=self.val_samples_per_embedding
@@ -1312,15 +1308,13 @@ class FullDTIModel(AbstractDTIModel):
                         
                         self.val_mol.update(
                             generated_mols=generated_molecules,
-                            target_smiles=batch_smiles,
-                            target_fps=drug_fps
+                            target_smiles=batch_smiles
                         )
                 
                 # Clear buffers after sampling
                 if hasattr(self, '_val_embeddings_buffer'):
                     del self._val_embeddings_buffer
-                    del self._val_smiles_buffer  
-                    del self._val_fps_buffer
+                    del self._val_smiles_buffer
             
             val_mol_metrics = self.val_mol.compute()
             for key, value in val_mol_metrics.items():
@@ -1351,7 +1345,7 @@ class FullDTIModel(AbstractDTIModel):
                 logger.info("Performing test sampling at epoch end")
                 
                 # Sample from stored test embeddings
-                for i, (drug_embeddings, drug_fps) in enumerate(zip(self._test_embeddings_buffer, self._test_fps_buffer)):
+                for i, drug_embeddings in enumerate(self._test_embeddings_buffer):
                     generated_molecules = self.sample_batch(
                         drug_embeddings=drug_embeddings,
                         num_samples_per_embedding=self.test_samples_per_embedding
@@ -1365,15 +1359,13 @@ class FullDTIModel(AbstractDTIModel):
                         
                         self.test_mol.update(
                             generated_mols=generated_molecules,
-                            target_smiles=batch_smiles,
-                            target_fps=drug_fps
+                            target_smiles=batch_smiles
                         )
                 
                 # Clear buffers after sampling
                 if hasattr(self, '_test_embeddings_buffer'):
                     del self._test_embeddings_buffer
                     del self._test_smiles_buffer
-                    del self._test_fps_buffer
             
             test_mol_metrics = self.test_mol.compute()
             for key, value in test_mol_metrics.items():
