@@ -62,15 +62,15 @@ model:
   # num_samples_to_generate: 100
 
 gridsearch:
-  model.embedding_dim: [512, 768, 1024]
-  model.encoder_type: ["resnet", "transformer"]
-  model.hidden_dim: [128, 256, 512]
-  model.n_layers: [1, 2, 3]
+  model.embedding_dim: [512, 768]
+  model.hidden_dim: [256, 512]
+  model.n_layers: [1, 2]
 
+  model.encoder_type: ["resnet", "transformer"]
   model.aggregator_type: ["concat", "attentive"]
 
-  training.learning_rate: [0.0005, 0.001, 0.002]
-  data.batch_size: [16, 32, 64]
+  training.learning_rate: [0.001, 0.002]
+  data.batch_size: [16, 32]
 
 ensemble:
   configs:
