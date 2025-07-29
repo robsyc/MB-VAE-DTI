@@ -319,9 +319,10 @@ def get_config_summary(config: DictConfig) -> Dict[str, Any]:
         "data.target_features",
         "model.embedding_dim",
         "model.hidden_dim",
-        "model.num_layers",
+        "model.n_layers",
         "model.encoder_type",
-        "model.aggregator_type"
+        "model.aggregator_type",
+        "model.dropout",
     }
     
     # Convert OmegaConf to regular dict and flatten

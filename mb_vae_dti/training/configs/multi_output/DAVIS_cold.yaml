@@ -13,7 +13,7 @@ loss:
   # contrastive_temp: 0.1
 
 data:
-  batch_size: 32
+  batch_size: 16
   num_workers: 4               # increase for multi-GPU training ~ depends if bottleneck in data loading or processing
   pin_memory: true             # Set to false for CPU training (true for GPU)
   shuffle_train: true
@@ -48,7 +48,7 @@ model:
   drug_checkpoint_path: null
   target_checkpoint_path: null
 
-  encoder_type: "resnet" # transformer or resnet
+  encoder_type: "transformer" # transformer or resnet
   # aggregator_type: "attentive" # attentive or concat
 
   # graph_transformer_kwargs:
@@ -64,3 +64,4 @@ model:
 gridsearch:
   training.learning_rate: [0.0001, 0.0005, 0.001]
   data.batch_size: [16, 32, 64]
+  model.dropout: [0.1, 0.25, 0.5]

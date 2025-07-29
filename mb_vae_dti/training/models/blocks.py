@@ -123,7 +123,7 @@ class TransformerEncoder(nn.Module):
         x = self.input_proj(x)
         
         for i in range(self.n_layers):
-            x = x + self.att_layers[i](x)
+            x = x + x * self.att_layers[i](x) 
             x = x + self.mlp_layers[i](x)
         
         return self.output_proj(x)

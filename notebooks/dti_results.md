@@ -1,11 +1,11 @@
 # Single-score DTI benchmark results
 
-Hello world!
-
 - Illiadis: https://doi.org/10.1186/s12859-024-05684-y
 - TxGemma: https://arxiv.org/abs/2504.06196
 - SSM-DTA: https://doi.org/10.1093/bib/bbad386 (very similar goals as our thesis; they note on pretraining strategies)
 - MMELON (IBM Biomed): https://arxiv.org/abs/2410.19704
+
+Baseline & multi-modal model results were more extensively tuned and the average test-set results over the 5 best configurations were reported.The other models, due to pre-training, were not tuned as extensively and the results report the best test-set results of the single best configuration (based on the validation set).
 
 ## DAVIS (pKd)
 
@@ -30,7 +30,7 @@ Hello world!
 |-------|-----|------|----|----|---------|--------|
 | Baseline | 0.834226 | 0.913028 | 0.330966 | 0.780424 | 0.588732 | 1.6M |
 | Multi-modal | 0.858424 | 0.926012 | 0.311564 | 0.763706 | 0.570308 | 9.5M |
-| Multi-output | | | | | |  |
+| Multi-output | | | | | | 45.1M |
 | Multi-hybrid | | | | | |  |
 | Full | | | | | |  |
 |-------|-----|------|----|----|---------|--------|
@@ -38,7 +38,7 @@ Hello world!
 | TxGemma (27B-Predict) | 0.555 | | | | | 27B |
 | SSM-DTA | 0.8019 | | 0.2803 | | | |
 
-## KIBA (pKi)
+## KIBA (KIBA score)
 
 ### Random Split
 
@@ -59,7 +59,7 @@ Hello world!
 |-------|-----|------|----|----|---------|--------|
 | Baseline | 0.375726 | 0.612934 | 0.38079 | 0.733286 | 0.642546 | 11.9M |
 | Multi-modal | 0.427438 | 0.653584 | 0.29555 | 0.709544 | 0.550116 | 18.6M |
-| Multi-output | | | | | |  |
+| Multi-output | | | | | | 45.1M |
 | Multi-hybrid | | | | | |  |
 | Full | | | | | |  |
 |-------|-----|------|----|----|---------|--------|
@@ -67,18 +67,18 @@ Hello world!
 | TxGemma (9B-Predict) | 0.588 | | | | | 9B |
 
 
-# Multi-score DTI results
+# Multi-score DTI results (real-valued and binary)
 
 ### Random Split
 
-| Model | MSE pKd ↓ | MSE pKi ↓ | MSE KIBA ↓ | Accuracy ↑ | F1 ↑ | AUROC ↑ | AUPRC ↑ |
-| Multi-output | | | | | | | |
-| Multi-hybrid | | | | | | | |
-| Full | | | | | | | |
+| Model | MSE pKd ↓ | MSE pKi ↓ | MSE KIBA ↓ | Accuracy ↑ | F1 ↑ | AUROC ↑ | AUPRC ↑ | Params |
+| Multi-output | | | | | | | | |
+| Multi-hybrid | | | | | | | | |
+| Full | | | | | | | | |
 
 ### Cold Split
 
-| Model | MSE pKd ↓ | MSE pKi ↓ | MSE KIBA ↓ | Accuracy ↑ | F1 ↑ | AUROC ↑ | AUPRC ↑ |
-| Multi-output | | | | | | | |
-| Multi-hybrid | | | | | | | |
-| Full | | | | | | | |
+| Model | MSE pKd ↓ | MSE pKi ↓ | MSE KIBA ↓ | Accuracy ↑ | F1 ↑ | AUROC ↑ | AUPRC ↑ | Params |
+| Multi-output | 0.9154 | 0.9453 | 0.4686 | 0.8363 | 0.6651 | 0.8726 | 0.7418 | 45.1M |
+| Multi-hybrid | | | | | | | | |
+| Full | | | | | | | | |
