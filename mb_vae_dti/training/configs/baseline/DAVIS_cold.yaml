@@ -60,14 +60,14 @@ model:
   # diffusion_steps: 500
   # num_samples_to_generate: 100
 
-gridsearch: # 500s (10 mins) for a run, max 6 gb mem used on Davis -> 4 jobs, 24 hours each (took only 9 hours; rand split much longer...)
-  model.embedding_dim: [512, 768, 1024]
+gridsearch: # 500s (10 mins) for a run, max 6 gb mem used on Davis
+  model.embedding_dim: [512, 768]
   model.encoder_type: ["resnet", "transformer"]
-  model.hidden_dim: [128, 256, 512]
-  model.n_layers: [2, 3, 4]
+  model.hidden_dim: [128, 256]
+  model.n_layers: [2, 3]
 
-  training.learning_rate: [0.0005, 0.001, 0.002]
-  data.batch_size: [16, 32, 64]
+  training.learning_rate: [0.0005, 0.001]
+  data.batch_size: [16, 32]
 
 ensemble: # Top 5 performing configurations from gridsearch results (<1 hr)
   configs:

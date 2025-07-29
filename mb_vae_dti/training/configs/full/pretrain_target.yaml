@@ -44,7 +44,6 @@ model:
   dropout: 0.2
   bias: true
   # checkpoint_path: 
-  # drug_checkpoint_path: 
   # target_checkpoint_path: "data/results/full/pretrain/target/full_pretrain_target/checkpoints/best_model.ckpt"
   drug_checkpoint_path: null
   target_checkpoint_path: null
