@@ -5,7 +5,9 @@ import torch.nn.functional as F
 from typing import Dict, Tuple, List, Union
 
 from mb_vae_dti.training.diffusion.utils import PlaceHolder
+import logging
 
+logger = logging.getLogger(__name__)
 
 class DTIHead(nn.Module):
     """
@@ -156,6 +158,10 @@ class InfoNCEHead(nn.Module):
         
         # Apply negative weighting: keep original logits for positives, weight negatives
         weighted_logits = logits.clone()
+        logger.info(f"weighted_logits: {type(weighted_logits)}")
+        logger.info(f"logits: {type(logits)}")
+        logger.info(f"negative_weights: {type(negative_weights)}")
+        logger.info(f"exclude_mask: {type(exclude_mask)}")
         weighted_logits[~exclude_mask] = logits[~exclude_mask] * negative_weights[~exclude_mask]
         
         # 6. Compute cross-entropy loss
@@ -168,19 +174,17 @@ class InfoNCEHead(nn.Module):
             self, 
             x: torch.Tensor, 
             fingerprints: torch.Tensor,
-            temperature: float = None
+            temperature: float
             ) -> torch.Tensor:
         """
         Args:
             x: Input tensor (batch_size, input_dim)
             fingerprints: Binary fingerprints (batch_size, n_bits)
+            temperature: Temperature for logits scaling
 
         Returns:
             loss: InfoNCE loss (scalar)
         """
-        if temperature is None:
-            temperature = self.contrastive_temp
-            
         z = self.projection(x)
         similarity_matrix = self.tanimoto_similarity(fingerprints)
         return self.info_nce_loss(z, similarity_matrix, temperature)
