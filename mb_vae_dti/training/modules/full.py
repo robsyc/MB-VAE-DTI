@@ -629,12 +629,6 @@ class FullDTIModel(AbstractDTIModel):
         )
         prob_pred.E = prob_pred.E.reshape((bs, n, n, -1))
 
-        # Debug: Check for NaN in posterior distributions
-        if torch.isnan(prob_true.X).any() or torch.isnan(prob_true.E).any():
-            logger.warning("NaN detected in prob_true distributions")
-        if torch.isnan(prob_pred.X).any() or torch.isnan(prob_pred.E).any():
-            logger.warning("NaN detected in prob_pred distributions")
-
         # Reshape and filter masked rows
         prob_true_X, prob_true_E, prob_pred_X, prob_pred_E = mask_distributions(
             true_X=prob_true.X,
@@ -644,19 +638,11 @@ class FullDTIModel(AbstractDTIModel):
             node_mask=node_mask
         )
         
-        # Compute KL divergence between true and predicted posteriors (use masked variables!)
-        # Add epsilon to prevent log(0)
-        prob_pred_X_safe = torch.clamp(prob_pred_X, min=1e-8)
-        prob_pred_E_safe = torch.clamp(prob_pred_E, min=1e-8)
-        
-        kl_x = (self.test_X_kl if test else self.val_X_kl)(prob_true_X, torch.log(prob_pred_X_safe))
-        kl_e = (self.test_E_kl if test else self.val_E_kl)(prob_true_E, torch.log(prob_pred_E_safe))
-        
-        # Debug: Check for NaN in KL computations
-        if torch.isnan(kl_x) or torch.isnan(kl_e):
-            logger.warning("NaN detected in KL computations")
-            logger.warning(f"  kl_x is NaN: {torch.isnan(kl_x)}")
-            logger.warning(f"  kl_e is NaN: {torch.isnan(kl_e)}")
+        # Compute KL divergence between true and predicted posteriors over masked nodes and edges
+        kl_x = (self.test_X_kl if test else self.val_X_kl)( # Add epsilon to prevent log(0)
+            prob_true_X, torch.log(torch.clamp(prob_pred_X, min=1e-8)))
+        kl_e = (self.test_E_kl if test else self.val_E_kl)(
+            prob_true_E, torch.log(torch.clamp(prob_pred_E, min=1e-8)))
             
         return self.T * (kl_x + kl_e)
 
@@ -763,11 +749,11 @@ class FullDTIModel(AbstractDTIModel):
             
         node_mask = batch_data.graph_data.node_mask
         
-        # 1. Log probability of number of nodes (we want to penalize too few or too many nodes)
+        # 1. Log probability of number of nodes (we want to penalize too few or too many nodes) (small contribution to NLL)
         N = node_mask.sum(1).long()
         log_pN = self.nodes_dist.log_prob(N)
 
-        # 2. KL between q(z_T | x) and p(z_T) = limit distribution
+        # 2. KL between q(z_T | x) and p(z_T) = limit distribution (very small contribution to NLL)
         kl_prior = self.kl_prior(batch_data)
 
         # 3. Diffusion loss
@@ -775,22 +761,15 @@ class FullDTIModel(AbstractDTIModel):
 
         # 4. Reconstruction loss at t=0
         probX0, probE0 = self.reconstruction_logp(batch_data, embedding_data, test)
-        # Add epsilon to prevent log(0)
-        probX0_safe = torch.clamp(probX0, min=1e-8)
-        probE0_safe = torch.clamp(probE0, min=1e-8)
-        loss_term_0 = self.val_X_logp(batch_data.graph_data.X * probX0_safe.log()) + self.val_E_logp(batch_data.graph_data.E * probE0_safe.log())
+        loss_term_0 = self.val_X_logp( # Add epsilon to prevent log(0)
+            batch_data.graph_data.X * torch.clamp(probX0, min=1e-8).log()
+            ) + self.val_E_logp(
+            batch_data.graph_data.E * torch.clamp(probE0, min=1e-8).log()
+            )
 
         # Combine terms
         nlls = -log_pN + kl_prior + loss_all_t - loss_term_0
         assert len(nlls.shape) == 1, f'{nlls.shape} has more than only batch dim.'
-        
-        # Debug: Check for NaN values and log the source
-        if torch.isnan(nlls).any():
-            logger.warning("NaN detected in NLL computation:")
-            logger.warning(f"  log_pN has NaN: {torch.isnan(log_pN).any()}")
-            logger.warning(f"  kl_prior has NaN: {torch.isnan(kl_prior).any()}")
-            logger.warning(f"  loss_all_t has NaN: {torch.isnan(loss_all_t).any()}")
-            logger.warning(f"  loss_term_0 has NaN: {torch.isnan(loss_term_0).any()}")
 
         # Return average NLL over batch
         nll = (self.test_nll if test else self.val_nll)(nlls)

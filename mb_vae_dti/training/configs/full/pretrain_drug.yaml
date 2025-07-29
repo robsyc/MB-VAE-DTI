@@ -1,5 +1,5 @@
 training:
-  learning_rate: 0.0005
+  learning_rate: 0.0007
   max_epochs: 100
   early_stopping_patience: 12
   gradient_clip_val: null      # Disabled - try without first (https://medium.com/@kaveh.kamali/a-beginners-guide-to-gradient-clipping-with-pytorch-lightning-c394d28e2b69)
@@ -13,8 +13,8 @@ loss:
   contrastive_temp: 0.1
 
 data:
-  batch_size: 128
-  num_workers: 4               # increase for multi-GPU training ~ depends if bottleneck in data loading or processing
+  batch_size: 256
+  num_workers: 6               # increase for multi-GPU training ~ depends if bottleneck in data loading or processing
   pin_memory: true             # Set to false for CPU training (true for GPU)
   shuffle_train: true
   drop_last: false             # no dropping of last batch when it is incomplete
@@ -25,13 +25,13 @@ data:
 
 logging:
   project_name: "MB-VAE-DTI"
-  log_every_n_steps: 50
+  log_every_n_steps: 100
   use_wandb: true
   save_dir: "data/results/full/pretrain/drug"
   
 hardware:
   gpus: 1                      # run on cpu or set to 1 for gpu
-  precision: 32-true           # https://lightning.ai/docs/pytorch/stable/common/precision_basic.html
+  precision: 16-mixed           # https://lightning.ai/docs/pytorch/stable/common/precision_basic.html
   deterministic: true          # Set to False when on CPU
   seed: 42
 
@@ -57,7 +57,7 @@ model:
     input_dims: {'X': 16, 'E': 5, 'y': 1037} # after augmentation
     output_dims: {'X': 8, 'E': 5, 'y': 1024} # y_output_dim == embedding_dim
     hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 1024}
-    hidden_dims : {'dx': 256, 'de': 64, 'dy': 1024, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 1024}
+    hidden_dims : {'dx': 256, 'de': 64, 'dy': 512, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 1024}
 
   diffusion_steps: 500
   sample_every_val: 5
