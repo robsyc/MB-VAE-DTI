@@ -58,9 +58,10 @@ model:
   #   hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 1024}
   #   hidden_dims : {'dx': 256, 'de': 64, 'dy': 1024, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 1024}
 
-#   diffusion_steps: 500
-#   num_samples_to_generate: 100
+  # diffusion_steps: 500
+  # num_samples_to_generate: 100
 
 gridsearch:
   training.learning_rate: [0.0001, 0.0005, 0.001]
   data.batch_size: [16, 32, 64]
+  model.dropout: [0.1, 0.2, 0.3]
