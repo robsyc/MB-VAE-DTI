@@ -46,8 +46,6 @@ model:
   # checkpoint_path: 
   drug_checkpoint_path: "data/results/full/pretrain/drug/full_pretrain_drug/checkpoints/best_model.ckpt"
   # target_checkpoint_path: 
-  drug_checkpoint_path: null
-  target_checkpoint_path: null
 
   encoder_type: "transformer" # transformer or resnet
   aggregator_type: "attentive" # attentive or concat
