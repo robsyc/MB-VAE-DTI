@@ -90,9 +90,7 @@ class InfoNCEHead(nn.Module):
         
         Returns:
             Similarity matrix (batch_size, batch_size)
-        """
-        fp = fp.float()
-        
+        """        
         # Compute intersection and union
         intersection = torch.mm(fp, fp.T)
         union = (fp.sum(dim=1).unsqueeze(1) + 
@@ -133,7 +131,7 @@ class InfoNCEHead(nn.Module):
         logits = torch.mm(features, features.T) / temperature
         
         # 3. Mask out self-similarities (diagonal)
-        eye_mask = torch.eye(batch_size, device=device).bool()
+        eye_mask = torch.eye(batch_size, device=device, dtype=torch.bool)
         logits = logits.masked_fill(eye_mask, -float('inf'))
         
         # 4. Find positive pairs: top-1 similar molecule for each anchor
