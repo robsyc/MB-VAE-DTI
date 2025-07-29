@@ -44,7 +44,7 @@ model:
   dropout: 0.1
   bias: true
   # checkpoint_path: 
-  drug_checkpoint_path: "data/results/full/pretrain/drug/full_pretrain_drug/checkpoints/best_model.ckpt"
+  # drug_checkpoint_path: "data/results/full/pretrain/drug/full_pretrain_drug/checkpoints/best_model.ckpt"
   # target_checkpoint_path: 
 
   encoder_type: "transformer" # transformer or resnet
