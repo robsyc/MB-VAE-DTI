@@ -279,8 +279,8 @@ class AbstractDTIModel(pl.LightningModule):
         logger.info(f"Loaded {len(pretrained_dict)} pretrained weights")
 
         # Optionally freeze encoder weights for fine-tuning
-        if self.hparams.phase == "finetune":
-            self.freeze_encoders()
+        # if self.hparams.phase == "finetune":
+        #     self.freeze_encoders()
     
 
     def _get_features_from_batch(
