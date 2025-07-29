@@ -978,7 +978,7 @@ class FullDTIModel(AbstractDTIModel):
         progress_bar = tqdm(timesteps, desc="Denoising molecules", leave=False)
         
         for s_int in progress_bar:
-            s_array = s_int * torch.ones((batch_size, 1), dtype=torch.float32, device=self.device)
+            s_array = s_int * torch.ones((batch_size, 1), dtype=self.model_dtype, device=self.device)
             t_array = s_array + 1
             s_norm = s_array / self.T
             t_norm = t_array / self.T
