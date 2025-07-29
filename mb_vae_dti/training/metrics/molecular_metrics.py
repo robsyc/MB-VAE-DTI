@@ -72,8 +72,7 @@ class CEPerClass(Metric):
         self.class_id = class_id
         self.add_state('total_ce', default=torch.tensor(0.), dist_reduce_fx="sum")
         self.add_state('total_samples', default=torch.tensor(0.), dist_reduce_fx="sum")
-        self.softmax = torch.nn.Softmax(dim=-1)
-        self.binary_cross_entropy = torch.nn.BCELoss(reduction='sum')
+        self.binary_cross_entropy_with_logits = torch.nn.BCEWithLogitsLoss(reduction='sum')
 
     def update(self, preds: Tensor, target: Tensor) -> None:
         """Update state with predictions and targets.
@@ -84,15 +83,15 @@ class CEPerClass(Metric):
         target = target.reshape(-1, target.shape[-1])
         mask = (target != 0.).any(dim=-1)
 
-        prob = self.softmax(preds)[..., self.class_id]
-        prob = prob.flatten()[mask]
+        logits = preds[..., self.class_id]
+        logits = logits.flatten()[mask]
 
         target = target[:, self.class_id]
         target = target[mask]
 
-        output = self.binary_cross_entropy(prob, target)
+        output = self.binary_cross_entropy_with_logits(logits, target)
         self.total_ce += output
-        self.total_samples += prob.numel()
+        self.total_samples += logits.numel()
 
     def compute(self):
         return self.total_ce / self.total_samples

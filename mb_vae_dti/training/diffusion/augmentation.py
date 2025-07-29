@@ -7,50 +7,19 @@ Extra augmentation features are computed using the discretized noisy graph G^t.
 """
 
 import torch
-
 from .utils import PlaceHolder
 
-# class Augmentation:
-#     def __init__(
-#             self,
-#             valencies,
-#             max_weight,
-#             atom_weights,
-#             max_n_nodes = 64
-#     ):
-#         self.extra_graph_features = ExtraFeatures(max_n_nodes=max_n_nodes)
-#         self.extra_molecular_features = ExtraMolecularFeatures(
-#             valencies=valencies,
-#             max_weight=max_weight,
-#             atom_weights=atom_weights
-#         )
-    
-#     def __call__(self, X_t, E_t, node_mask):
-#         """
-#         Compute both graph-structural features and molecular features,
-#         then combine them into a single PlaceHolder.
-#         """
-#         graph_features = self.extra_graph_features(E_t, node_mask)
-#         molecular_features = self.extra_molecular_features(X_t, E_t)
-        
-#         # Combine the features
-#         combined_X = torch.cat((graph_features.X, molecular_features.X), dim=-1)
-#         combined_E = torch.cat((graph_features.E, molecular_features.E), dim=-1)
-#         combined_y = torch.cat((graph_features.y, molecular_features.y), dim=-1)
-        
-#         return PlaceHolder(X=combined_X, E=combined_E, y=combined_y)
 
 ##################################################################################
 # Descriptive graph features (cycles, spectral features)
 
 class ExtraFeatures:
-    def __init__(self, max_n_nodes = 64):
+    def __init__(self, max_n_nodes=64):
         self.max_n_nodes = max_n_nodes
         self.ncycles = NodeCycleFeatures()
         self.eigenfeatures = EigenFeatures()
 
     def __call__(self, E_t, node_mask):
-
         n = node_mask.sum(dim=1).unsqueeze(1) / self.max_n_nodes
 
         x_cycles, y_cycles = self.ncycles(E_t, node_mask)       # (bs, n_cycles)
@@ -206,8 +175,7 @@ def batch_diagonal(X):
 
 
 class KNodeCycles:
-    """ Builds cycle counts for each node in a graph.
-    """
+    """ Builds cycle counts for each node in a graph. """
 
     def __init__(self):
         super().__init__()
