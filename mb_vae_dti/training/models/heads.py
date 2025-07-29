@@ -148,6 +148,9 @@ class InfoNCEHead(nn.Module):
         negative_weights = 1.0 - similarity_matrix
         negative_weights = negative_weights.masked_fill(eye_mask, 0.0)
         
+        # Ensure dtype consistency for mixed precision training
+        negative_weights = negative_weights.to(dtype=logits.dtype)
+        
         # Apply negative weighting to logits (vectorized approach)
         # Create mask for positive pairs
         positive_mask = torch.zeros(batch_size, batch_size, dtype=torch.bool, device=device)
@@ -158,10 +161,6 @@ class InfoNCEHead(nn.Module):
         
         # Apply negative weighting: keep original logits for positives, weight negatives
         weighted_logits = logits.clone()
-        logger.info(f"weighted_logits: {type(weighted_logits)}, dtype: {weighted_logits.dtype}")
-        logger.info(f"logits: {type(logits)}, dtype: {logits.dtype}")
-        logger.info(f"negative_weights: {type(negative_weights)}, dtype: {negative_weights.dtype}")
-        logger.info(f"exclude_mask: {type(exclude_mask)}, dtype: {exclude_mask.dtype}")
         weighted_logits[~exclude_mask] = logits[~exclude_mask] * negative_weights[~exclude_mask]
         
         # 6. Compute cross-entropy loss
