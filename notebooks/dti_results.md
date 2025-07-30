@@ -13,8 +13,8 @@ Baseline & multi-modal model results were more extensively tuned and the average
 
 | Model | MSE ↓ | RMSE ↓ | R2 ↑ | CI ↑ | Pearson ↑ | Params |
 |-------|-----|------|----|----|---------|--------|
-| Baseline | 0.23359 | 0.483302 | 0.694448 | 0.891916 | 0.833774 | 15.7M |
-| Multi-modal | 0.240136 | 0.489898 | 0.685882 | 0.88058 | 0.828586 | 7.7M |
+| Baseline | 0.2352 | 0.4849 | 0.6924 | 0.8896 | 0.8324 | 13.9M |
+| Multi-modal | 0.240136 | 0.489898 | 0.685882 | 0.88058 | 0.828586 | 7.7M | **REDO**
 | Multi-output | | | | | |  |
 | Multi-hybrid | | | | | |  |
 | Full | | | | | |  |
@@ -28,8 +28,8 @@ Baseline & multi-modal model results were more extensively tuned and the average
 
 | Model | MSE ↓ | RMSE ↓ | R2 ↑ | CI ↑ | Pearson ↑ | Params |
 |-------|-----|------|----|----|---------|--------|
-| Baseline | 0.834226 | 0.913028 | 0.330966 | 0.780424 | 0.588732 | 1.6M |
-| Multi-modal | 0.858424 | 0.926012 | 0.311564 | 0.763706 | 0.570308 | 9.5M |
+| Baseline | 0.8609 | 0.9274 | 0.3096 | 0.7664 | 0.5677 | 1.7M |
+| Multi-modal | 0.858424 | 0.926012 | 0.311564 | 0.763706 | 0.570308 | 9.5M | **REDO**
 | Multi-output | | | | | | 45.1M |
 | Multi-hybrid | | | | | |  |
 | Full | | | | | |  |
@@ -44,8 +44,8 @@ Baseline & multi-modal model results were more extensively tuned and the average
 
 | Model | MSE ↓ | RMSE ↓ | R2 ↑ | CI ↑ | Pearson ↑ | Params |
 |-------|-----|------|----|----|---------|--------|
-| Baseline | 0.159508 | 0.399382 | 0.761456 | 0.859122 | 0.87306 | 19.7M |
-| Multi-modal | 0.195592 | 0.442218 | 0.707488 | 0.84797 | 0.841234 | 10.1M |
+| Baseline | 0.159508 | 0.399382 | 0.761456 | 0.859122 | 0.87306 | 19.7M | **REDO**
+| Multi-modal | 0.195592 | 0.442218 | 0.707488 | 0.84797 | 0.841234 | 10.1M | **REDO**
 | Multi-output | | | | | |  |
 | Multi-hybrid | | | | | |  |
 | Full | | | | | |  |
@@ -57,8 +57,8 @@ Baseline & multi-modal model results were more extensively tuned and the average
 
 | Model | MSE ↓ | RMSE ↓ | R2 ↑ | CI ↑ | Pearson ↑ | Params |
 |-------|-----|------|----|----|---------|--------|
-| Baseline | 0.375726 | 0.612934 | 0.38079 | 0.733286 | 0.642546 | 11.9M |
-| Multi-modal | 0.427438 | 0.653584 | 0.29555 | 0.709544 | 0.550116 | 18.6M |
+| Baseline | 0.3702 | 0.6084 | 0.3899 | 0.7335 | 0.6481 | 15.4M |
+| Multi-modal | 0.427438 | 0.653584 | 0.29555 | 0.709544 | 0.550116 | 18.6M | **REDO**
 | Multi-output | | | | | | 45.1M |
 | Multi-hybrid | | | | | |  |
 | Full | | | | | |  |
@@ -72,13 +72,21 @@ Baseline & multi-modal model results were more extensively tuned and the average
 ### Random Split
 
 | Model | MSE pKd ↓ | MSE pKi ↓ | MSE KIBA ↓ | Accuracy ↑ | F1 ↑ | AUROC ↑ | AUPRC ↑ | Params |
-| Multi-output | | | | | | | | |
-| Multi-hybrid | | | | | | | | |
+|-------|-----|------|----|----|---------|--------|---------|--------|
+| Multi-output | 0.4212 | 0.6633 | 0.2358 | 0.8742 | 0.7679 | 0.9253 | 0.8451 | 44.3M |
+| Multi-hybrid | 0.3720 | 0.7014 | 0.2104 | 0.8627 | 0.7556 | 0.9225 | 0.8320 | 65.9M |
 | Full | | | | | | | | |
 
 ### Cold Split
 
 | Model | MSE pKd ↓ | MSE pKi ↓ | MSE KIBA ↓ | Accuracy ↑ | F1 ↑ | AUROC ↑ | AUPRC ↑ | Params |
-| Multi-output | 0.9154 | 0.9453 | 0.4686 | 0.8363 | 0.6651 | 0.8726 | 0.7418 | 45.1M |
-| Multi-hybrid | | | | | | | | |
+|-------|-----|------|----|----|---------|--------|---------|--------|
+| Multi-output | 0.9612 | 0.8288 | 0.4535 | 0.8458 | 0.6929 | 0.8816 | 0.7713 | 45.1M |
+| Multi-hybrid | 1.2683 | 0.8862 | 0.4701 | 0.8300 | 0.6785 | 0.8743 | 0.7446 | 65.9M |
 | Full | | | | | | | | |
+
+# Comparisons
+
+## Simple residual encoder vs. transformer encoder
+
+## Attentive vs. concat-based aggregator
