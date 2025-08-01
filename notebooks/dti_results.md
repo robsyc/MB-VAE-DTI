@@ -58,7 +58,7 @@ Baseline & multi-modal model results were more extensively tuned and the average
 | Model | MSE ↓ | RMSE ↓ | R2 ↑ | CI ↑ | Pearson ↑ | Params |
 |-------|-----|------|----|----|---------|--------|
 | Baseline | 0.3702 | 0.6084 | 0.3899 | 0.7335 | 0.6481 | 15.4M |
-| Multi-modal | 0.427438 | 0.653584 | 0.29555 | 0.709544 | 0.550116 | 18.6M | **REDO**
+| Multi-modal | 0.4120 | 0.6418 | 0.3210 | 0.7243 | 0.5824 | 31.1M |
 | Multi-output | 0.4535 | 0.6734 | 0.2525 | 0.7171 | 0.5808 | 45.1M |
 | Multi-hybrid | 0.4701 | 0.6856 | 0.2252 | 0.7374 | 0.5883 | 65.9M |
 | Full | | | | | |  |
@@ -90,3 +90,7 @@ Baseline & multi-modal model results were more extensively tuned and the average
 ## Simple residual encoder vs. transformer encoder
 
 ## Attentive vs. concat-based aggregator
+
+## Most informative embedding (in models supporting attentive aggregator)
+
+## Single embedding vs. multi-embedding vs. fingerprints

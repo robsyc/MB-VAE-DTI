@@ -477,6 +477,128 @@ def setup_model_full(
             logger.warning(f"Checkpoint file not found: {config.model.checkpoint_path}")
             logger.warning("Continuing without pretrained weights")
     
+    # one-time load of DiffMS & contrastive drug-encoder weights
+    if True and model_phase == "pretrain_drug":
+        if os.path.exists("data/diffms_decoder.ckpt"):
+            logger.info("Loading DiffMS decoder weights...")
+            try:
+                # Load state_dict
+                state_dict = torch.load("data/diffms_decoder.ckpt", map_location='cpu')
+                state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
+                
+                # Get our drug_decoder state dict for comparison
+                target_state_dict = model.drug_decoder.state_dict()
+                loaded_count = 0
+                skipped_count = 0
+                
+                for param_name, param_value in state_dict.items():
+                    # Skip noise_schedule parameters (not part of the transformer)
+                    if param_name.startswith('noise_schedule'):
+                        continue
+                        
+                    if param_name in target_state_dict:
+                        if target_state_dict[param_name].shape == param_value.shape:
+                            target_state_dict[param_name] = param_value
+                            loaded_count += 1
+                            logger.debug(f"✓ Loaded {param_name}: {param_value.shape}")
+                        else:
+                            skipped_count += 1
+                            logger.debug(f"✗ Skipped {param_name}: {param_value.shape} → {target_state_dict[param_name].shape}")
+                    else:
+                        skipped_count += 1
+                        logger.debug(f"✗ Skipped {param_name}: not found in target model")
+                
+                # Load the modified state dict
+                model.drug_decoder.load_state_dict(target_state_dict, strict=False)
+                logger.info(f"DiffMS decoder weights loaded: {loaded_count} direct, {skipped_count} skipped")
+                
+            except Exception as e:
+                logger.warning(f"Error loading DiffMS decoder weights: {e}")
+                logger.warning("Continuing without DiffMS decoder weights")
+        
+        if os.path.exists("data/full_drug_encoder.ckpt"):
+            logger.info("Loading full drug encoder weights...")
+            try:
+                state_dict = torch.load("data/full_drug_encoder.ckpt", map_location='cpu')
+                loaded_components = []
+                
+                # 1. Load drug_encoders weights
+                for feat_name in model.drug_encoders.keys():
+                    encoder_prefix = f"drug_encoders.{feat_name}."
+                    encoder_state_dict = {}
+                    
+                    for param_name, param_value in state_dict.items():
+                        if param_name.startswith(encoder_prefix):
+                            # Remove the prefix to get the parameter name within the encoder
+                            clean_name = param_name[len(encoder_prefix):]
+                            encoder_state_dict[clean_name] = param_value
+                    
+                    if encoder_state_dict:
+                        try:
+                            model.drug_encoders[feat_name].load_state_dict(encoder_state_dict, strict=False)
+                            loaded_components.append(f"drug_encoders.{feat_name}")
+                            logger.debug(f"Loaded weights for drug_encoders.{feat_name}")
+                        except Exception as e:
+                            logger.warning(f"Failed to load weights for drug_encoders.{feat_name}: {e}")
+                
+                # 2. Load drug_aggregator weights (if it's not Identity)
+                if not isinstance(model.drug_aggregator, torch.nn.Identity):
+                    aggregator_prefix = "drug_aggregator."
+                    aggregator_state_dict = {}
+                    
+                    for param_name, param_value in state_dict.items():
+                        if param_name.startswith(aggregator_prefix):
+                            clean_name = param_name[len(aggregator_prefix):]
+                            aggregator_state_dict[clean_name] = param_value
+                    
+                    if aggregator_state_dict:
+                        try:
+                            model.drug_aggregator.load_state_dict(aggregator_state_dict, strict=False)
+                            loaded_components.append("drug_aggregator")
+                            logger.debug("Loaded weights for drug_aggregator")
+                        except Exception as e:
+                            logger.warning(f"Failed to load weights for drug_aggregator: {e}")
+                
+                # 3. Load drug_contrastive_head weights
+                contrastive_prefix = "drug_contrastive_head."
+                contrastive_state_dict = {}
+                
+                for param_name, param_value in state_dict.items():
+                    if param_name.startswith(contrastive_prefix):
+                        clean_name = param_name[len(contrastive_prefix):]
+                        contrastive_state_dict[clean_name] = param_value
+                
+                if contrastive_state_dict:
+                    try:
+                        model.drug_contrastive_head.load_state_dict(contrastive_state_dict, strict=False)
+                        loaded_components.append("drug_contrastive_head")
+                        logger.debug("Loaded weights for drug_contrastive_head")
+                    except Exception as e:
+                        logger.warning(f"Failed to load weights for drug_contrastive_head: {e}")
+                
+                # 4. Load drug_kl_head weights
+                kl_prefix = "drug_kl_head."
+                kl_state_dict = {}
+                
+                for param_name, param_value in state_dict.items():
+                    if param_name.startswith(kl_prefix):
+                        clean_name = param_name[len(kl_prefix):]
+                        kl_state_dict[clean_name] = param_value
+                
+                if kl_state_dict:
+                    try:
+                        model.drug_kl_head.load_state_dict(kl_state_dict, strict=False)
+                        loaded_components.append("drug_kl_head")
+                        logger.debug("Loaded weights for drug_kl_head")
+                    except Exception as e:
+                        logger.warning(f"Failed to load weights for drug_kl_head: {e}")
+                
+                logger.info(f"Full drug encoder weights loaded successfully for components: {loaded_components}")
+                
+            except Exception as e:
+                logger.warning(f"Error loading full drug encoder weights: {e}")
+                logger.warning("Continuing without full drug encoder weights")
+    
     return model
 
 
