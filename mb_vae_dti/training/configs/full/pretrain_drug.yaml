@@ -1,5 +1,5 @@
 training:
-  learning_rate: 0.0015
+  learning_rate: 0.0005
   max_epochs: 100
   early_stopping_patience: 12
   gradient_clip_val: null      # Disabled - try without first (https://medium.com/@kaveh.kamali/a-beginners-guide-to-gradient-clipping-with-pytorch-lightning-c394d28e2b69)
@@ -7,7 +7,7 @@ training:
   scheduler: "one_cycle"       # "const", "step", "one_cycle", or "cosine"
 
 loss:
-  weights: [0, 0.01, 0.1, 1] # for accuracy, complexity, contrastive, reconstruction
+  weights: [0, 0.1, 1, 0] # for accuracy, complexity, contrastive, reconstruction
   # dti_weights: [1.0, 0.903964, 0.282992, 0.755172] # for binary, pKd, pKi, KIBA (real values are weighted ~ representation in train)
   diff_weights: [1, 5] # for nodes X and edges E
   contrastive_temp: 0.1
@@ -46,6 +46,7 @@ model:
   # checkpoint_path: 
   # drug_checkpoint_path: "data/results/full/pretrain/drug/full_pretrain_drug/checkpoints/best_model.ckpt"
   # target_checkpoint_path: 
+  # might want to add something for the DiffMS checkpoint ...
 
   encoder_type: "transformer" # transformer or resnet
   aggregator_type: "attentive" # attentive or concat

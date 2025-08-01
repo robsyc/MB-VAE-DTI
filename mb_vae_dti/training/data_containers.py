@@ -159,7 +159,7 @@ class LossData:
         
         for weight, loss_component in zip(weights, loss_components):
             if weight != 0 and loss_component is not None:
-                total_loss = total_loss + weight * loss_component
+                total_loss += weight * loss_component
         
         return total_loss
 
