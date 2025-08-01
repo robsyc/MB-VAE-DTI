@@ -54,10 +54,10 @@ model:
     n_layers: 5
     input_dims: {'X': 16, 'E': 5, 'y': 1037} # after augmentation
     output_dims: {'X': 8, 'E': 5, 'y': 1024} # y_output_dim == embedding_dim
-    hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 1024}
-    hidden_dims : {'dx': 256, 'de': 64, 'dy': 512, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 1024}
+    hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 2048}
+    hidden_dims : {'dx': 256, 'de': 64, 'dy': 1024, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 1024}
 
   diffusion_steps: 500
   sample_every_val: 5
-  val_samples_per_embedding: 3
-  test_samples_per_embedding: 5
+  val_samples_per_embedding: 5
+  test_samples_per_embedding: 10

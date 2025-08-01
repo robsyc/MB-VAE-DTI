@@ -507,7 +507,7 @@ class FullDTIModel(AbstractDTIModel):
         self, 
         embedding_data: EmbeddingData, 
         batch_data: BatchData
-    ) -> PlaceHolder:
+        ) -> PlaceHolder:
         """
         Apply diffusion decoder to reconstruct drug graphs.
         
@@ -585,7 +585,7 @@ class FullDTIModel(AbstractDTIModel):
         batch_data: BatchData, 
         prediction_data: PredictionData,
         test: bool = False
-    ) -> torch.Tensor:
+        ) -> torch.Tensor:
         """
         Compute diffusion loss term Lt (KL between true and predicted posterior).
         Adapted from DiGress/DiffMS for our data structure.
@@ -652,7 +652,7 @@ class FullDTIModel(AbstractDTIModel):
         batch_data: BatchData, 
         embedding_data: EmbeddingData,
         test: bool = False
-    ) -> torch.Tensor:
+        ) -> torch.Tensor:
         """
         Compute reconstruction probability at t=0.
         Adapted from DiGress/DiffMS for our data structure.
@@ -737,7 +737,7 @@ class FullDTIModel(AbstractDTIModel):
         embedding_data: EmbeddingData, 
         prediction_data: PredictionData,
         test: bool = False
-    ) -> torch.Tensor:
+        ) -> torch.Tensor:
         """
         Computes an estimator for the variational lower bound (NLL).
         Adapted from DiGress/DiffMS for our data structure.
@@ -787,7 +787,7 @@ class FullDTIModel(AbstractDTIModel):
         self, 
         batch: Dict[str, Any],
         step: Literal["train", "val", "test"]
-    ) -> Tuple[BatchData, EmbeddingData, PredictionData, LossData]:
+        ) -> Tuple[BatchData, EmbeddingData, PredictionData, LossData]:
         """
         Common step logic shared across train/val/test.
         
