@@ -483,11 +483,13 @@ def setup_model_full(
             logger.info("Loading DiffMS decoder weights...")
             try:
                 # Load state_dict
-                state_dict = torch.load("data/diffms_decoder.ckpt", map_location='cpu')
+                state_dict = torch.load("data/diffms_decoder.ckpt", map_location='cpu')["state_dict"]
                 state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
+                logger.debug(f"DiffMS decoder state dict: {state_dict.keys()}")
                 
                 # Get our drug_decoder state dict for comparison
                 target_state_dict = model.drug_decoder.state_dict()
+                logger.debug(f"Drug decoder state dict: {target_state_dict.keys()}")
                 loaded_count = 0
                 skipped_count = 0
                 
@@ -503,10 +505,10 @@ def setup_model_full(
                             logger.debug(f"✓ Loaded {param_name}: {param_value.shape}")
                         else:
                             skipped_count += 1
-                            logger.debug(f"✗ Skipped {param_name}: {param_value.shape} → {target_state_dict[param_name].shape}")
+                            logger.info(f"✗ Skipped {param_name}: {param_value.shape} → {target_state_dict[param_name].shape}")
                     else:
                         skipped_count += 1
-                        logger.debug(f"✗ Skipped {param_name}: not found in target model")
+                        logger.info(f"✗ Skipped {param_name}: not found in target model")
                 
                 # Load the modified state dict
                 model.drug_decoder.load_state_dict(target_state_dict, strict=False)
@@ -519,10 +521,12 @@ def setup_model_full(
         if os.path.exists("data/full_drug_encoder.ckpt"):
             logger.info("Loading full drug encoder weights...")
             try:
-                state_dict = torch.load("data/full_drug_encoder.ckpt", map_location='cpu')
+                state_dict = torch.load("data/full_drug_encoder.ckpt", map_location='cpu')["state_dict"]
+                logger.debug(f"Full drug encoder state dict: {state_dict.keys()}")
                 loaded_components = []
                 
                 # 1. Load drug_encoders weights
+                logger.debug(f"Drug encoders: {model.drug_encoders.keys()}")
                 for feat_name in model.drug_encoders.keys():
                     encoder_prefix = f"drug_encoders.{feat_name}."
                     encoder_state_dict = {}
@@ -537,11 +541,12 @@ def setup_model_full(
                         try:
                             model.drug_encoders[feat_name].load_state_dict(encoder_state_dict, strict=False)
                             loaded_components.append(f"drug_encoders.{feat_name}")
-                            logger.debug(f"Loaded weights for drug_encoders.{feat_name}")
+                            logger.info(f"Loaded weights for drug_encoders.{feat_name}")
                         except Exception as e:
                             logger.warning(f"Failed to load weights for drug_encoders.{feat_name}: {e}")
                 
                 # 2. Load drug_aggregator weights (if it's not Identity)
+                logger.debug(f"Drug aggregator: {model.drug_aggregator}")
                 if not isinstance(model.drug_aggregator, torch.nn.Identity):
                     aggregator_prefix = "drug_aggregator."
                     aggregator_state_dict = {}
@@ -555,11 +560,12 @@ def setup_model_full(
                         try:
                             model.drug_aggregator.load_state_dict(aggregator_state_dict, strict=False)
                             loaded_components.append("drug_aggregator")
-                            logger.debug("Loaded weights for drug_aggregator")
+                            logger.info("Loaded weights for drug_aggregator")
                         except Exception as e:
                             logger.warning(f"Failed to load weights for drug_aggregator: {e}")
                 
                 # 3. Load drug_contrastive_head weights
+                logger.debug(f"Drug contrastive head: {model.drug_contrastive_head}")
                 contrastive_prefix = "drug_contrastive_head."
                 contrastive_state_dict = {}
                 
@@ -572,11 +578,12 @@ def setup_model_full(
                     try:
                         model.drug_contrastive_head.load_state_dict(contrastive_state_dict, strict=False)
                         loaded_components.append("drug_contrastive_head")
-                        logger.debug("Loaded weights for drug_contrastive_head")
+                        logger.info("Loaded weights for drug_contrastive_head")
                     except Exception as e:
                         logger.warning(f"Failed to load weights for drug_contrastive_head: {e}")
                 
                 # 4. Load drug_kl_head weights
+                logger.debug(f"Drug kl head: {model.drug_kl_head}")
                 kl_prefix = "drug_kl_head."
                 kl_state_dict = {}
                 
@@ -589,7 +596,7 @@ def setup_model_full(
                     try:
                         model.drug_kl_head.load_state_dict(kl_state_dict, strict=False)
                         loaded_components.append("drug_kl_head")
-                        logger.debug("Loaded weights for drug_kl_head")
+                        logger.info("Loaded weights for drug_kl_head")
                     except Exception as e:
                         logger.warning(f"Failed to load weights for drug_kl_head: {e}")
                 

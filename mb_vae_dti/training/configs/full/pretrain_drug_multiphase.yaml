@@ -7,7 +7,7 @@ training:
   scheduler: "one_cycle"       # "const", "step", "one_cycle", or "cosine"
 
 loss:
-  weights: [0, 0.01, 0.1, 1] # for accuracy, complexity, contrastive, reconstruction
+  weights: [0, 0.1, 1, 0] # for accuracy, complexity, contrastive, reconstruction
   # dti_weights: [1.0, 0.903964, 0.282992, 0.755172] # for binary, pKd, pKi, KIBA (real values are weighted ~ representation in train)
   diff_weights: [1, 5] # for nodes X and edges E
   contrastive_temp: 0.1
@@ -59,6 +59,6 @@ model:
     hidden_dims : {'dx': 256, 'de': 64, 'dy': 1024, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 1024}
 
   diffusion_steps: 500
-  sample_every_val: 4
-  val_samples_per_embedding: 4
-  test_samples_per_embedding: 8
+  sample_every_val: 5
+  val_samples_per_embedding: 5
+  test_samples_per_embedding: 10

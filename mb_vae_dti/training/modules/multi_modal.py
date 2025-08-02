@@ -129,6 +129,12 @@ class MultiModalDTIModel(AbstractDTIModel):
             
         # Setup metrics using AbstractDTIModel's method
         self.setup_metrics(phase=phase, finetune_score=finetune_score)
+        
+        # Initialize attention tracking for testing
+        if self.attentive:
+            self.drug_attention_accumulator = {}
+            self.target_attention_accumulator = {}
+            self.test_batch_count = 0
     
 
     def _create_batch_data( 
@@ -272,6 +278,62 @@ class MultiModalDTIModel(AbstractDTIModel):
                 batch_data.dti_targets
             )
         
+        # Track attention weights for attentive aggregator
+        if self.attentive:
+            self.test_batch_count += 1
+            
+            # Track drug attention weights
+            if embedding_data.drug_attention is not None:
+                drug_feat_names = list(self.hparams.drug_features.keys())
+                drug_att_weights = embedding_data.drug_attention.squeeze(1)  # (batch_size, n_features)
+                
+                for i, feat_name in enumerate(drug_feat_names):
+                    if feat_name not in self.drug_attention_accumulator:
+                        self.drug_attention_accumulator[feat_name] = []
+                    self.drug_attention_accumulator[feat_name].append(
+                        drug_att_weights[:, i].mean().item()
+                    )
+            
+            # Track target attention weights
+            if embedding_data.target_attention is not None:
+                target_feat_names = list(self.hparams.target_features.keys())
+                target_att_weights = embedding_data.target_attention.squeeze(1)  # (batch_size, n_features)
+                
+                for i, feat_name in enumerate(target_feat_names):
+                    if feat_name not in self.target_attention_accumulator:
+                        self.target_attention_accumulator[feat_name] = []
+                    self.target_attention_accumulator[feat_name].append(
+                        target_att_weights[:, i].mean().item()
+                    )
+        
         # Log MSE accuracy loss & return to trainer
         self.log("test/loss", loss_data.accuracy)
         return loss_data.accuracy
+    
+    def on_test_epoch_end(self):
+        """Compute and log test metrics and attention weights."""
+        # Call parent method to log standard metrics
+        super().on_test_epoch_end()
+        
+        # Log attention weights if using attentive aggregator
+        if self.attentive and self.test_batch_count > 0:
+            # Compute average drug attention weights
+            if self.drug_attention_accumulator:
+                drug_avg_attention = {
+                    feat_name: sum(weights) / len(weights)
+                    for feat_name, weights in self.drug_attention_accumulator.items()
+                }
+                self.log("test/drug_att", drug_avg_attention)
+            
+            # Compute average target attention weights
+            if self.target_attention_accumulator:
+                target_avg_attention = {
+                    feat_name: sum(weights) / len(weights)
+                    for feat_name, weights in self.target_attention_accumulator.items()
+                }
+                self.log("test/target_att", target_avg_attention)
+            
+            # Reset
+            self.drug_attention_accumulator = {}
+            self.target_attention_accumulator = {}
+            self.test_batch_count = 0
