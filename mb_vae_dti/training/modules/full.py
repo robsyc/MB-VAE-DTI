@@ -354,8 +354,8 @@ class FullDTIModel(AbstractDTIModel):
     # Same forward pass as in multi_hybrid.py
     def forward(
         self, 
-        drug_features: Optional[List[torch.Tensor]], 
-        target_features: Optional[List[torch.Tensor]]
+        drug_features: Optional[Union[List[torch.Tensor], torch.Tensor]], 
+        target_features: Optional[Union[List[torch.Tensor], torch.Tensor]]
         ) -> Tuple[EmbeddingData, PredictionData]:
         """
         Forward pass through the multi-modal two-tower model.
@@ -372,26 +372,35 @@ class FullDTIModel(AbstractDTIModel):
 
         # Encode & aggregate drug and/or target features
         if self.phase != "pretrain_target":
+            # Always treat drug_features as a list for uniformity
+            if isinstance(drug_features, torch.Tensor):
+                drug_features = [drug_features]
             drug_embeddings = [
                 self.drug_encoders[feat_name](feat)
                 for feat_name, feat in zip(self.hparams.drug_features, drug_features)
             ]
-            if self.attentive:
+
+            if len(drug_embeddings) == 1:
+                embedding_data.drug_embedding = drug_embeddings[0]
+            elif self.attentive:
                 embedding_data.drug_embedding, embedding_data.drug_attention = self.drug_aggregator(drug_embeddings)
             else:
                 embedding_data.drug_embedding = self.drug_aggregator(drug_embeddings)
-            
             # Variational head for drug embedding
             embedding_data.drug_embedding, \
             embedding_data.drug_mu, \
             embedding_data.drug_logvar = self.drug_kl_head(embedding_data.drug_embedding)
 
         if self.phase != "pretrain_drug":
+            if isinstance(target_features, torch.Tensor):
+                target_features = [target_features]
             target_embeddings = [
                 self.target_encoders[feat_name](feat)
                 for feat_name, feat in zip(self.hparams.target_features, target_features)
             ]
-            if self.attentive:
+            if len(target_embeddings) == 1:
+                embedding_data.target_embedding = target_embeddings[0]
+            elif self.attentive:
                 embedding_data.target_embedding, embedding_data.target_attention = self.target_aggregator(target_embeddings)
             else:
                 embedding_data.target_embedding = self.target_aggregator(target_embeddings)
@@ -521,7 +530,6 @@ class FullDTIModel(AbstractDTIModel):
         if self.phase == "pretrain_target":
             return None
         
-        # Apply graph transformer decoder
         G_hat = self.drug_decoder(
             X=torch.cat([batch_data.graph_data.X_t, batch_data.graph_data.X_extra], dim=2).float(),
             E=batch_data.graph_data.E_t.float(), # no extra edge features

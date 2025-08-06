@@ -292,7 +292,6 @@ def setup_model_multi_output(
 
 
 def setup_model_multi_hybrid(
-        # TODO: UPDATE TO NEW MULTI-HYBRID MODEL & CONFIGS
     config: DictConfig,
     feature_dims: Dict[str, Dict[str, int]],
     dataset: Dataset = None,
@@ -379,7 +378,7 @@ def setup_model_full(
     split: Split = None,
     phase: TrainingPhase = None,
     pretrain_target: PretrainTarget = None
-):
+    ):
     # Set finetune score based on phase & dataset
     if phase == "finetune":
         finetune_score = "Y_pKd" if dataset == "DAVIS" else "Y_KIBA"
@@ -518,7 +517,7 @@ def setup_model_full(
                 logger.warning(f"Error loading DiffMS decoder weights: {e}")
                 logger.warning("Continuing without DiffMS decoder weights")
         
-        if os.path.exists("data/full_drug_encoder.ckpt"):
+        if False and os.path.exists("data/full_drug_encoder.ckpt"):
             logger.info("Loading full drug encoder weights...")
             try:
                 state_dict = torch.load("data/full_drug_encoder.ckpt", map_location='cpu')["state_dict"]
@@ -794,6 +793,8 @@ def train_single_config(
                 shutil.rmtree(wandb_dir)
                 logger.info(f"Cleaned up wandb directory: {wandb_dir}")
         else:
+            # TODO: this is a bit of a hack bcs it doesn't take into account
+            # the fact that the path could be e.g. best_model-v1.ckpt
             best_model_path = save_dir / "checkpoints" / "best_model.ckpt"
             if best_model_path.exists():
                 logger.info(f"Saved best model to {best_model_path}")

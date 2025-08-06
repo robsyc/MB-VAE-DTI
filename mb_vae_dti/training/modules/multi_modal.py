@@ -323,7 +323,8 @@ class MultiModalDTIModel(AbstractDTIModel):
                     feat_name: sum(weights) / len(weights)
                     for feat_name, weights in self.drug_attention_accumulator.items()
                 }
-                self.log("test/drug_att", drug_avg_attention)
+                for feat_name, avg_att in drug_avg_attention.items():
+                    self.log(f"test/drug_att_{feat_name}", avg_att)
             
             # Compute average target attention weights
             if self.target_attention_accumulator:
@@ -331,7 +332,8 @@ class MultiModalDTIModel(AbstractDTIModel):
                     feat_name: sum(weights) / len(weights)
                     for feat_name, weights in self.target_attention_accumulator.items()
                 }
-                self.log("test/target_att", target_avg_attention)
+                for feat_name, avg_att in target_avg_attention.items():
+                    self.log(f"test/target_att_{feat_name}", avg_att)
             
             # Reset
             self.drug_attention_accumulator = {}

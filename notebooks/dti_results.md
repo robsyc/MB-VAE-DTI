@@ -34,7 +34,7 @@ Baseline & multi-modal model results were more extensively tuned and the average
 | Multi-hybrid | 0.8860 | 0.9413 | 0.2895 | 0.7346 | 0.5858  | 65.9M  |
 | Full         |        |        |        |        |         |        |
 |--------------|--------|--------|--------|--------|---------|--------|
-| Iliadis      | 0.6189 |        | -0.0426 | 0.7304 |         | 6.3M   | (MLP-MLP)
+| Iliadis      | 0.6189 |        |-0.0426 | 0.7304 |         | 6.3M   | (MLP-MLP)
 | TxGemma      | 0.555  |        |        |        |         | 27B    | (27B-Predict)
 | SSM-DTA      | 0.8019 |        | 0.2803 |        |         |        |
 
@@ -47,7 +47,7 @@ Baseline & multi-modal model results were more extensively tuned and the average
 | Baseline     | 0.1573 | 0.3966 | 0.7648 | 0.8595 | 0.8749    | 16.9M  |
 | Multi-modal  | 0.1955 | 0.4422 | 0.7074 | 0.8479 | 0.8412    | 10.1M  | **REDO**
 | Multi-output | 0.2358 | 0.4856 | 0.6475 | 0.8389 | 0.8213    | 44.3M  |
-| Multi-hybrid | 0.2103 | 0.4587 | 0.6853 | 0.8618 | 0.8536    | 65.9M  |
+| Multi-hybrid | 0.2104 | 0.4587 | 0.6853 | 0.8618 | 0.8536    | 65.9M  |
 | Full | | | | | |  |
 |--------------|--------|--------|--------|--------|---------|--------|
 | Iliadis      | 0.1994 |        | 0.7187 | 0.8379 |         | 2.1M   | (MLP-MLP)

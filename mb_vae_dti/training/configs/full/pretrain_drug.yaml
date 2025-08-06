@@ -1,33 +1,33 @@
 training:
-  learning_rate: 0.0002
-  max_epochs: 75
+  learning_rate: 0.0005
+  max_epochs: 50
   early_stopping_patience: 12
   gradient_clip_val: null      # Disabled - try without first (https://medium.com/@kaveh.kamali/a-beginners-guide-to-gradient-clipping-with-pytorch-lightning-c394d28e2b69)
   weight_decay: 0.0001         # Increase if overfitting, decrease if underfitting
   scheduler: "one_cycle"       # "const", "step", "one_cycle", or "cosine"
 
 loss:
-  weights: [0, 0.01, 0.1, 1] # for accuracy, complexity, contrastive, reconstruction
+  weights: [0, 0.01, 0, 1] # for accuracy, complexity, contrastive, reconstruction
   # dti_weights: [1.0, 0.903964, 0.282992, 0.755172] # for binary, pKd, pKi, KIBA (real values are weighted ~ representation in train)
   diff_weights: [1, 5] # for nodes X and edges E
   contrastive_temp: 0.1
 
 data:
-  batch_size: 128
+  batch_size: 64
   num_workers: 4               # increase for multi-GPU training ~ depends if bottleneck in data loading or processing
   pin_memory: true             # Set to false for CPU training (true for GPU)
   shuffle_train: true
   drop_last: false             # no dropping of last batch when it is incomplete
-  load_in_memory: false
-  h5_path: "data/input/drugs_full.h5torch" # also drugs.h5torch & targets.h5torch
-  drug_features: ["EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"] # "FP-Morgan", "EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"
+  load_in_memory: true
+  h5_path: "data/input/drugs.h5torch" # also drugs.h5torch & targets.h5torch
+  drug_features: ["FP-Morgan"] # "FP-Morgan", "EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"
   target_features: null # "FP-ESP", "EMB-ESM", "EMB-NT"
 
 logging:
   project_name: "MB-VAE-DTI"
   log_every_n_steps: 100
   use_wandb: true
-  save_dir: "data/results/full/pretrain/drug"
+  save_dir: "data/results/full/pretrain/drugfp"
   
 hardware:
   gpus: 1                      # run on cpu or set to 1 for gpu
@@ -59,6 +59,6 @@ model:
     hidden_dims : {'dx': 256, 'de': 64, 'dy': 1024, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 1024}
 
   diffusion_steps: 500
-  sample_every_val: 4
-  val_samples_per_embedding: 4
-  test_samples_per_embedding: 8
+  sample_every_val: 5
+  val_samples_per_embedding: 5
+  test_samples_per_embedding: 10
