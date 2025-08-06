@@ -1,6 +1,6 @@
 training:
   learning_rate: 0.0005
-  max_epochs: 100
+  max_epochs: 60
   early_stopping_patience: 12
   gradient_clip_val: null      # Disabled - try without first (https://medium.com/@kaveh.kamali/a-beginners-guide-to-gradient-clipping-with-pytorch-lightning-c394d28e2b69)
   weight_decay: 0.0001         # Increase if overfitting, decrease if underfitting
@@ -13,7 +13,7 @@ loss:
   # contrastive_temp: 0.1
 
 data:
-  batch_size: 32
+  batch_size: 64
   num_workers: 4               # increase for multi-GPU training ~ depends if bottleneck in data loading or processing
   pin_memory: true             # Set to false for CPU training (true for GPU)
   shuffle_train: true
@@ -37,18 +37,18 @@ hardware:
   seed: 42
 
 model:
-  embedding_dim: 1024  # output representation of a drug/target encoding brach
-  hidden_dim: 512      # within-network dimensionality
+  embedding_dim: 768  # output representation of a drug/target encoding brach
+  hidden_dim: 128      # within-network dimensionality
   factor: 4            # expansion / contraction factor in mlp and att blocks respectively
   n_layers: 3          # number of residual layers in mlp and att blocks
   activation: "relu"
-  dropout: 0.1
+  dropout: 0.2
   bias: true
   checkpoint_path: "data/results/baseline/KIBA/cold/baseline_finetune_KIBA_cold/checkpoints/best_model.ckpt"
   drug_checkpoint_path: null
   target_checkpoint_path: null
 
-  encoder_type: "resnet" # transformer or resnet
+  encoder_type: "transformer" # transformer or resnet
   # aggregator_type: "attentive" # attentive or concat
 
   # graph_transformer_kwargs:

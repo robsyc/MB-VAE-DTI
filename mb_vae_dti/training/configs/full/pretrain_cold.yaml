@@ -1,13 +1,13 @@
 training:
-  learning_rate: 0.001
-  max_epochs: 100
+  learning_rate: 0.0004
+  max_epochs: 50
   early_stopping_patience: 12
   gradient_clip_val: null      # Disabled - try without first (https://medium.com/@kaveh.kamali/a-beginners-guide-to-gradient-clipping-with-pytorch-lightning-c394d28e2b69)
   weight_decay: 0.0001         # Increase if overfitting, decrease if underfitting
   scheduler: "one_cycle"       # "const", "step", "one_cycle", or "cosine"
 
 loss:
-  weights: [1, 0.001, 0.1, 1] # for accuracy, complexity, contrastive, reconstruction
+  weights: [1, 0.01, 0, 1] # for accuracy, complexity, contrastive, reconstruction
   dti_weights: [1.0, 0.903964, 0.282992, 0.755172] # for binary, pKd, pKi, KIBA (real values are weighted ~ representation in train)
   diff_weights: [1, 5] # for nodes X and edges E
   contrastive_temp: 0.1
@@ -20,8 +20,8 @@ data:
   drop_last: false             # no dropping of last batch when it is incomplete
   load_in_memory: true
   h5_path: "data/input/dti.h5torch" # also drugs.h5torch & targets.h5torch
-  drug_features: ["EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"] # "FP-Morgan", "EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"
-  target_features: ["EMB-ESM", "EMB-NT"] # "FP-ESP", "EMB-ESM", "EMB-NT"
+  drug_features: ["FP-Morgan"] # "FP-Morgan", "EMB-BiomedGraph", "EMB-BiomedImg", "EMB-BiomedText"
+  target_features: ["FP-ESP"] # "FP-ESP", "EMB-ESM", "EMB-NT"
 
 logging:
   project_name: "MB-VAE-DTI"
@@ -44,9 +44,9 @@ model:
   dropout: 0.2
   bias: true
   # checkpoint_path: "data/results/full/pretrain/cold/full_train_cold/checkpoints/best_model.ckpt"
-  drug_checkpoint_path: "data/results/full/pretrain/drug/full_pretrain_drug/checkpoints/best_model.ckpt"
-  target_checkpoint_path: "data/results/full/pretrain/target/full_pretrain_target/checkpoints/best_model.ckpt"
-  drug_checkpoint_path: null
+  drug_checkpoint_path: "data/results/full/pretrain/drugfp/full_pretrain_drug/checkpoints/best_model.ckpt"
+  # target_checkpoint_path: "data/results/full/pretrain/target/full_pretrain_target/checkpoints/best_model.ckpt"
+  # drug_checkpoint_path: null
   target_checkpoint_path: null
 
   encoder_type: "transformer" # transformer or resnet

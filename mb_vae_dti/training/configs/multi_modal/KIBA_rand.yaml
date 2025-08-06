@@ -13,7 +13,7 @@ loss:
   # contrastive_temp: 0.1
 
 data:
-  batch_size: 16
+  batch_size: 32
   num_workers: 4               # increase for multi-GPU training ~ depends if bottleneck in data loading or processing
   pin_memory: true             # Set to false for CPU training (true for GPU)
   shuffle_train: true
@@ -38,18 +38,18 @@ hardware:
 
 model:
   embedding_dim: 1024  # output representation of a drug/target encoding brach
-  hidden_dim: 256      # within-network dimensionality
+  hidden_dim: 512      # within-network dimensionality
   factor: 4            # expansion / contraction factor in mlp and att blocks respectively
   n_layers: 3          # number of residual layers in mlp and att blocks
   activation: "relu"
   dropout: 0.1
   bias: true
-  checkpoint_path: "data/results/multi_modal/KIBA/rand/multi_modal_finetune_KIBA_rand/checkpoints/best_model.ckpt"
+  checkpoint_path: null #"data/results/multi_modal/KIBA/rand/multi_modal_finetune_KIBA_rand/checkpoints/best_model.ckpt"
   drug_checkpoint_path: null
   target_checkpoint_path: null
 
   encoder_type: "resnet" # transformer or resnet
-  aggregator_type: "concat" # attentive or concat
+  aggregator_type: "attentive" # attentive or concat
 
   # graph_transformer_kwargs:
   #   n_layers: 5

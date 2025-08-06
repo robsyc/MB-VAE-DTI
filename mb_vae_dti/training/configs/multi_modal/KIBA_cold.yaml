@@ -1,6 +1,6 @@
 training:
   learning_rate: 0.0005
-  max_epochs: 100
+  max_epochs: 70
   early_stopping_patience: 12
   gradient_clip_val: null      # Disabled - try without first (https://medium.com/@kaveh.kamali/a-beginners-guide-to-gradient-clipping-with-pytorch-lightning-c394d28e2b69)
   weight_decay: 0.0001         # Increase if overfitting, decrease if underfitting
@@ -13,7 +13,7 @@ loss:
   # contrastive_temp: 0.1
 
 data:
-  batch_size: 64
+  batch_size: 32
   num_workers: 4               # increase for multi-GPU training ~ depends if bottleneck in data loading or processing
   pin_memory: true             # Set to false for CPU training (true for GPU)
   shuffle_train: true
@@ -42,7 +42,7 @@ model:
   factor: 4            # expansion / contraction factor in mlp and att blocks respectively
   n_layers: 3          # number of residual layers in mlp and att blocks
   activation: "relu"
-  dropout: 0.1
+  dropout: 0.15
   bias: true
   checkpoint_path: "data/results/multi_modal/KIBA/cold/multi_modal_finetune_KIBA_cold/checkpoints/best_model.ckpt"
   drug_checkpoint_path: null
