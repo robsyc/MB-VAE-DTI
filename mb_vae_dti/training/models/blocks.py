@@ -283,17 +283,17 @@ class CrossAttentionFusion(nn.Module):
             # MLP blocks
             self.mlp_a.append(nn.Sequential(
                 nn.LayerNorm(input_dim, bias=bias),
-                nn.Linear(input_dim, input_dim, bias=bias),
+                nn.Linear(input_dim, input_dim // factor, bias=bias),
                 self.activation,
                 nn.Dropout(dropout),
-                nn.Linear(input_dim, input_dim, bias=bias)
+                nn.Linear(input_dim // factor, input_dim, bias=bias)
             ))
             self.mlp_b.append(nn.Sequential(
                 nn.LayerNorm(input_dim, bias=bias),
-                nn.Linear(input_dim, input_dim, bias=bias),
+                nn.Linear(input_dim, input_dim // factor, bias=bias),
                 self.activation,
                 nn.Dropout(dropout),
-                nn.Linear(input_dim, input_dim, bias=bias)
+                nn.Linear(input_dim // factor, input_dim, bias=bias)
             ))
 
         # Final aggregation
@@ -318,8 +318,7 @@ class CrossAttentionFusion(nn.Module):
             # Cross-attention: bidirectional information flow with gating
             gate_a = self.cross_gates_b_to_a[i](torch.cat([a, b], dim=-1))
             gate_b = self.cross_gates_a_to_b[i](torch.cat([b, a], dim=-1))
-            a = a + gate_a * self.align_proj_b_to_a[i](b)
-            b = b + gate_b * self.align_proj_a_to_b[i](a)
+            a, b = a + gate_a * self.align_proj_b_to_a[i](b), b + gate_b * self.align_proj_a_to_b[i](a)
 
             # Self-attention: refine each embedding individually (like TransformerEncoder)
             a = a + a * self.self_gates_a[i](a)

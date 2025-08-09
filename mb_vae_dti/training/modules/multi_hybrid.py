@@ -123,7 +123,7 @@ class MultiHybridDTIModel(AbstractDTIModel):
                 )
             else:
                 self.drug_aggregator = torch.nn.Identity()  # No aggregation needed for single feature
-        
+            
             self.drug_contrastive_head = InfoNCEHead(
                 input_dim=embedding_dim,
                 proj_dim=hidden_dim // 2,
@@ -188,6 +188,12 @@ class MultiHybridDTIModel(AbstractDTIModel):
         # Setup metrics using AbstractDTIModel's method
         self.setup_metrics(phase=phase, finetune_score=finetune_score)
         
+        # Initialize attention tracking for testing (when using attentive aggregator)
+        if self.attentive:
+            self.drug_attention_accumulator = {}
+            self.target_attention_accumulator = {}
+            self.test_batch_count = 0
+        
     def _create_batch_data( 
             self, 
             batch: Dict[str, Any]
@@ -219,7 +225,7 @@ class MultiHybridDTIModel(AbstractDTIModel):
         Args:
             drug_features: Drug feature tensors [batch_size, drug_input_dim] (optional in case of pretrain_target)
             target_features: Target feature tensors [batch_size, target_input_dim] (optional in case of pretrain_drug)
-            
+        
         Returns:
             embedding_data: Structured drug & target embeddings (and attention weights if using attentive aggregator)
             prediction_data: Structured predictions with single-score dot-product prediction
@@ -407,6 +413,34 @@ class MultiHybridDTIModel(AbstractDTIModel):
             for name, value in loss_data.components.items():
                 self.log(f"test/loss_{name}", value)
         
+        # Track attention weights for attentive aggregator
+        if self.attentive:
+            self.test_batch_count += 1
+            
+            # Track drug attention weights
+            if hasattr(embedding_data, 'drug_attention') and embedding_data.drug_attention is not None:
+                drug_feat_names = list(self.hparams.drug_features.keys())
+                drug_att_weights = embedding_data.drug_attention.squeeze(1)  # (batch_size, n_features)
+                
+                for i, feat_name in enumerate(drug_feat_names):
+                    if feat_name not in self.drug_attention_accumulator:
+                        self.drug_attention_accumulator[feat_name] = []
+                    self.drug_attention_accumulator[feat_name].append(
+                        drug_att_weights[:, i].mean().item()
+                    )
+            
+            # Track target attention weights
+            if hasattr(embedding_data, 'target_attention') and embedding_data.target_attention is not None:
+                target_feat_names = list(self.hparams.target_features.keys())
+                target_att_weights = embedding_data.target_attention.squeeze(1)  # (batch_size, n_features)
+                
+                for i, feat_name in enumerate(target_feat_names):
+                    if feat_name not in self.target_attention_accumulator:
+                        self.target_attention_accumulator[feat_name] = []
+                    self.target_attention_accumulator[feat_name].append(
+                        target_att_weights[:, i].mean().item()
+                    )
+        
         loss = loss_data.compute_loss(self.weights)
 
         # Log finetune/DTI test loss and return to trainer
@@ -414,3 +448,33 @@ class MultiHybridDTIModel(AbstractDTIModel):
         self.log("test/loss_accuracy", loss_data.accuracy) if loss_data.accuracy is not None else None
         self.log("test/loss", loss)
         return loss
+    
+    def on_test_epoch_end(self):
+        """Compute and log test metrics and attention weights."""
+        # Call parent method to log standard metrics
+        super().on_test_epoch_end()
+        
+        # Log attention weights if using attentive aggregator
+        if self.attentive and getattr(self, 'test_batch_count', 0) > 0:
+            # Compute average drug attention weights
+            if getattr(self, 'drug_attention_accumulator', None):
+                drug_avg_attention = {
+                    feat_name: sum(weights) / len(weights)
+                    for feat_name, weights in self.drug_attention_accumulator.items()
+                }
+                for feat_name, avg_att in drug_avg_attention.items():
+                    self.log(f"test/drug_att_{feat_name}", avg_att)
+            
+            # Compute average target attention weights
+            if getattr(self, 'target_attention_accumulator', None):
+                target_avg_attention = {
+                    feat_name: sum(weights) / len(weights)
+                    for feat_name, weights in self.target_attention_accumulator.items()
+                }
+                for feat_name, avg_att in target_avg_attention.items():
+                    self.log(f"test/target_att_{feat_name}", avg_att)
+            
+            # Reset
+            self.drug_attention_accumulator = {}
+            self.target_attention_accumulator = {}
+            self.test_batch_count = 0
