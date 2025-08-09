@@ -1,4 +1,4 @@
-# Multi-branch VAE for Drug-target Interaction Prediction and Target-conditioned de novo Drug Design (MB-VAE-DTI)
+# Multi-branch Neural Networks for Drug-target Interaction Prediction and Target-conditioned de novo Drug Design (MB-VAE-DTI)
 
 A machine-learning framework for the dyadic drug-target interaction (DTI) prediction problem that combines multi-branch variational autoencoders with discrete diffusion processes. Our architecture uniquely integrates multiple drug/target representations and modalities, pre-trained foundation models, and target-conditioned discrete diffusion-based molecule generation in a unified framework.
 
