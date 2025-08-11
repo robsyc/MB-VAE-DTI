@@ -44,7 +44,7 @@ model:
   activation: "relu"
   dropout: 0.2
   bias: true
-  checkpoint_path: null #"data/results/multi_modal/KIBA/rand/multi_modal_finetune_KIBA_rand/checkpoints/best_model.ckpt"
+  checkpoint_path: "data/results/multi_modal/KIBA/rand/multi_modal_finetune_KIBA_rand/checkpoints/best_model.ckpt"
   drug_checkpoint_path: null
   target_checkpoint_path: null
 

@@ -32,18 +32,18 @@ MB-VAE-DTI/
 │   │   ├── h5factory.py        # h5torch file creation
 │   │   └── split.py            # DTI dataset splitting
 |   |
-│   ├── training/               # Model training (in progress)
+│   ├── training/               # Model training
 │   │   ├── configs/            # Configuration files (incl. gridsearch & ensemble)
 │   │   ├── datasets/           # PyTorch Lightning DataModules for DTI & pretraining
 │   │   ├── models/             # Model architectures & components
 │   │   ├── metrics/            # Pyl metrics for DTI accuracy, and molecular reconstruction
 |   |   ├── modules/            # Pyl modules for DTI models
-|   |   ├── diffusion/          # Diffusion utilities (in progress)
+|   |   ├── diffusion/          # Diffusion utilities
 │   │   ├── utils/              # Training & testing utilities
 │   │   └── run.py & test.py    # Main training & testing scripts
 |   |
-│   └── validating/             # Validation and analysis (in progress)
-│       ├── ...
+│   └── validating/             # Validation and analysis
+│       ├── analysis.py         # Basic helper functions for parsing results
 │       └── ...
 |
 ├── external/                   # External dependencies (each has it's own requirements.txt and script.py)

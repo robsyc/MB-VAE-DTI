@@ -136,7 +136,7 @@ def get_config_path(
     split: Optional[Split] = None,
     pretrain_target: Optional[PretrainTarget] = None,
     config_root: Optional[Path] = CONFIG_ROOT
-) -> Path:
+    ) -> Path:
     """
     Get the config file path based on model type, phase, and other parameters.
     
@@ -244,7 +244,7 @@ def setup_model_multi_output(
     feature_dims: Dict[str, Dict[str, int]],
     dataset: Dataset,
     phase: TrainingPhase
-) -> MultiOutputDTIModel:
+    ) -> MultiOutputDTIModel:
     # Set finetune score based on phase & dataset
     if phase == "finetune":
         finetune_score = "Y_pKd" if dataset == "DAVIS" else "Y_KIBA"
@@ -297,7 +297,7 @@ def setup_model_multi_hybrid(
     dataset: Dataset = None,
     phase: TrainingPhase = None,
     pretrain_target: PretrainTarget = None
-) -> MultiHybridDTIModel:
+    ) -> MultiHybridDTIModel:
     # Set finetune score based on phase & dataset
     if phase == "finetune":
         finetune_score = "Y_pKd" if dataset == "DAVIS" else "Y_KIBA"
@@ -455,6 +455,13 @@ def setup_model_full(
     )
     
     # Load pretrained weights if specified
+    if config.model.get('checkpoint_path') is not None:
+        if os.path.exists(config.model.checkpoint_path):
+            model.load_pretrained_weights(checkpoint_path=config.model.checkpoint_path)
+        else:
+            logger.warning(f"Checkpoint file not found: {config.model.checkpoint_path}")
+            logger.warning("Continuing without pretrained weights")
+
     if config.model.get('drug_checkpoint_path') is not None:
         if os.path.exists(config.model.drug_checkpoint_path):
             model.load_pretrained_weights(checkpoint_path=config.model.drug_checkpoint_path, prefix="drug_")
@@ -468,13 +475,6 @@ def setup_model_full(
         else:
             logger.warning(f"Checkpoint file not found: {config.model.target_checkpoint_path}")
             logger.warning("Continuing without pretrained target weights")
-    
-    if config.model.get('checkpoint_path') is not None:
-        if os.path.exists(config.model.checkpoint_path):
-            model.load_pretrained_weights(checkpoint_path=config.model.checkpoint_path)
-        else:
-            logger.warning(f"Checkpoint file not found: {config.model.checkpoint_path}")
-            logger.warning("Continuing without pretrained weights")
     
     # one-time load of DiffMS & contrastive drug-encoder weights
     if True and model_phase == "pretrain_drug":
@@ -619,7 +619,7 @@ def train_single_config(
     split: Optional[Split] = None,
     pretrain_target: Optional[PretrainTarget] = None,
     cleanup_checkpoints: bool = False
-) -> None:
+    ) -> None:
     """
     Train a single configuration.
     

@@ -8,7 +8,7 @@ training:
 
 loss:
   weights: [1, 0, 0, 0] # for accuracy, complexity, contrastive, reconstruction
-  dti_weights: [1.0, 0.903964, 0.282992, 0.755172] # for binary, pKd, pKi, KIBA (real values are weighted ~ representation in train)
+  dti_weights: [0.8, 0.903964, 0.282992, 0.755172] # for binary, pKd, pKi, KIBA (real values are weighted ~ representation in train)
   # diff_weights: [1, 5] # for nodes X and edges E
   # contrastive_temp: 0.1
 
@@ -41,7 +41,7 @@ model:
   factor: 4            # expansion / contraction factor in mlp and att blocks respectively
   n_layers: 3          # number of residual layers in mlp and att blocks
   activation: "relu"
-  dropout: 0.1
+  dropout: 0.2
   bias: true
   checkpoint_path: null #"data/results/multi_output/pretrain/cold/multi_output_train_cold/checkpoints/best_model.ckpt"
   drug_checkpoint_path: null

@@ -1,6 +1,6 @@
 training:
   learning_rate: 0.0001
-  max_epochs: 100
+  max_epochs: 90
   early_stopping_patience: 12
   gradient_clip_val: null      # Disabled - try without first (https://medium.com/@kaveh.kamali/a-beginners-guide-to-gradient-clipping-with-pytorch-lightning-c394d28e2b69)
   weight_decay: 0.0001         # Increase if overfitting, decrease if underfitting
@@ -48,7 +48,7 @@ model:
   drug_checkpoint_path: null
   target_checkpoint_path: null
 
-  encoder_type: "resnet" # transformer or resnet
+  encoder_type: "transformer" # transformer or resnet
   # aggregator_type: "attentive" # attentive or concat
 
   # graph_transformer_kwargs:

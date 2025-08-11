@@ -406,6 +406,84 @@ class DTIDataModule(pl.LightningDataModule):
             
         sample = self.train_dataset[0]
         return [k for k in sample['y'].keys() if k != 'Y']  # Exclude binary label 
+ 
+    def get_test_feature_means(self, as_numpy: bool = False) -> Dict[str, Dict[str, Any]]:
+        """
+        Compute the average input feature vector for each available feature in the test set.
+
+        Returns a nested dictionary with the same structure used by the collate function:
+            {
+              'drug':   { 'features': { feature_name: tensor_or_array_with_original_shape, ... } },
+              'target': { 'features': { feature_name: tensor_or_array_with_original_shape, ... } }
+            }
+
+        Args:
+            as_numpy: If True, return feature means as numpy arrays; otherwise torch tensors.
+
+        Notes:
+            - Preserves the original feature shape (e.g., (1, D) vs (D,)).
+            - Ignores PyG graph data and representations if present.
+        """
+        # Ensure test dataset and loader are ready
+        if self.test_dataset is None:
+            self.setup("test")
+
+        dataloader = self.test_dataloader()
+
+        # Accumulators for sums; initialize lazily on first batch to preserve shapes
+        feature_sum_accumulators: Dict[str, Dict[str, torch.Tensor]] = {
+            'drug': {},
+            'target': {}
+        }
+        num_examples: Optional[int] = None
+
+        with torch.no_grad():
+            for batch in dataloader:
+                # Determine batch size from any feature tensor
+                if num_examples is None:
+                    num_examples = 0
+
+                # Accumulate drug features
+                for feature_name, feature_tensor in batch['drug']['features'].items():
+                    # feature_tensor has shape [batch_size, ...original_feature_shape...]
+                    if feature_name not in feature_sum_accumulators['drug']:
+                        feature_sum_accumulators['drug'][feature_name] = torch.zeros_like(feature_tensor[0])
+                    feature_sum_accumulators['drug'][feature_name] = (
+                        feature_sum_accumulators['drug'][feature_name] + feature_tensor.sum(dim=0)
+                    )
+
+                # Accumulate target features
+                for feature_name, feature_tensor in batch['target']['features'].items():
+                    if feature_name not in feature_sum_accumulators['target']:
+                        feature_sum_accumulators['target'][feature_name] = torch.zeros_like(feature_tensor[0])
+                    feature_sum_accumulators['target'][feature_name] = (
+                        feature_sum_accumulators['target'][feature_name] + feature_tensor.sum(dim=0)
+                    )
+
+                # Update total count using the batch dimension
+                # Use any available feature to get the batch size
+                any_target_feature = next(iter(batch['target']['features'].values()))
+                batch_size = int(any_target_feature.shape[0])
+                num_examples += batch_size
+
+        if num_examples is None or num_examples == 0:
+            raise RuntimeError("Test dataloader produced no batches.")
+
+        # Compute means and format output structure
+        result: Dict[str, Dict[str, Any]] = {
+            'drug':   { 'features': {} },
+            'target': { 'features': {} }
+        }
+
+        for entity in ['drug', 'target']:
+            for feature_name, sum_tensor in feature_sum_accumulators[entity].items():
+                mean_tensor = sum_tensor / float(num_examples)
+                if as_numpy:
+                    result[entity]['features'][feature_name] = mean_tensor.cpu().numpy()
+                else:
+                    result[entity]['features'][feature_name] = mean_tensor
+
+        return result
 
 
 class PretrainDataModule(pl.LightningDataModule):
