@@ -160,7 +160,7 @@ def setup_callbacks(
         filename="best_model",
         monitor=monitor,
         mode="min",
-        save_top_k=5,
+        save_top_k=3,
         save_last=True,
         save_weights_only=True,  # Save only model weights, not optimizer states
         verbose=True

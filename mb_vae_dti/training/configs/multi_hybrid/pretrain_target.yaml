@@ -41,7 +41,7 @@ model:
   factor: 4            # expansion / contraction factor in mlp and att blocks respectively
   n_layers: 3          # number of residual layers in mlp and att blocks
   activation: "relu"
-  dropout: 0.1
+  dropout: 0.2
   bias: true
   # checkpoint_path: 
   # drug_checkpoint_path: 
@@ -49,7 +49,7 @@ model:
   drug_checkpoint_path: null
   target_checkpoint_path: null
 
-  encoder_type: "transformer" # transformer or resnet
+  encoder_type: "resnet" # transformer or resnet
   aggregator_type: "attentive" # attentive or concat
 
   # graph_transformer_kwargs:

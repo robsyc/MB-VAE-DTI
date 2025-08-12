@@ -228,7 +228,22 @@ def plot_perturbation_overview(
 
     # Consistent branch colors
     branch_colors = {"drug": "#1f77b4", "target": "#2ca02c"}
-
+    # Short, human-friendly feature labels and consistent linestyles across subplots
+    feature_label_map = {
+        "EMB-BiomedGraph": "graph",
+        "EMB-BiomedImg": "img",
+        "EMB-BiomedText": "text",
+        "EMB-ESM": "ESM",
+        "EMB-NT": "NT",
+    }
+    feature_linestyle_map = {
+        "graph": ":",   # fine dotted
+        "img": "--",     # dashed
+        "text": "-.",    # dash-dot
+        "ESM": "--",
+        "NT": "-.",
+    }
+ 
     # Arrange: rows = splits (rand on top, cold below); columns = datasets (DAVIS left, KIBA right)
     fig, axes = plt.subplots(len(splits), len(datasets), sharex=True, sharey=False, figsize=(12, 8))
     if len(splits) == 1 and len(datasets) == 1:
@@ -271,9 +286,11 @@ def plot_perturbation_overview(
             # Per-feature (for multi_modal): dotted lines, color by branch
             feature_df = df[~df["feature"].isna()].copy()
             if not feature_df.empty:
-                feature_df["series"] = feature_df.apply(lambda r: f"{r['branch']}:{r['feature']}", axis=1)
+                # Shorten feature names and assign consistent linestyles
+                feature_df["feature_short"] = feature_df["feature"].map(feature_label_map).fillna(feature_df["feature"])
+                feature_df["series"] = feature_df.apply(lambda r: f"{r['branch']}:{r['feature_short']}", axis=1)
                 for series_name, sub_df in feature_df.groupby("series"):
-                    branch_name = series_name.split(":", 1)[0]
+                    branch_name, feature_short = series_name.split(":", 1)
                     sub_df = sub_df.sort_values("alpha")
                     row_yvalues[i].extend(sub_df["value"].tolist())
                     ax.plot(
@@ -281,7 +298,7 @@ def plot_perturbation_overview(
                         sub_df["value"],
                         label=series_name,
                         color=branch_colors.get(branch_name, None),
-                        linestyle=":",
+                        linestyle=feature_linestyle_map.get(feature_short, ":"),
                         linewidth=1.5,
                         alpha=0.9,
                         marker=None,

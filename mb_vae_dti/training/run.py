@@ -751,7 +751,7 @@ def train_single_config(
         if phase != "pretrain":
             logger.info("Testing on best checkpoint...")
             trainer.test(model, data_module, ckpt_path="best")
-
+        # trainer.test(model, data_module)
         ###############################################################
         # Collect results
         ###############################################################
