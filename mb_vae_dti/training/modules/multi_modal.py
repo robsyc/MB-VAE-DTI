@@ -44,7 +44,7 @@ class MultiModalDTIModel(AbstractDTIModel):
             Literal["FP-Morgan", "EMB-BioMedGraph", "EMB-BioMedImg", "EMB-BioMedText"], 
             int],  # dict mapping feature name to input dimension
         target_features: Dict[
-            Literal["FP-ESM", "FP-NT", "FP-ESP"], 
+            Literal["FP-ESP", "EMB-ESM", "EMB-NT"], 
             int
         ],
 

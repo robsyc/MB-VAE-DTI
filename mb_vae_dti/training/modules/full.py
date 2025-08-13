@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 # Set Tensor Cores precision for performance optimization
 torch.set_float32_matmul_precision('medium')
 
+SAVE_GENERATED_MOLS = False
+if SAVE_GENERATED_MOLS:
+    import json
+    import os
+    from rdkit.Chem import Draw
+    from rdkit.Chem import rdMolDescriptors
+    from mb_vae_dti.training.metrics.molecular_metrics import mol2smiles, mol2fp
 
 class FullDTIModel(AbstractDTIModel):
     """
@@ -65,7 +72,7 @@ class FullDTIModel(AbstractDTIModel):
             Literal["FP-Morgan", "EMB-BioMedGraph", "EMB-BioMedImg", "EMB-BioMedText"], 
             int],  # dict mapping feature name to input dimension
         target_features: Dict[
-            Literal["FP-ESM", "FP-NT", "FP-ESP"], 
+            Literal["FP-ESP", "EMB-ESM", "EMB-NT"], 
             int
         ],
 
@@ -326,6 +333,15 @@ class FullDTIModel(AbstractDTIModel):
             self.val_mol = None
             self.test_mol = None
 
+        # Freeze all except fusion and dti_head during finetune
+        if self.phase == "finetune":
+            for p in self.parameters():
+                p.requires_grad = False
+            for p in self.fusion.parameters():
+                p.requires_grad = True
+            for p in self.dti_head.parameters():
+                p.requires_grad = True
+
 
     def _create_batch_data( 
             self, 
@@ -345,7 +361,7 @@ class FullDTIModel(AbstractDTIModel):
             batch_data.dti_targets, batch_data.dti_masks = self._get_targets_masks_from_batch(batch)
         
         # Only interested in graph data when decoder is in use
-        if self.phase != "pretrain_target":
+        if self.phase not in ["pretrain_target", "finetune"]:
             batch_data.graph_data = self._extract_graph_data(batch)
             batch_data.smiles = self._get_smiles_from_batch(batch)
         
@@ -527,7 +543,7 @@ class FullDTIModel(AbstractDTIModel):
         Returns:
             G_hat: Reconstructed graph predictions (pre-masked PlaceHolder object)
         """
-        if self.phase == "pretrain_target":
+        if self.phase in ["pretrain_target", "finetune"]:
             return None
         
         G_hat = self.drug_decoder(
@@ -839,13 +855,10 @@ class FullDTIModel(AbstractDTIModel):
         loss_data = LossData()
 
         # 1. Complexity loss (KL divergence for VAE) - only for the drug branch
-        if self.phase != "pretrain_target":
-            loss_data.complexity = self.drug_kl_head.kl_divergence(
-                embedding_data.drug_mu, 
-                embedding_data.drug_logvar
-            )
-        else:
-            loss_data.complexity = torch.tensor(0.0, device=self.device)
+        loss_data.complexity = self.drug_kl_head.kl_divergence(
+            embedding_data.drug_mu, 
+            embedding_data.drug_logvar
+        ) if self.phase not in ["pretrain_target", "finetune"] else torch.tensor(0.0, device=self.device)
 
         # 2. Contrastive losses - skipped when finetuning
         drug_contrastive_loss = self.drug_contrastive_head(
@@ -948,7 +961,7 @@ class FullDTIModel(AbstractDTIModel):
             List of lists of RDKit molecule objects, grouped by original embedding
             Shape: [original_batch_size][num_samples_per_embedding]
         """
-        if self.phase == "pretrain_target":
+        if self.phase in ["pretrain_target", "finetune"]:
             return []
             
         original_batch_size = drug_embeddings.size(0)
@@ -1059,7 +1072,7 @@ class FullDTIModel(AbstractDTIModel):
             PlaceHolder object with graph G_s (E, X) given G_t (already masked)
             Note: G_s.y is just torch.zeros(batch_size, 0)
         """
-        if self.phase == "pretrain_target":
+        if self.phase in ["pretrain_target", "finetune"]:
             return None
             
         bs, n, dxs = X_t.shape
@@ -1200,7 +1213,7 @@ class FullDTIModel(AbstractDTIModel):
                 )
         
         # Store validation data for sampling at epoch end (performance optimization)
-        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
+        if self.phase not in ["pretrain_target", "finetune"] and batch_data.graph_data is not None:
             if not hasattr(self, '_val_embeddings_buffer'):
                 self._val_embeddings_buffer = []
                 self._val_smiles_buffer = []
@@ -1242,7 +1255,7 @@ class FullDTIModel(AbstractDTIModel):
                 )
         
         # Store test data for sampling at epoch end (performance optimization)
-        if self.phase != "pretrain_target" and batch_data.graph_data is not None:
+        if self.phase not in ["pretrain_target", "finetune"] and batch_data.graph_data is not None:
             if not hasattr(self, '_test_embeddings_buffer'):
                 self._test_embeddings_buffer = []
                 self._test_smiles_buffer = []
@@ -1276,7 +1289,7 @@ class FullDTIModel(AbstractDTIModel):
         """Override to add diffusion-specific epoch end logging."""
         super().on_train_epoch_end()
 
-        if self.phase != "pretrain_target":
+        if self.phase not in ["pretrain_target", "finetune"]:
             train_mol_metrics = self.train_mol.compute()
             for key, value in train_mol_metrics.items():
                 self.log(key, value)
@@ -1286,7 +1299,7 @@ class FullDTIModel(AbstractDTIModel):
         """Override to add diffusion-specific epoch end logging."""
         super().on_validation_epoch_end()
         
-        if self.phase != "pretrain_target":
+        if self.phase not in ["pretrain_target", "finetune"]:
             # Perform conditional sampling at epoch end for efficiency (following DiGress pattern)
             if (hasattr(self, 'current_epoch') and 
                 self.current_epoch % self.sample_every_val == 0 and 
@@ -1339,12 +1352,16 @@ class FullDTIModel(AbstractDTIModel):
         """Override to add diffusion-specific epoch end logging."""
         super().on_test_epoch_end()
         
-        if self.phase != "pretrain_target":
+        if self.phase not in ["pretrain_target", "finetune"]:
             # Perform conditional sampling at test epoch end for efficiency (following DiGress pattern)
             if (hasattr(self, '_test_embeddings_buffer') and 
                 len(self._test_embeddings_buffer) > 0):
                 
                 logger.info("Performing test sampling at epoch end")
+                
+                if SAVE_GENERATED_MOLS:
+                    # Accumulate per-group candidates for selection and saving
+                    group_candidates: List[Dict[str, Any]] = []
                 
                 # Sample from stored test embeddings
                 for i, drug_embeddings in enumerate(self._test_embeddings_buffer):
@@ -1363,6 +1380,77 @@ class FullDTIModel(AbstractDTIModel):
                             generated_mols=generated_molecules,
                             target_smiles=batch_smiles
                         )
+                        
+                        if SAVE_GENERATED_MOLS:
+                            # Build group candidates with ranking info and top-10 generated SMILES per target
+                            for j, target_smi in enumerate(batch_smiles):
+                                gen_group = generated_molecules[j]
+                                has_exact, best_sim, ranked_pairs = self._rank_generated_by_similarity(gen_group, target_smi)
+                                top10_smiles = [s for s, _ in ranked_pairs[:10]]
+                                if len(top10_smiles) < 10:
+                                    top10_smiles += [None] * (10 - len(top10_smiles))
+                                group_candidates.append({
+                                    "target_smiles": target_smi,
+                                    "score_exact": has_exact,
+                                    "score_sim": float(best_sim),
+                                    "generated_smiles": top10_smiles,
+                                    "drug_embedding": drug_embeddings[j:j+1].detach().to(self.device)
+                                })
+                
+                if SAVE_GENERATED_MOLS:
+                    # Select top unique target SMILES by exact match first, then best Tanimoto
+                    group_candidates.sort(key=lambda d: (d["score_exact"], d["score_sim"]), reverse=True)
+                    selected_candidates: List[Dict[str, Any]] = []
+                    seen_targets = set()
+                    for cand in group_candidates:
+                        t = cand["target_smiles"]
+                        if t in seen_targets:
+                            continue
+                        selected_candidates.append(cand)
+                        seen_targets.add(t)
+                        if len(selected_candidates) == 10:
+                            break
+
+                    # Ensure base trajectory output dir exists
+                    base_traj_dir = "data/images/generated_trajectories"
+                    os.makedirs(base_traj_dir, exist_ok=True)
+
+                    # For each selected candidate, run a single-sample trajectory capture and save images
+                    for idx, cand in enumerate(selected_candidates):
+                        # Determine target node count (heavy atoms) if possible
+                        try:
+                            heavy = rdMolDescriptors.CalcNumHeavyAtoms(Chem.MolFromSmiles(cand["target_smiles"]))
+                        except Exception:
+                            heavy = None
+                        traj_dir = os.path.join(base_traj_dir, f"cand_{idx:02d}")
+                        try:
+                            traj = self.sample_trajectory( # list of smiles per step (still returned)
+                                cand["drug_embedding"],
+                                num_nodes=heavy if heavy is not None else None,
+                                save_dir=traj_dir
+                            )
+                        except Exception:
+                            traj = []
+                        cand["trajectory_smiles"] = traj
+
+                    # Build results for JSON
+                    selected_results: List[Dict[str, Any]] = []
+                    for cand in selected_candidates:
+                        selected_results.append({
+                            "target_smiles": cand["target_smiles"],
+                            "generated_smiles": cand["generated_smiles"],
+                            "trajectory_smiles": cand.get("trajectory_smiles", [])
+                        })
+
+                    # Save to JSON at project root
+                    output_payload = {"results": selected_results}
+                    output_path = "data/generated.json"
+                    try:
+                        with open(output_path, "w") as f:
+                            json.dump(output_payload, f, indent=2)
+                        logger.info(f"Saved generated molecules summary to {output_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to save generated molecules summary: {e}")
                 
                 # Clear buffers after sampling
                 if hasattr(self, '_test_embeddings_buffer'):
@@ -1385,3 +1473,102 @@ class FullDTIModel(AbstractDTIModel):
             self.test_E_kl.reset()
             self.test_X_logp.reset()
             self.test_E_logp.reset()
+
+    # Extra helper functions for saving generated molecules and diffusion trajectory (messy, but works)
+    @torch.no_grad()
+    def sample_trajectory(
+        self,
+        drug_embedding: torch.Tensor,
+        num_nodes: Optional[torch.Tensor] = None,
+        save_dir: Optional[str] = None
+        ) -> List[Optional[str]]:
+        """Run a single conditional sampling and record SMILES at each diffusion step.
+        Expects drug_embedding shaped [1, embedding_dim]. Returns list length T.
+        Optionally saves per-step molecule images to save_dir if provided.
+        """
+        device = self.device
+        if drug_embedding.dim() == 1:
+            drug_embedding = drug_embedding.unsqueeze(0)
+        drug_embedding = drug_embedding.to(device)
+
+        # Nodes: accept int or tensor; convert to shape (1,)
+        if num_nodes is None:
+            n_nodes = self.nodes_dist.sample_n(1, device=self.device)
+        else:
+            if isinstance(num_nodes, int):
+                n_nodes = torch.tensor([num_nodes], device=device, dtype=torch.long)
+            elif isinstance(num_nodes, torch.Tensor):
+                if num_nodes.dim() == 0:
+                    n_nodes = num_nodes.unsqueeze(0).to(device)
+                elif num_nodes.dim() == 1:
+                    n_nodes = num_nodes.to(device)
+                else:
+                    n_nodes = num_nodes.view(-1)[:1].to(device)
+            else:
+                raise ValueError("num_nodes must be an int or torch.Tensor")
+        n_max = torch.max(n_nodes).item()
+
+        # Mask
+        arange = torch.arange(n_max, device=device).unsqueeze(0)
+        node_mask = arange < n_nodes.unsqueeze(1)
+
+        # Init noise
+        z_T = sample_discrete_feature_noise(limit_dist=self.limit_dist, node_mask=node_mask)
+        X, E = z_T.X, z_T.E
+
+        # Prepare save dir
+        if save_dir is not None:
+            os.makedirs(save_dir, exist_ok=True)
+
+        # Record per step
+        smiles_traj: List[Optional[str]] = []
+
+        # Loop timesteps
+        timesteps = list(reversed(range(0, self.T)))
+        for step_idx, s_int in enumerate(timesteps, start=1):
+            s_array = s_int * torch.ones((1, 1), dtype=self.model_dtype, device=device)
+            t_array = s_array + 1
+            s_norm = s_array / self.T
+            t_norm = t_array / self.T
+
+            sampled_s = self.sample_p_zs_given_zt(s_norm, t_norm, X, E, drug_embedding, node_mask)
+            X, E = sampled_s.X, sampled_s.E
+
+            # Collapse and convert to molecule for this step
+            collapsed = sampled_s.mask(node_mask, collapse=True)
+            try:
+                mol = self.visualization_tools.mol_from_graphs(
+                    collapsed.X[0].cpu(), collapsed.E[0].cpu()
+                )
+                if save_dir is not None and mol is not None:
+                    Draw.MolToFile(mol, os.path.join(save_dir, f"step_{step_idx:03d}.png"))
+                smiles_traj.append(mol2smiles(mol))
+            except Exception:
+                smiles_traj.append(None)
+
+        return smiles_traj
+
+    def _rank_generated_by_similarity(self, gen_mols: List[Optional[Chem.Mol]], target_smi: str, radius: int = 2, nBits: int = 2048) -> Tuple[bool, float, List[Tuple[str, float]]]:
+        """Rank generated molecules by Tanimoto similarity to target; also flag exact matches.
+        Returns (has_exact, best_similarity, [(smiles, sim), ...] sorted desc)."""
+        target_mol = Chem.MolFromSmiles(target_smi) if target_smi is not None else None
+        target_fp = mol2fp(target_mol, radius, nBits) if target_mol is not None else None
+        pairs: List[Tuple[str, float]] = []
+        has_exact = False
+        best_sim = 0.0
+        for m in gen_mols:
+            s = mol2smiles(m)
+            if s is None:
+                continue
+            if s == target_smi:
+                has_exact = True
+            sim = 0.0
+            if target_fp is not None:
+                gen_fp = mol2fp(m, radius, nBits)
+                if gen_fp is not None:
+                    sim = float(Chem.DataStructs.TanimotoSimilarity(gen_fp, target_fp))
+            if sim > best_sim:
+                best_sim = sim
+            pairs.append((s, sim))
+        pairs.sort(key=lambda x: x[1], reverse=True)
+        return has_exact, best_sim, pairs
