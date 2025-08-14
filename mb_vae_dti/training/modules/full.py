@@ -335,13 +335,23 @@ class FullDTIModel(AbstractDTIModel):
 
         # Freeze all except fusion and dti_head during finetune
         if self.phase == "finetune":
+            logger.info("Freezing weights for finetuning...")
             for p in self.parameters():
                 p.requires_grad = False
             for p in self.fusion.parameters():
                 p.requires_grad = True
             for p in self.dti_head.parameters():
                 p.requires_grad = True
-
+            for p in self.drug_encoders.parameters():
+                p.requires_grad = True
+            for p in self.target_encoders.parameters():
+                p.requires_grad = True
+            for p in self.drug_aggregator.parameters():
+                p.requires_grad = True
+            for p in self.target_aggregator.parameters():
+                p.requires_grad = True
+            for p in self.drug_kl_head.parameters():
+                p.requires_grad = True
 
     def _create_batch_data( 
             self, 
