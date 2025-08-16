@@ -7,7 +7,7 @@ training:
   scheduler: "one_cycle"       # "const", "step", "one_cycle", or "cosine"
 
 loss:
-  weights: [1, 0, 0, 0] # for accuracy, complexity, contrastive, reconstruction
+  weights: [1, 0, 0.1, 0] # for accuracy, complexity, contrastive, reconstruction
   dti_weights: [1.0, 0.903964, 0.282992, 0.755172] # for binary, pKd, pKi, KIBA (real values are weighted ~ representation in train)
   # diff_weights: [1, 5] # for nodes X and edges E
   contrastive_temp: 0.1

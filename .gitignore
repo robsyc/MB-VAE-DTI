@@ -5,6 +5,8 @@ external/biomed-multi-view/bmfm_sm/predictive/tests/test-data/finetune/
 *.ckpt
 *.hdf5
 *.h5torch
+*.pt
+*.zip
 
 wandb/
 

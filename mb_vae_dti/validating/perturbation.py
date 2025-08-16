@@ -17,9 +17,9 @@ python mb_vae_dti/validating/perturbation.py \
 """
 
 import sys
-sys.path.append("/root/MB-VAE-DTI")
-
 from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent.parent))
+
 from typing import Dict, List, Optional, Literal, Any
 import argparse
 import json
@@ -34,7 +34,6 @@ from mb_vae_dti.training.metrics.dti_metrics import RealDTIMetrics
 
 # Reuse model setup utilities from the training script
 from mb_vae_dti.training.run import (
-    get_config_path,
     setup_model_baseline,
     setup_model_multi_modal,
 )
