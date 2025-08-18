@@ -289,6 +289,15 @@ class ConditionalDrugGenerator:
         logger.debug(f"Generated {latent_samples.shape[0]} learned latent samples")
         return latent_samples
 
+    def _flatten_grouped_stats(self, grouped_df):
+        """
+        Helper method to flatten pandas groupby aggregation results for JSON serialization.
+        Converts tuple column names to string format.
+        """
+        # Flatten the multi-level column names
+        grouped_df.columns = ['_'.join(col).strip() for col in grouped_df.columns.values]
+        return grouped_df.to_dict('index')
+
     def optimize_latents_for_interaction(
         self,
         initial_latents: torch.Tensor,
@@ -382,7 +391,7 @@ class ConditionalDrugGenerator:
                 metadata.append([target_idx, sample_idx, sampling_strategy, best_score])
                 
                 sampling_type = "learned" if sampling_strategy == 1 else "random"
-                logger.debug(f"Optimization complete. Final score: {best_score:.4f} (from {sampling_type} sampling)")
+                logger.info(f"Optimization complete. Final score: {best_score:.4f} (from {sampling_type} sampling)")
         
         # Concatenate all optimized latents
         optimized_latents = torch.cat(optimized_latents, dim=0)  # [total_optimized, embedding_dim]
@@ -390,7 +399,7 @@ class ConditionalDrugGenerator:
         
         logger.info(f"Latent optimization complete. Generated {optimized_latents.shape[0]} optimized latents")
         logger.info(f"Score statistics - Mean: {metadata[:, 3].mean():.4f}, "
-                   f"Std: {metadata[:, 3].std():.4f}, Max: {metadata[:, 3].max():.4f}")
+                   f"Std: {metadata[:, 3].std():.4f}, Min: {metadata[:, 3].min():.4f}, Max: {metadata[:, 3].max():.4f}")
         
         # Log statistics by sampling strategy
         random_mask = metadata[:, 2] == 0
@@ -399,12 +408,12 @@ class ConditionalDrugGenerator:
         if random_mask.any():
             random_scores = metadata[random_mask, 3]
             logger.info(f"Random sampling scores - Mean: {random_scores.mean():.4f}, "
-                       f"Std: {random_scores.std():.4f}, Max: {random_scores.max():.4f}")
+                       f"Std: {random_scores.std():.4f}, Min: {random_scores.min():.4f}, Max: {random_scores.max():.4f}")
         
         if learned_mask.any():
             learned_scores = metadata[learned_mask, 3]
             logger.info(f"Learned sampling scores - Mean: {learned_scores.mean():.4f}, "
-                       f"Std: {learned_scores.std():.4f}, Max: {learned_scores.max():.4f}")
+                       f"Std: {learned_scores.std():.4f}, Min: {learned_scores.min():.4f}, Max: {learned_scores.max():.4f}")
         
         return optimized_latents, metadata
 
@@ -437,13 +446,12 @@ class ConditionalDrugGenerator:
         
         logger.info(f"Processing {n_latents} latents in batches of {effective_batch_size}")
         
-        for batch_start in tqdm(range(0, n_latents, effective_batch_size), 
-                               desc="Generating molecules"):
+        for batch_start in tqdm(range(0, n_latents, effective_batch_size), desc="Generating molecules"):
             batch_end = min(batch_start + effective_batch_size, n_latents)
             batch_latents = optimized_latents[batch_start:batch_end]
             batch_metadata = metadata[batch_start:batch_end]
             
-            logger.debug(f"Processing batch {batch_start}-{batch_end}")
+            logger.info(f"Processing batch {batch_start}-{batch_end}")
             
             try:
                 # Generate molecules for this batch
@@ -475,8 +483,9 @@ class ConditionalDrugGenerator:
                         if mol is not None:
                             try:
                                 smiles = Chem.MolToSmiles(mol, isomericSmiles=False)
+                                mol = Chem.MolFromSmiles(smiles) if smiles is not None else None
                                 result['smiles'] = smiles
-                                result['valid'] = True
+                                result['valid'] = True if mol is not None else False
                             except Exception as e:
                                 logger.debug(f"Failed to convert molecule to SMILES: {e}")
                         
@@ -581,14 +590,14 @@ class ConditionalDrugGenerator:
                 'random_score_mean': df[df['sampling_strategy'] == 0]['optimization_score'].mean(),
                 'learned_score_mean': df[df['sampling_strategy'] == 1]['optimization_score'].mean()
             },
-            'per_target_stats': df.groupby('target_idx').agg({
+            'per_target_stats': self._flatten_grouped_stats(df.groupby('target_idx').agg({
                 'valid': ['sum', 'count', 'mean'],
                 'optimization_score': ['mean', 'std', 'max']
-            }).to_dict(),
-            'per_sampling_strategy_stats': df.groupby('sampling_type').agg({
+            })),
+            'per_sampling_strategy_stats': self._flatten_grouped_stats(df.groupby('sampling_type').agg({
                 'valid': ['sum', 'count', 'mean'],
                 'optimization_score': ['mean', 'std', 'max']
-            }).to_dict()
+            }))
         }
         
         summary_file = os.path.join(self.output_dir, "generation_summary.json")
@@ -713,7 +722,7 @@ aa_counts = df_filtered["Target_AA"].value_counts()
 df_sub = df_filtered[df_filtered["Target_AA"].isin(aa_counts[aa_counts.between(64, 128)].index)]
 
 df_train_true_sub = df_train_true[df_train_true["Target_AA"].isin(df_sub["Target_AA"].unique())]
-targets = df_train_true_sub["Target_AA"].value_counts().sort_values(ascending=True).head(8).index
+targets = df_train_true_sub["Target_AA"].value_counts().sort_values(ascending=True).head(32).index
 
 df = df[df["Target_AA"].isin(targets)]
 
@@ -794,7 +803,7 @@ if __name__ == "__main__":
     # Run the full pipeline
     summary = generator.run_full_pipeline(
         target_sequences=target_sequences,
-        n_samples_per_target=16,
+        n_samples_per_target=32,
         n_molecules_per_latent=16,
         optimization_config={
             'n_optimization_steps': 100,

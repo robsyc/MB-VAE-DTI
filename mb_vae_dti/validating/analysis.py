@@ -12,6 +12,11 @@ from typing import Dict, List, Optional, Any, Union
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from rdkit import Chem
+from rdkit.Chem import AllChem, DataStructs
+import numpy as np
+import warnings
+
 
 logger = logging.getLogger(__name__)
 
@@ -367,3 +372,4 @@ def plot_perturbation_overview(
 
     fig.tight_layout(rect=[0, 0, 0.95, 0.98])
     return fig
+
