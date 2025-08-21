@@ -111,20 +111,18 @@ conda activate mb-vae-dti
 
   See `training/run.py` and `training/configs/` for more examples and details.
 
-**Note:** This project is currently in development (training/validation components in progress). There currently are still some `archive` folders spread throughout the repository, which contain old code to be refactored.
-
 ## Current Progress
 
 - ✅ Data loading and preprocessing
 - ✅ Embedding generation and processing
 - ✅ h5torch file creation and dataset splitting
 - ✅ Setting up model architectures
-- 🔄 Model pre-training w/ contrastive, complexity, (reconstruction) loss
+- ✅ Model pre-training w/ contrastive, complexity, (reconstruction) loss
   - Contrastive loss: SimCLR with InfoNCE (1 positive pair and many negatives weighted w/ Tanimoto similarity)
   - Complexity loss: KL divergence between the encoder's output and a standard normal distribution
   - Reconstruction loss: MSE between the diffusion decoder's output and the input (only for the drug branch)
-- 🔄 Training baseline model (MLP on FPs & dot-product) and full model (incl. DTI accuracy loss)
-- 🔄 Model validation and analysis
+- ✅ Training baseline model (MLP on FPs & dot-product) and full model (incl. DTI accuracy loss)
+- ✅ Model validation and analysis
 
 ## Citation
 
@@ -132,7 +130,7 @@ If you use this code in your research, please cite:
 
 ```
 @article{mbvae_dti,
-   title={Multi-branch VAE for Drug-target Interaction Prediction and Target-conditioned de novo Drug Design},
+   title={Multi-branch Neural Networks for Drug-target Interaction Prediction and Target-conditioned de novo Drug Design},
    author={Claeys, Robbe},
    year={2025},
    url={https://...}
