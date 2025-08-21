@@ -120,7 +120,7 @@ conda activate mb-vae-dti
 - ✅ Model pre-training w/ contrastive, complexity, (reconstruction) loss
   - Contrastive loss: SimCLR with InfoNCE (1 positive pair and many negatives weighted w/ Tanimoto similarity)
   - Complexity loss: KL divergence between the encoder's output and a standard normal distribution
-  - Reconstruction loss: MSE between the diffusion decoder's output and the input (only for the drug branch)
+  - Reconstruction loss: CE between the diffusion decoder's output and the input (only for the drug branch)
 - ✅ Training baseline model (MLP on FPs & dot-product) and full model (incl. DTI accuracy loss)
 - ✅ Model validation and analysis
 
