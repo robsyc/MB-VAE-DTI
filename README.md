@@ -2,6 +2,8 @@
 
 A machine-learning framework for the dyadic drug-target interaction (DTI) prediction problem that combines multi-branch variational autoencoders with discrete diffusion processes. Our architecture uniquely integrates multiple drug/target representations and modalities, pre-trained foundation models, and target-conditioned discrete diffusion-based molecule generation in a unified framework.
 
+![Visual Abstract](https://github.com/robsyc/MB-VAE-DTI/blob/main/overview.gif)
+
 **Key features of this project:**
 - Multiple drug representations: Morgan fingerprints, graph, image and text (SMILES)
 - Multiple protein representations: ESPF fingerprints, amino acid and DNA sequences
@@ -65,8 +67,8 @@ MB-VAE-DTI/
 ├── notebooks/                  # Jupyter notebooks for reproducing experiments
 │   ├── loading.ipynb           # Data loading, pre-processing and exploration
 │   ├── processing.ipynb        # Embedding generation and h5torch file creation
-│   ├── training.ipynb          # Gridsearch analysis & metrics (in progress)
-│   └── validating.ipynb        # Inspection of generative quirks (in progress)
+│   ├── training.ipynb          # Gridsearch analysis & metrics
+│   └── validating.ipynb        # Inspection of generative quirks
 |
 ├── scripts/                    # Shell scripts for running jobs
 │   ├── embedding/
@@ -97,7 +99,7 @@ conda activate mb-vae-dti
 ## Quick Start
 
 **Download the complete data folder** including all datasets and pre-trained models:
-   - Link: TBA (coming soon)
+   - Link: too large sorry; contact me instead
    - This provides everything needed to immediately start experimenting with the models
    - Alternatively, you can consult the notebooks to generate the data & run all experiments from scratch
   
@@ -133,7 +135,7 @@ If you use this code in your research, please cite:
    title={Multi-branch Neural Networks for Drug-target Interaction Prediction and Target-conditioned de novo Drug Design},
    author={Claeys, Robbe},
    year={2025},
-   url={https://...}
+   url={https://github.com/robsyc/MB-VAE-DTI/blob/main/thesis.pdf}
 }
 ```
 
